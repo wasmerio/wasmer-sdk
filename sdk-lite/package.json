@@ -18,7 +18,8 @@
     "graphql-ws": "^6.0.4",
     "persisted-subscriptions-transport-ws": "^0.11.0",
     "relay-compiler": "^18.0.0",
-    "relay-runtime": "^18.0.0"
+    "relay-runtime": "^18.0.0",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "@babel/preset-typescript": "^7.27.0",

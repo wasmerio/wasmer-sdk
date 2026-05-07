@@ -46,7 +46,14 @@ export default {
     format: 'esm',
   },
   plugins: [
-    typescript(),
+    typescript({
+      compilerOptions: {
+        declaration: true,
+        declarationDir: "dist",
+        noEmit: false,
+        outDir: "dist",
+      },
+    }),
     relay(),
     // nodeResolve()
   ],

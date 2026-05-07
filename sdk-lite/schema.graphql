@@ -1369,6 +1369,7 @@ type DeployApp implements Node & Owner {
   s3Credentials: S3Credentials
   s3Url: URL
   screenshot(appearance: AppScreenshotAppearance, viewportSize: AppScreenshotViewportSize): URL
+  sshServer: AppSshServer
   secrets(after: String, before: String, first: Int, last: Int, offset: Int): SecretConnection!
   state: String!
   updatedAt: DateTime!
@@ -2264,6 +2265,7 @@ type Mutation {
 
   """Add stripe payment to the user"""
   addPayment(input: AddPaymentInput!): AddPaymentPayload
+  addSshAuthorizedKey(input: AddSshAuthorizedKeyInput!): AddSshAuthorizedKeyPayload
   archivePackage(input: ArchivePackageInput!): ArchivePackagePayload
 
   """Get the autobuild config for a given repo"""
@@ -2325,6 +2327,7 @@ type Mutation {
   generateCheckoutUrl(input: GenerateCheckoutUrlInput!): GenerateCheckoutUrlPayload
   generateDeployConfigToken(input: GenerateDeployConfigTokenInput!): GenerateDeployConfigTokenPayload
   generateDeployToken(input: GenerateDeployTokenInput!): GenerateDeployTokenPayload
+  generateSshToken(input: GenerateSshTokenInput!): GenerateSshTokenPayload
   generateUploadUrl(input: GenerateUploadUrlInput!): GenerateUploadUrlPayload
 
   """Add a new github app installation"""
@@ -2376,6 +2379,7 @@ type Mutation {
   renameApp(input: RenameAppInput!): RenameAppPayload
   renameAppAlias(input: RenameAppAliasInput!): RenameAppAliasPayload
   renamePackage(input: RenamePackageInput!): RenamePackagePayload
+  revealSshUserPassword(input: RevealSshUserPasswordInput!): RevealSshUserPasswordPayload
   requestAppTransfer(input: RequestAppTransferInput!): RequestAppTransferPayload
   requestPackageTransfer(input: RequestPackageTransferInput!): RequestPackageTransferPayload
   requestPasswordReset(input: RequestPasswordResetInput!): RequestPasswordResetPayload
@@ -2390,12 +2394,14 @@ type Mutation {
 
   """Redeploy the active version of an app."""
   rotateS3SecretsForApp(input: RotateS3SecretsForAppInput!): RotateS3SecretsForAppPayload
+  rotateSshUserPassword(input: RotateSshUserPasswordInput!): RotateSshUserPasswordPayload
   seePendingNotifications(input: SeePendingNotificationsInput!): SeePendingNotificationsPayload
   socialAuth(input: SocialAuthJWTInput!): SocialAuthJWTPayload
   tagPackageRelease(input: TagPackageReleaseInput!): TagPackageReleasePayload
 
   """Toggle HTTP redirect for the active version of app"""
   toggleForceHttps(input: ToggleForceHTTPSInput!): ToggleForceHTTPSPayload
+  toggleSshServer(input: ToggleSshServerInput!): ToggleSshServerPayload
   tokenAuth(input: ObtainJSONWebTokenInput!): ObtainJSONWebTokenPayload
 
   """Un-ban app with a reason."""
@@ -4219,6 +4225,130 @@ type SRVRecord implements DNSRecordInterface & Node {
   A relative weight for records with the same priority, higher value means higher chance of getting picked.
   """
   weight: Int!
+}
+
+type SshAuthorizedKey implements Node {
+  createdAt: DateTime!
+  createdBy: User!
+
+  """The ID of the object"""
+  id: ID!
+  name: String
+  publicKey: String!
+  sshUser: SshUser!
+}
+
+type SshAuthorizedKeyConnection {
+  """Contains the nodes in this connection."""
+  edges: [SshAuthorizedKeyEdge]!
+
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  totalCount: Int
+}
+
+"""A Relay edge containing a `SshAuthorizedKey` and its cursor."""
+type SshAuthorizedKeyEdge {
+  """A cursor for use in pagination"""
+  cursor: String!
+  node: SshAuthorizedKey
+}
+
+enum SshAuthenticationMethod {
+  PASSWORD
+  PUBLIC_KEY
+}
+
+type SshUser implements Node {
+  authenticationMethods: [SshAuthenticationMethod]
+  authorizedKeys(after: String, before: String, first: Int, last: Int, offset: Int): SshAuthorizedKeyConnection!
+
+  """The ID of the object"""
+  id: ID!
+  port: Int!
+  serverHost: String!
+  sftpRootFolder: String!
+  username: String!
+}
+
+type SshUserConnection {
+  """Contains the nodes in this connection."""
+  edges: [SshUserEdge]!
+
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  totalCount: Int
+}
+
+"""A Relay edge containing a `SshUser` and its cursor."""
+type SshUserEdge {
+  """A cursor for use in pagination"""
+  cursor: String!
+  node: SshUser
+}
+
+type AppSshServer {
+  enabled: Boolean!
+
+  """The ID of the object"""
+  id: ID!
+  users(after: String, before: String, first: Int, last: Int, offset: Int): SshUserConnection!
+}
+
+input AddSshAuthorizedKeyInput {
+  clientMutationId: String
+  name: String
+  publicKey: String!
+  sshUserId: ID!
+}
+
+type AddSshAuthorizedKeyPayload {
+  authorizedKey: SshAuthorizedKey!
+  clientMutationId: String
+}
+
+input GenerateSshTokenInput {
+  appId: ID
+  clientMutationId: String
+}
+
+type GenerateSshTokenPayload {
+  clientMutationId: String
+  token: String!
+}
+
+input RevealSshUserPasswordInput {
+  clientMutationId: String
+  sshUserId: ID!
+}
+
+type RevealSshUserPasswordPayload {
+  clientMutationId: String
+  password: String
+  sshUser: SshUser!
+}
+
+input RotateSshUserPasswordInput {
+  clientMutationId: String
+  sshUserId: ID!
+}
+
+type RotateSshUserPasswordPayload {
+  clientMutationId: String
+  password: String!
+  sshUser: SshUser!
+}
+
+input ToggleSshServerInput {
+  appId: ID!
+  clientMutationId: String
+  enabled: Boolean!
+}
+
+type ToggleSshServerPayload {
+  app: DeployApp!
+  clientMutationId: String
+  sshServer: AppSshServer!
 }
 
 type SSHFPRecord implements DNSRecordInterface & Node {

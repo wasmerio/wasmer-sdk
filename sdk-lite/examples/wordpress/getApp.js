@@ -18,3 +18,4 @@ const app = await Wasmer.getApp({
 });
 
 console.log("App", app);
+console.log("SSH users", app?.sshServer?.users ?? []);
