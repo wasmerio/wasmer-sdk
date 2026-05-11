@@ -12,7 +12,8 @@
     "local-relay": "mkdir -p src/__generated__ && WASMER_RELAY_ENDPOINT=http://127.0.0.1:8000/graphql npm run relay-compile",
     "dev-relay": "mkdir -p src/__generated__ && WASMER_RELAY_ENDPOINT=https://registry.wasmer.wtf/graphql npm run relay-compile",
     "prod-relay": "mkdir -p src/__generated__ && WASMER_RELAY_ENDPOINT=https://registry.wasmer.io/graphql npm run relay-compile",
-    "relay-compile": "relay-compiler --repersist relay.config.js"
+    "relay-compile": "relay-compiler --repersist relay.config.js",
+    "test": "npm run build-sdk && node --test ./test/*.test.mjs"
   },
   "dependencies": {
     "graphql-ws": "^6.0.4",

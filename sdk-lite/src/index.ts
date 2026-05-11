@@ -48,9 +48,24 @@ export type SshCommandResult = {
   stdout: string;
 };
 
+type Ssh2Module = {
+  Client: new () => {
+    on(event: string, listener: (...args: any[]) => void): any;
+    connect(options: Record<string, unknown>): any;
+    exec(
+      command: string,
+      options: Record<string, unknown>,
+      callback: (error: unknown, stream: any) => void,
+    ): any;
+    end(): any;
+    destroy(): any;
+  };
+};
+
 let config: {
   environment: Environment;
 } | null = null;
+let ssh2ModuleLoaderForTests: (() => Promise<Ssh2Module>) | null = null;
 
 const assertConfig = () => {
   if (!config) {
@@ -78,14 +93,23 @@ const decodeOutputChunk = (chunk: unknown): string => {
   return String(chunk);
 }
 
-const loadSsh2 = async (): Promise<any> => {
+const loadSsh2 = async (): Promise<Ssh2Module> => {
   if (!isNodeRuntime()) {
     throw new Error("SSH command execution is only available in Node.js.");
+  }
+  if (ssh2ModuleLoaderForTests) {
+    return ssh2ModuleLoaderForTests();
   }
   return import("ssh2");
 }
 
-class DeployAppSshAuthorizedKey {
+export const __setSsh2ModuleLoaderForTests = (
+  loader: (() => Promise<Ssh2Module>) | null,
+) => {
+  ssh2ModuleLoaderForTests = loader;
+}
+
+export class DeployAppSshAuthorizedKey {
   static fragment = graphql`
     fragment srcDeployAppSshAuthorizedKeyData on SshAuthorizedKey {
       id
@@ -111,7 +135,7 @@ class DeployAppSshAuthorizedKey {
   }
 }
 
-class DeployAppSshUser {
+export class DeployAppSshUser {
   static fragment = graphql`
     fragment srcDeployAppSshUserData on SshUser {
       id
@@ -369,7 +393,7 @@ class DeployAppSshUser {
   }
 }
 
-class DeployAppSshServer {
+export class DeployAppSshServer {
   static fragment = graphql`
     fragment srcDeployAppSshServerData on AppSshServer {
       id
@@ -434,7 +458,7 @@ class DeployAppKindWordPress extends DeployAppKind {
   }
 }
 
-class DeployApp {
+export class DeployApp {
       
   static fragment = graphql`
     fragment srcDeployAppData on DeployApp {
@@ -557,7 +581,7 @@ class DeployApp {
   }
 }
 
-class DeployAppVersion {
+export class DeployAppVersion {
   static fragment = graphql`
     fragment srcDeployAppVersionData on DeployAppVersion {
       id
@@ -614,7 +638,7 @@ export type AutoBuildProgressData = {
   stream: string | undefined | null;
 }
 
-class AutobuildApp {
+export class AutobuildApp {
   buildId: string;
   appVersion: DeployAppVersion | null = null;
   subscription: any;
