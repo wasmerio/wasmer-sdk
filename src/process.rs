@@ -375,7 +375,9 @@ pub(crate) struct ProcessControl {
 
 impl ProcessControl {
     pub(crate) fn signal_terminate(&self) {
-        self.record_exit(EXIT_TERMINATED_GRACEFUL);
+        if !self.record_exit_if_running(EXIT_TERMINATED_GRACEFUL) {
+            return;
+        }
         self.process.signal_process(Signal::Sigterm);
         if let Some(stdin) = &self.stdin {
             stdin.close_now();
@@ -383,7 +385,9 @@ impl ProcessControl {
     }
 
     pub(crate) fn kill(&self) {
-        self.record_exit(EXIT_TERMINATED_FORCED);
+        if !self.record_exit_if_running(EXIT_TERMINATED_FORCED) {
+            return;
+        }
         self.force_exit();
         if let Some(stdin) = &self.stdin {
             stdin.close_now();
@@ -391,7 +395,9 @@ impl ProcessControl {
     }
 
     pub(crate) fn kill_timed_out(&self) {
-        self.record_exit(EXIT_TIMED_OUT);
+        if !self.record_exit_if_running(EXIT_TIMED_OUT) {
+            return;
+        }
         self.force_exit();
         if let Some(stdin) = &self.stdin {
             stdin.close_now();
@@ -413,10 +419,14 @@ impl ProcessControl {
         self.process.try_join().is_some()
     }
 
-    fn record_exit(&self, requested: u8) {
+    fn record_exit_if_running(&self, requested: u8) -> bool {
+        if self.try_join_exited() {
+            return false;
+        }
         let _ = self
             .exit
             .compare_exchange(EXIT_NONE, requested, Ordering::AcqRel, Ordering::Acquire);
+        true
     }
 
     fn exit_state(&self, backend_code: i32) -> (ExitReason, ExitStatus) {

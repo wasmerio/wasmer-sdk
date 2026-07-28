@@ -2,7 +2,7 @@ use std::{path::Path, time::Duration};
 
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use wasmer_sdk::{CacheConfig, PackageSource, Result, Stdio, Wasmer, WasmerConfig};
+use wasmer_sdk::{CacheConfig, ExitReason, PackageSource, Result, Stdio, Wasmer, WasmerConfig};
 
 const ECHO_WAT: &str = r#"
 (module
@@ -129,6 +129,39 @@ async fn closing_a_sandbox_kills_its_live_processes() -> Result<()> {
     tokio::time::timeout(Duration::from_secs(3), process.wait())
         .await
         .expect("sandbox cleanup timed out")?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn closing_a_sandbox_preserves_a_natural_unwaited_exit() -> Result<()> {
+    let fixture = TempDir::new().expect("create fixture directory");
+    write_package(fixture.path());
+    let state = TempDir::new().expect("create SDK state directory");
+    let client = client(&state)?;
+    let sandbox = client
+        .sandbox()
+        .package(PackageSource::path(fixture.path()))
+        .start()
+        .await?;
+    let mut process = sandbox
+        .command("echo")
+        .stdin(Stdio::Null)
+        .stdout(Stdio::Piped)
+        .stderr(Stdio::Null)
+        .spawn()
+        .await?;
+
+    let mut stdout = process.take_stdout().expect("piped stdout");
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(3), stdout.read_to_end(&mut bytes))
+        .await
+        .expect("guest did not close stdout")?;
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    sandbox.close().await?;
+
+    let output = process.wait().await?;
+    assert_eq!(output.reason, ExitReason::Exited);
+    assert_eq!(output.status.code(), 0);
     Ok(())
 }
 

@@ -55,6 +55,63 @@ test("serves HTTP from EdgeJS QuickJS through the Node network bridge", async (c
   }
 });
 
+test(
+  "keeps two live clients on their own Node network bridges",
+  { timeout: 60_000 },
+  async () => {
+    const first = await startServer("client-a");
+    let second;
+    try {
+      second = await startServer("client-b");
+      await assertServer(first, "client-a");
+      await assertServer(second, "client-b");
+
+      await closeServer(second);
+      second = undefined;
+      await assertServer(first, "client-a");
+    } finally {
+      if (second) await closeServer(second);
+      await closeServer(first);
+    }
+  },
+);
+
+async function startServer(name) {
+  const port = await reservePort();
+  const client = new Wasmer();
+  const edgejs = await client.loadPackage("wasmer/edgejs-quickjs@0.1.0");
+  const source = new TextDecoder()
+    .decode(serverSource)
+    .replace("Hello from Edge.js!", name);
+  const sandbox = await client.createSandbox({
+    packages: [edgejs],
+    files: { "server.js": source },
+    env: { PORT: String(port) },
+    network: { mode: "host" },
+  });
+  const process = await sandbox
+    .command(edgejs, ["/workspace/server.js"])
+    .spawn({ stdout: "pipe", stderr: "capture", outputBytes: 256 * 1024 });
+  assert(process.stdout);
+  await waitForLine(process.stdout.lines(), "Edge.js listening on", 20_000);
+  return { client, sandbox, process, port };
+}
+
+async function assertServer(server, expected) {
+  const response = await fetch(`http://127.0.0.1:${server.port}/bridge`, {
+    headers: { connection: "close" },
+  });
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), new RegExp(`<h1>${expected}</h1>`));
+}
+
+async function closeServer(server) {
+  await server.process.kill();
+  await server.process.wait();
+  await server.sandbox.close();
+  await server.client.close();
+}
+
 async function waitForLine(lines, marker, timeoutMs) {
   let timeout;
   try {

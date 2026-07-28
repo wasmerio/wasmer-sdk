@@ -9,10 +9,7 @@ import {
   installNodeNetworkGlobals,
   NodeNetworkBridge,
 } from "./node-network.js";
-import {
-  configureNodeWorkerBridge,
-  NodeWorkerAdapter,
-} from "./node-worker-adapter.js";
+import { NodeWorkerAdapter } from "./node-worker-adapter.js";
 
 export * from "./index.js";
 
@@ -41,8 +38,7 @@ export class Wasmer extends BrowserWasmer {
       });
     await nodeInitialization;
     const network = new NodeNetworkBridge();
-    installNodeNetworkGlobals(network);
-    configureNodeWorkerBridge(network);
+    installNodeNetworkGlobals();
     installNodeWorkers();
     const client = core.WasmerCore.create(
       { outputBytes: options.outputBytes },

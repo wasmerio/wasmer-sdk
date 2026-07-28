@@ -49,41 +49,57 @@ async function handleMessage(data: any): Promise<void> {
 
 function installNetworkProxy(): void {
   const scope = globalThis as Record<string, unknown>;
-  scope.__wasmerNodeResolve = (host: string) =>
-    Promise.resolve(callNetwork("resolve", [host]));
-  scope.__wasmerNodeConnectTcp = (local: string, peer: string) =>
-    Promise.resolve(callNetwork("connectTcp", [local, peer]));
-  scope.__wasmerNodeListenTcp = (address: string) =>
-    callNetwork("listenTcp", [address]);
-  scope.__wasmerNodeListenerAccept = (id: number) =>
-    callNetwork("listenerAccept", [id]);
-  scope.__wasmerNodeListenerRefresh = (id: number) =>
-    callNetwork("listenerRefresh", [id]);
-  scope.__wasmerNodeListenerReadable = (id: number) =>
-    callNetwork("listenerReadable", [id]);
-  scope.__wasmerNodeListenerClose = (id: number) =>
-    callNetwork("listenerClose", [id]);
-  scope.__wasmerNodeSocketRead = (id: number, maximum: number) =>
-    callNetwork("socketRead", [id, maximum], maximum + 16);
-  scope.__wasmerNodeSocketWrite = (id: number, bytes: Uint8Array) =>
-    callNetwork("socketWrite", [id, bytes]);
-  scope.__wasmerNodeSocketFlush = (id: number) =>
-    callNetwork("socketFlush", [id]);
-  scope.__wasmerNodeSocketClose = (id: number) =>
-    callNetwork("socketClose", [id]);
-  scope.__wasmerNodeSocketReadable = (id: number) =>
-    callNetwork("socketReadable", [id]);
-  scope.__wasmerNodeSocketWritable = (id: number) =>
-    callNetwork("socketWritable", [id]);
-  scope.__wasmerNodeSocketSetNoDelay = (id: number, enabled: boolean) =>
-    callNetwork("socketSetNoDelay", [id, enabled]);
-  scope.__wasmerNodeSocketSetKeepAlive = (id: number, enabled: boolean) =>
-    callNetwork("socketSetKeepAlive", [id, enabled]);
-  scope.__wasmerNodeSocketRefresh = (id: number) =>
-    callNetwork("socketRefresh", [id]);
+  scope.__wasmerNodeResolve = (bridgeId: number, host: string) =>
+    Promise.resolve(callNetwork(bridgeId, "resolve", [host]));
+  scope.__wasmerNodeConnectTcp = (
+    bridgeId: number,
+    local: string,
+    peer: string,
+  ) => Promise.resolve(callNetwork(bridgeId, "connectTcp", [local, peer]));
+  scope.__wasmerNodeListenTcp = (bridgeId: number, address: string) =>
+    callNetwork(bridgeId, "listenTcp", [address]);
+  scope.__wasmerNodeListenerAccept = (bridgeId: number, id: number) =>
+    callNetwork(bridgeId, "listenerAccept", [id]);
+  scope.__wasmerNodeListenerRefresh = (bridgeId: number, id: number) =>
+    callNetwork(bridgeId, "listenerRefresh", [id]);
+  scope.__wasmerNodeListenerReadable = (bridgeId: number, id: number) =>
+    callNetwork(bridgeId, "listenerReadable", [id]);
+  scope.__wasmerNodeListenerClose = (bridgeId: number, id: number) =>
+    callNetwork(bridgeId, "listenerClose", [id]);
+  scope.__wasmerNodeSocketRead = (
+    bridgeId: number,
+    id: number,
+    maximum: number,
+  ) => callNetwork(bridgeId, "socketRead", [id, maximum], maximum + 16);
+  scope.__wasmerNodeSocketWrite = (
+    bridgeId: number,
+    id: number,
+    bytes: Uint8Array,
+  ) => callNetwork(bridgeId, "socketWrite", [id, bytes]);
+  scope.__wasmerNodeSocketFlush = (bridgeId: number, id: number) =>
+    callNetwork(bridgeId, "socketFlush", [id]);
+  scope.__wasmerNodeSocketClose = (bridgeId: number, id: number) =>
+    callNetwork(bridgeId, "socketClose", [id]);
+  scope.__wasmerNodeSocketReadable = (bridgeId: number, id: number) =>
+    callNetwork(bridgeId, "socketReadable", [id]);
+  scope.__wasmerNodeSocketWritable = (bridgeId: number, id: number) =>
+    callNetwork(bridgeId, "socketWritable", [id]);
+  scope.__wasmerNodeSocketSetNoDelay = (
+    bridgeId: number,
+    id: number,
+    enabled: boolean,
+  ) => callNetwork(bridgeId, "socketSetNoDelay", [id, enabled]);
+  scope.__wasmerNodeSocketSetKeepAlive = (
+    bridgeId: number,
+    id: number,
+    enabled: boolean,
+  ) => callNetwork(bridgeId, "socketSetKeepAlive", [id, enabled]);
+  scope.__wasmerNodeSocketRefresh = (bridgeId: number, id: number) =>
+    callNetwork(bridgeId, "socketRefresh", [id]);
 }
 
 function callNetwork(
+  bridgeId: number,
   method: NodeNetworkMethod,
   args: unknown[],
   minimumPayload = 0,
@@ -93,6 +109,7 @@ function callNetwork(
   const control = new Int32Array(response, 0, 4);
   port.postMessage({
     type: "wasmer-network-rpc",
+    bridgeId,
     method,
     args,
     response,

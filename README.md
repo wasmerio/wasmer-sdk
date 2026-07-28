@@ -91,8 +91,13 @@ let sandbox = wasmer
 Run the network-free local-package proof with:
 
 ```console
-cargo test --all-targets
+cargo test -p wasmer-sdk --all-targets
 ```
+
+The native SDK and wasm-bindgen facade share one source workspace but are
+always built in separate target-specific invocations. Do not use
+`cargo test --workspace`: that would select both Wasmer's mutually exclusive
+`sys` and `js` feature sets for one host build.
 
 The PostgreSQL 18 WASIX proof starts a rebuilt single-backend PostgreSQL
 command through this SDK. The guest owns the loopback TCP socket, and a

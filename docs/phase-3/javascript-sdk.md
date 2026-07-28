@@ -1,7 +1,7 @@
 # JavaScript SDK implementation
 
 Status: multi-worker Node vertical slice complete  
-Last updated: 2026-07-27
+Last updated: 2026-07-28
 
 ## Shape
 
@@ -52,6 +52,12 @@ while a guest worker is blocked. Worker-side virtual sockets call it through a
 small synchronous RPC protocol backed by `SharedArrayBuffer` and
 `Atomics.wait`; readiness events call back into WASIX interest handlers in
 shared Rust state.
+
+Every bridge has a client-scoped ID. Main-agent hooks and worker RPC messages
+carry that ID and resolve it through a bridge registry before touching a
+descriptor. Consequently, independently allocated descriptor numbers cannot
+collide across simultaneous `Wasmer` clients, and closing one client removes
+only its listeners and sockets.
 
 A sandbox only uses networking after the caller grants
 `network: { mode: "host" }`;
@@ -129,6 +135,11 @@ const output = await sandbox.command(localPackage).run({ check: true });
 
 ## Build and validation
 
+The native SDK and `crates/wasmer-sdk-js` are members of one source workspace,
+but they are intentionally built in separate invocations. Wasmer's native
+`sys` and WebAssembly `js` features are mutually exclusive; do not select both
+members with `cargo test --workspace`.
+
 ```sh
 rustup toolchain install nightly
 rustup target add wasm32-unknown-unknown
@@ -138,6 +149,12 @@ cd bindings/javascript
 npm install
 npm run build
 npm test
+```
+
+From the repository root, the native command is:
+
+```sh
+cargo test -p wasmer-sdk --all-targets
 ```
 
 Validation currently covers:

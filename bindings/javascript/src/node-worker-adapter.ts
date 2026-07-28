@@ -4,7 +4,7 @@ import {
 } from "node:worker_threads";
 import {
   dispatchNodeNetworkCall,
-  type NodeNetworkBridge,
+  nodeNetworkBridge,
   type NodeNetworkMethod,
 } from "./node-network.js";
 
@@ -14,18 +14,14 @@ interface WorkerEvent<T> {
 
 interface NetworkRequest {
   type: "wasmer-network-rpc";
+  bridgeId: number;
   method: NodeNetworkMethod;
   args: unknown[];
   response: SharedArrayBuffer;
 }
 
-let networkBridge: NodeNetworkBridge | undefined;
 let workersCreated = 0;
 let activeWorkers = 0;
-
-export function configureNodeWorkerBridge(bridge: NodeNetworkBridge): void {
-  networkBridge = bridge;
-}
 
 export function nodeWorkerStats(): {
   workersCreated: number;
@@ -105,9 +101,8 @@ async function respondToNetworkRequest(request: NetworkRequest): Promise<void> {
   const control = new Int32Array(request.response, 0, 4);
   const payload = new Uint8Array(request.response, 16);
   try {
-    if (!networkBridge) throw new Error("Node network bridge is not installed");
     const result = await dispatchNodeNetworkCall(
-      networkBridge,
+      nodeNetworkBridge(request.bridgeId),
       request.method,
       request.args,
     );

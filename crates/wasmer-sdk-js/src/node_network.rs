@@ -24,59 +24,66 @@ extern "C" {
     #[derive(Clone, Debug)]
     pub type NodeNetworkBridge;
 
+    #[wasm_bindgen(method, getter)]
+    fn id(this: &NodeNetworkBridge) -> u32;
+
     #[wasm_bindgen(method, js_name = setWakeCallback)]
     fn set_wake_callback(this: &NodeNetworkBridge, callback: &Function);
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeResolve)]
-    fn node_resolve(host: String) -> Result<js_sys::Promise, JsValue>;
+    fn node_resolve(bridge_id: u32, host: String) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeConnectTcp)]
-    fn node_connect_tcp(local: String, peer: String) -> Result<js_sys::Promise, JsValue>;
+    fn node_connect_tcp(
+        bridge_id: u32,
+        local: String,
+        peer: String,
+    ) -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenTcp)]
-    fn node_listen_tcp(addr: String) -> Result<JsValue, JsValue>;
+    fn node_listen_tcp(bridge_id: u32, addr: String) -> Result<JsValue, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerAccept)]
-    fn node_listener_accept(id: u32) -> Result<JsValue, JsValue>;
+    fn node_listener_accept(bridge_id: u32, id: u32) -> Result<JsValue, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerRefresh)]
-    fn node_listener_refresh(id: u32) -> Result<(), JsValue>;
+    fn node_listener_refresh(bridge_id: u32, id: u32) -> Result<(), JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerReadable)]
-    fn node_listener_readable(id: u32) -> Result<bool, JsValue>;
+    fn node_listener_readable(bridge_id: u32, id: u32) -> Result<bool, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerClose)]
-    fn node_listener_close(id: u32) -> Result<(), JsValue>;
+    fn node_listener_close(bridge_id: u32, id: u32) -> Result<(), JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketRead)]
-    fn node_socket_read(id: u32, length: usize) -> Result<JsValue, JsValue>;
+    fn node_socket_read(bridge_id: u32, id: u32, length: usize) -> Result<JsValue, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketWrite)]
-    fn node_socket_write(id: u32, data: &[u8]) -> Result<i32, JsValue>;
+    fn node_socket_write(bridge_id: u32, id: u32, data: &[u8]) -> Result<i32, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketFlush)]
-    fn node_socket_flush(id: u32) -> Result<bool, JsValue>;
+    fn node_socket_flush(bridge_id: u32, id: u32) -> Result<bool, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketClose)]
-    fn node_socket_close(id: u32) -> Result<(), JsValue>;
+    fn node_socket_close(bridge_id: u32, id: u32) -> Result<(), JsValue>;
 
     // `catch` is required on every hook: on worker threads these calls proxy
     // through the RPC channel, and a JavaScript throw through a non-`catch`
     // import would abort the wasm instance.
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketReadable)]
-    fn node_socket_readable(id: u32) -> Result<i32, JsValue>;
+    fn node_socket_readable(bridge_id: u32, id: u32) -> Result<i32, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketWritable)]
-    fn node_socket_writable(id: u32) -> Result<i32, JsValue>;
+    fn node_socket_writable(bridge_id: u32, id: u32) -> Result<i32, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketSetNoDelay)]
-    fn node_socket_set_nodelay(id: u32, enabled: bool) -> Result<(), JsValue>;
+    fn node_socket_set_nodelay(bridge_id: u32, id: u32, enabled: bool) -> Result<(), JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketSetKeepAlive)]
-    fn node_socket_set_keepalive(id: u32, enabled: bool) -> Result<(), JsValue>;
+    fn node_socket_set_keepalive(bridge_id: u32, id: u32, enabled: bool) -> Result<(), JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketRefresh)]
-    fn node_socket_refresh(id: u32) -> Result<(), JsValue>;
+    fn node_socket_refresh(bridge_id: u32, id: u32) -> Result<(), JsValue>;
 
 }
 
@@ -93,6 +100,7 @@ type HandlerMap = Arc<Mutex<HashMap<u32, InterestState>>>;
 /// `NodeNetworkBridge`. The bridge itself owns `node:net` sockets.
 #[derive(Clone)]
 pub struct NodeNetworking {
+    bridge_id: u32,
     handlers: HandlerMap,
 }
 
@@ -106,6 +114,7 @@ impl std::fmt::Debug for NodeNetworking {
 
 impl NodeNetworking {
     pub fn new(bridge: NodeNetworkBridge) -> Self {
+        let bridge_id = bridge.id();
         let handlers: HandlerMap = Arc::new(Mutex::new(HashMap::new()));
         let callback_handlers = Arc::clone(&handlers);
         let callback = Closure::wrap(Box::new(move |id: u32, event: String| {
@@ -113,7 +122,10 @@ impl NodeNetworking {
         }) as Box<dyn FnMut(u32, String)>);
         bridge.set_wake_callback(callback.as_ref().unchecked_ref());
         callback.forget();
-        Self { handlers }
+        Self {
+            bridge_id,
+            handlers,
+        }
     }
 }
 
@@ -252,10 +264,11 @@ impl VirtualNetworking for NodeNetworking {
         _reuse_port: bool,
         _reuse_addr: bool,
     ) -> virtual_net::Result<Box<dyn VirtualTcpListener + Sync>> {
-        let descriptor = node_listen_tcp(addr.to_string()).map_err(js_error)?;
+        let descriptor = node_listen_tcp(self.bridge_id, addr.to_string()).map_err(js_error)?;
         let id = number_property(&descriptor, "id")?;
         let local = address_property(&descriptor, "local")?;
         Ok(Box::new(NodeTcpListener {
+            bridge_id: self.bridge_id,
             id,
             local,
             handlers: Arc::clone(&self.handlers),
@@ -270,6 +283,7 @@ impl VirtualNetworking for NodeNetworking {
         _reuse_addr: bool,
     ) -> virtual_net::Result<Box<dyn VirtualTcpBoundSocket + Sync>> {
         Ok(Box::new(NodeTcpBoundSocket {
+            bridge_id: self.bridge_id,
             local: addr,
             handlers: Arc::clone(&self.handlers),
             ttl: 64,
@@ -281,12 +295,14 @@ impl VirtualNetworking for NodeNetworking {
         addr: SocketAddr,
         peer: SocketAddr,
     ) -> virtual_net::Result<Box<dyn VirtualTcpSocket + Sync>> {
-        let promise = node_connect_tcp(addr.to_string(), peer.to_string()).map_err(js_error)?;
+        let promise = node_connect_tcp(self.bridge_id, addr.to_string(), peer.to_string())
+            .map_err(js_error)?;
         let descriptor = JsSendFuture(JsFuture::from(promise))
             .await
             .map_err(js_error)?;
         Ok(Box::new(NodeTcpSocket::from_descriptor(
             descriptor,
+            self.bridge_id,
             Arc::clone(&self.handlers),
         )?))
     }
@@ -297,7 +313,7 @@ impl VirtualNetworking for NodeNetworking {
         _port: Option<u16>,
         _dns_server: Option<IpAddr>,
     ) -> virtual_net::Result<Vec<IpAddr>> {
-        let promise = node_resolve(host.to_owned()).map_err(js_error)?;
+        let promise = node_resolve(self.bridge_id, host.to_owned()).map_err(js_error)?;
         let values = JsSendFuture(JsFuture::from(promise))
             .await
             .map_err(js_error)?;
@@ -315,6 +331,7 @@ impl VirtualNetworking for NodeNetworking {
 }
 
 struct NodeTcpBoundSocket {
+    bridge_id: u32,
     local: SocketAddr,
     handlers: HandlerMap,
     ttl: u32,
@@ -335,10 +352,12 @@ impl VirtualTcpBoundSocket for NodeTcpBoundSocket {
     }
 
     fn listen(&mut self) -> virtual_net::Result<Box<dyn VirtualTcpListener + Sync>> {
-        let descriptor = node_listen_tcp(self.local.to_string()).map_err(js_error)?;
+        let descriptor =
+            node_listen_tcp(self.bridge_id, self.local.to_string()).map_err(js_error)?;
         let id = number_property(&descriptor, "id")?;
         let local = address_property(&descriptor, "local")?;
         Ok(Box::new(NodeTcpListener {
+            bridge_id: self.bridge_id,
             id,
             local,
             handlers: Arc::clone(&self.handlers),
@@ -363,6 +382,7 @@ impl VirtualTcpBoundSocket for NodeTcpBoundSocket {
 }
 
 struct NodeTcpListener {
+    bridge_id: u32,
     id: u32,
     local: SocketAddr,
     handlers: HandlerMap,
@@ -385,7 +405,7 @@ impl VirtualIoSource for NodeTcpListener {
 
     fn poll_read_ready(&mut self, cx: &mut Context<'_>) -> Poll<virtual_net::Result<usize>> {
         poll_ready(&self.handlers, self.id, InterestType::Readable, cx, || {
-            node_listener_readable(self.id).map(|ready| ready.then_some(1))
+            node_listener_readable(self.bridge_id, self.id).map(|ready| ready.then_some(1))
         })
     }
 
@@ -398,11 +418,12 @@ impl VirtualTcpListener for NodeTcpListener {
     fn try_accept(
         &mut self,
     ) -> virtual_net::Result<(Box<dyn VirtualTcpSocket + Sync>, SocketAddr)> {
-        let descriptor = node_listener_accept(self.id).map_err(js_error)?;
+        let descriptor = node_listener_accept(self.bridge_id, self.id).map_err(js_error)?;
         if descriptor.is_undefined() || descriptor.is_null() {
             return Err(NetworkError::WouldBlock);
         }
-        let socket = NodeTcpSocket::from_descriptor(descriptor, Arc::clone(&self.handlers))?;
+        let socket =
+            NodeTcpSocket::from_descriptor(descriptor, self.bridge_id, Arc::clone(&self.handlers))?;
         let peer = socket.peer;
         Ok((Box::new(socket), peer))
     }
@@ -412,7 +433,7 @@ impl VirtualTcpListener for NodeTcpListener {
         handler: Box<dyn InterestHandler + Send + Sync>,
     ) -> virtual_net::Result<()> {
         register_handler(&self.handlers, self.id, handler)?;
-        node_listener_refresh(self.id).map_err(js_error)?;
+        node_listener_refresh(self.bridge_id, self.id).map_err(js_error)?;
         Ok(())
     }
 
@@ -431,7 +452,7 @@ impl VirtualTcpListener for NodeTcpListener {
 
 impl Drop for NodeTcpListener {
     fn drop(&mut self) {
-        let _ = node_listener_close(self.id);
+        let _ = node_listener_close(self.bridge_id, self.id);
         self.handlers
             .lock()
             .expect("handler lock poisoned")
@@ -440,6 +461,7 @@ impl Drop for NodeTcpListener {
 }
 
 struct NodeTcpSocket {
+    bridge_id: u32,
     id: u32,
     local: SocketAddr,
     peer: SocketAddr,
@@ -462,8 +484,13 @@ impl std::fmt::Debug for NodeTcpSocket {
 }
 
 impl NodeTcpSocket {
-    fn from_descriptor(descriptor: JsValue, handlers: HandlerMap) -> virtual_net::Result<Self> {
+    fn from_descriptor(
+        descriptor: JsValue,
+        bridge_id: u32,
+        handlers: HandlerMap,
+    ) -> virtual_net::Result<Self> {
         Ok(Self {
+            bridge_id,
             id: number_property(&descriptor, "id")?,
             local: address_property(&descriptor, "local")?,
             peer: address_property(&descriptor, "peer")?,
@@ -483,13 +510,15 @@ impl VirtualIoSource for NodeTcpSocket {
 
     fn poll_read_ready(&mut self, cx: &mut Context<'_>) -> Poll<virtual_net::Result<usize>> {
         poll_ready(&self.handlers, self.id, InterestType::Readable, cx, || {
-            node_socket_readable(self.id).map(|ready| (ready >= 0).then_some(ready.max(0) as usize))
+            node_socket_readable(self.bridge_id, self.id)
+                .map(|ready| (ready >= 0).then_some(ready.max(0) as usize))
         })
     }
 
     fn poll_write_ready(&mut self, cx: &mut Context<'_>) -> Poll<virtual_net::Result<usize>> {
         poll_ready(&self.handlers, self.id, InterestType::Writable, cx, || {
-            node_socket_writable(self.id).map(|ready| (ready >= 0).then_some(ready.max(0) as usize))
+            node_socket_writable(self.bridge_id, self.id)
+                .map(|ready| (ready >= 0).then_some(ready.max(0) as usize))
         })
     }
 }
@@ -523,7 +552,7 @@ impl VirtualSocket for NodeTcpSocket {
         // Readiness can change between the operation returning WouldBlock and
         // this handler being installed. Ask the Node bridge to publish its
         // current level-triggered state after registration completes.
-        node_socket_refresh(self.id).map_err(js_error)?;
+        node_socket_refresh(self.bridge_id, self.id).map_err(js_error)?;
         Ok(())
     }
 }
@@ -539,7 +568,7 @@ impl VirtualConnectedSocket for NodeTcpSocket {
     }
 
     fn try_send(&mut self, data: &[u8]) -> virtual_net::Result<usize> {
-        let written = node_socket_write(self.id, data).map_err(js_error)?;
+        let written = node_socket_write(self.bridge_id, self.id, data).map_err(js_error)?;
         if written < 0 {
             Err(NetworkError::WouldBlock)
         } else {
@@ -548,7 +577,7 @@ impl VirtualConnectedSocket for NodeTcpSocket {
     }
 
     fn try_flush(&mut self) -> virtual_net::Result<()> {
-        if node_socket_flush(self.id).map_err(js_error)? {
+        if node_socket_flush(self.bridge_id, self.id).map_err(js_error)? {
             Ok(())
         } else {
             Err(NetworkError::WouldBlock)
@@ -556,7 +585,7 @@ impl VirtualConnectedSocket for NodeTcpSocket {
     }
 
     fn close(&mut self) -> virtual_net::Result<()> {
-        node_socket_close(self.id).map_err(js_error)?;
+        node_socket_close(self.bridge_id, self.id).map_err(js_error)?;
         self.closed = true;
         Ok(())
     }
@@ -569,7 +598,7 @@ impl VirtualConnectedSocket for NodeTcpSocket {
         if peek {
             return Err(NetworkError::Unsupported);
         }
-        let value = node_socket_read(self.id, buffer.len()).map_err(js_error)?;
+        let value = node_socket_read(self.bridge_id, self.id, buffer.len()).map_err(js_error)?;
         if value.is_undefined() {
             return Err(NetworkError::WouldBlock);
         }
@@ -591,18 +620,18 @@ impl VirtualTcpSocket for NodeTcpSocket {
         Ok(())
     }
     fn recv_buf_size(&self) -> virtual_net::Result<usize> {
-        let readable = node_socket_readable(self.id).map_err(js_error)?;
+        let readable = node_socket_readable(self.bridge_id, self.id).map_err(js_error)?;
         Ok(readable.max(0) as usize)
     }
     fn set_send_buf_size(&mut self, _size: usize) -> virtual_net::Result<()> {
         Ok(())
     }
     fn send_buf_size(&self) -> virtual_net::Result<usize> {
-        let writable = node_socket_writable(self.id).map_err(js_error)?;
+        let writable = node_socket_writable(self.bridge_id, self.id).map_err(js_error)?;
         Ok(writable.max(0) as usize)
     }
     fn set_nodelay(&mut self, enabled: bool) -> virtual_net::Result<()> {
-        node_socket_set_nodelay(self.id, enabled).map_err(js_error)?;
+        node_socket_set_nodelay(self.bridge_id, self.id, enabled).map_err(js_error)?;
         self.nodelay = enabled;
         Ok(())
     }
@@ -610,7 +639,7 @@ impl VirtualTcpSocket for NodeTcpSocket {
         Ok(self.nodelay)
     }
     fn set_keepalive(&mut self, enabled: bool) -> virtual_net::Result<()> {
-        node_socket_set_keepalive(self.id, enabled).map_err(js_error)?;
+        node_socket_set_keepalive(self.bridge_id, self.id, enabled).map_err(js_error)?;
         self.keepalive = enabled;
         Ok(())
     }
@@ -636,7 +665,7 @@ impl VirtualTcpSocket for NodeTcpSocket {
 
 impl Drop for NodeTcpSocket {
     fn drop(&mut self) {
-        let _ = node_socket_close(self.id);
+        let _ = node_socket_close(self.bridge_id, self.id);
         self.handlers
             .lock()
             .expect("handler lock poisoned")

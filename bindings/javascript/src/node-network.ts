@@ -3,6 +3,8 @@ import net, { type Server, type Socket } from "node:net";
 
 type Wake = (id: number, event: string) => void;
 type Address = { address: string; port: number; family: string };
+const bridges = new Map<number, NodeNetworkBridge>();
+let nextBridgeId = 1;
 
 /** Pause the socket once this much unread data is buffered. */
 const RECEIVE_HIGH_WATER_BYTES = 1024 * 1024;
@@ -41,10 +43,16 @@ export type NodeNetworkMethod =
   | "socketRefresh";
 
 export class NodeNetworkBridge {
+  readonly id: number;
   readonly #sockets = new Map<number, SocketState>();
   readonly #listeners = new Map<number, ListenerState>();
   #nextId = 1;
   #wake: Wake = () => {};
+
+  constructor() {
+    this.id = nextBridgeId++;
+    bridges.set(this.id, this);
+  }
 
   setWakeCallback(callback: Wake): void {
     this.#wake = callback;
@@ -60,6 +68,7 @@ export class NodeNetworkBridge {
     }
     this.#sockets.clear();
     this.#wake = () => {};
+    bridges.delete(this.id);
   }
 
   async resolve(host: string): Promise<string[]> {
@@ -257,34 +266,59 @@ export class NodeNetworkBridge {
   }
 }
 
-export function installNodeNetworkGlobals(bridge: NodeNetworkBridge): void {
+export function installNodeNetworkGlobals(): void {
   const scope = globalThis as Record<string, unknown>;
-  scope.__wasmerNodeResolve = (host: string) => bridge.resolve(host);
-  scope.__wasmerNodeConnectTcp = (local: string, peer: string) =>
-    bridge.connectTcp(local, peer);
-  scope.__wasmerNodeListenTcp = (address: string) => bridge.listenTcp(address);
-  scope.__wasmerNodeListenerAccept = (id: number) =>
-    bridge.listenerAccept(id);
-  scope.__wasmerNodeListenerRefresh = (id: number) =>
-    bridge.listenerRefresh(id);
-  scope.__wasmerNodeListenerReadable = (id: number) =>
-    bridge.listenerReadable(id);
-  scope.__wasmerNodeListenerClose = (id: number) => bridge.listenerClose(id);
-  scope.__wasmerNodeSocketRead = (id: number, maximum: number) =>
-    bridge.socketRead(id, maximum);
-  scope.__wasmerNodeSocketWrite = (id: number, bytes: Uint8Array) =>
-    bridge.socketWrite(id, bytes);
-  scope.__wasmerNodeSocketFlush = (id: number) => bridge.socketFlush(id);
-  scope.__wasmerNodeSocketClose = (id: number) => bridge.socketClose(id);
-  scope.__wasmerNodeSocketReadable = (id: number) =>
-    bridge.socketReadable(id);
-  scope.__wasmerNodeSocketWritable = (id: number) =>
-    bridge.socketWritable(id);
-  scope.__wasmerNodeSocketSetNoDelay = (id: number, enabled: boolean) =>
-    bridge.socketSetNoDelay(id, enabled);
-  scope.__wasmerNodeSocketSetKeepAlive = (id: number, enabled: boolean) =>
-    bridge.socketSetKeepAlive(id, enabled);
-  scope.__wasmerNodeSocketRefresh = (id: number) => bridge.socketRefresh(id);
+  scope.__wasmerNodeResolve = (bridgeId: number, host: string) =>
+    bridgeFor(bridgeId).resolve(host);
+  scope.__wasmerNodeConnectTcp = (
+    bridgeId: number,
+    local: string,
+    peer: string,
+  ) => bridgeFor(bridgeId).connectTcp(local, peer);
+  scope.__wasmerNodeListenTcp = (bridgeId: number, address: string) =>
+    bridgeFor(bridgeId).listenTcp(address);
+  scope.__wasmerNodeListenerAccept = (bridgeId: number, id: number) =>
+    bridgeFor(bridgeId).listenerAccept(id);
+  scope.__wasmerNodeListenerRefresh = (bridgeId: number, id: number) =>
+    bridgeFor(bridgeId).listenerRefresh(id);
+  scope.__wasmerNodeListenerReadable = (bridgeId: number, id: number) =>
+    bridgeFor(bridgeId).listenerReadable(id);
+  scope.__wasmerNodeListenerClose = (bridgeId: number, id: number) =>
+    bridgeFor(bridgeId).listenerClose(id);
+  scope.__wasmerNodeSocketRead = (
+    bridgeId: number,
+    id: number,
+    maximum: number,
+  ) => bridgeFor(bridgeId).socketRead(id, maximum);
+  scope.__wasmerNodeSocketWrite = (
+    bridgeId: number,
+    id: number,
+    bytes: Uint8Array,
+  ) => bridgeFor(bridgeId).socketWrite(id, bytes);
+  scope.__wasmerNodeSocketFlush = (bridgeId: number, id: number) =>
+    bridgeFor(bridgeId).socketFlush(id);
+  scope.__wasmerNodeSocketClose = (bridgeId: number, id: number) =>
+    bridgeFor(bridgeId).socketClose(id);
+  scope.__wasmerNodeSocketReadable = (bridgeId: number, id: number) =>
+    bridgeFor(bridgeId).socketReadable(id);
+  scope.__wasmerNodeSocketWritable = (bridgeId: number, id: number) =>
+    bridgeFor(bridgeId).socketWritable(id);
+  scope.__wasmerNodeSocketSetNoDelay = (
+    bridgeId: number,
+    id: number,
+    enabled: boolean,
+  ) => bridgeFor(bridgeId).socketSetNoDelay(id, enabled);
+  scope.__wasmerNodeSocketSetKeepAlive = (
+    bridgeId: number,
+    id: number,
+    enabled: boolean,
+  ) => bridgeFor(bridgeId).socketSetKeepAlive(id, enabled);
+  scope.__wasmerNodeSocketRefresh = (bridgeId: number, id: number) =>
+    bridgeFor(bridgeId).socketRefresh(id);
+}
+
+export function nodeNetworkBridge(bridgeId: number): NodeNetworkBridge {
+  return bridgeFor(bridgeId);
 }
 
 export async function dispatchNodeNetworkCall(
@@ -315,4 +349,10 @@ function formatAddress(value: Address | string | null): string {
 
 function isUnspecified(host: string): boolean {
   return host === "0.0.0.0" || host === "::" || host === "[::]";
+}
+
+function bridgeFor(id: number): NodeNetworkBridge {
+  const bridge = bridges.get(id);
+  if (!bridge) throw new Error(`unknown or closed Node network bridge ${id}`);
+  return bridge;
 }

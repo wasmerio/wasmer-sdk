@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import test from "node:test";
 
-import { NodeNetworkBridge } from "../dist/node-network.js";
+import {
+  installNodeNetworkGlobals,
+  NodeNetworkBridge,
+  nodeNetworkBridge,
+} from "../dist/node-network.js";
 
 test("Node network bridge uses node:net for TCP", async (context) => {
   const server = net.createServer((socket) => socket.end("hello"));
@@ -137,6 +141,62 @@ test("Node network bridge close releases listeners and accepted sockets", async 
     });
   }
 });
+
+test("global Node network hooks route colliding descriptors by bridge ID", async () => {
+  const firstPort = await reservePort();
+  const secondPort = await reservePort();
+  const first = new NodeNetworkBridge();
+  const second = new NodeNetworkBridge();
+  assert.notEqual(first.id, second.id);
+  assert.equal(nodeNetworkBridge(first.id), first);
+  assert.equal(nodeNetworkBridge(second.id), second);
+  installNodeNetworkGlobals();
+
+  const firstReady = bridgeEvent(first, "writable");
+  const secondReady = bridgeEvent(second, "writable");
+  const firstListener = globalThis.__wasmerNodeListenTcp(
+    first.id,
+    `127.0.0.1:${firstPort}`,
+  );
+  const secondListener = globalThis.__wasmerNodeListenTcp(
+    second.id,
+    `127.0.0.1:${secondPort}`,
+  );
+  assert.equal(firstListener.id, secondListener.id);
+  await Promise.all([firstReady, secondReady]);
+
+  globalThis.__wasmerNodeListenerClose(first.id, firstListener.id);
+  const rebound = net.createServer();
+  await new Promise((resolve, reject) => {
+    rebound.once("error", reject);
+    rebound.listen(firstPort, "127.0.0.1", resolve);
+  });
+
+  const secondClient = net.createConnection({
+    host: "127.0.0.1",
+    port: secondPort,
+  });
+  await new Promise((resolve, reject) => {
+    secondClient.once("connect", resolve);
+    secondClient.once("error", reject);
+  });
+
+  secondClient.destroy();
+  await new Promise((resolve, reject) =>
+    rebound.close((error) => (error ? reject(error) : resolve())),
+  );
+  second.close();
+  first.close();
+  assert.throws(() => nodeNetworkBridge(first.id), /unknown or closed/);
+});
+
+function bridgeEvent(bridge, expected) {
+  return new Promise((resolve) => {
+    bridge.setWakeCallback((_id, event) => {
+      if (event === expected) resolve();
+    });
+  });
+}
 
 async function reservePort() {
   const server = net.createServer();
