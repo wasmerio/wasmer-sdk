@@ -44,13 +44,13 @@ The default native layout should be added to source control ignore rules:
 Zero configuration uses the target default:
 
 ```ts
-const wasmer = await Wasmer.create();
+const client = new Wasmer();
 ```
 
 An explicit project root and cache:
 
 ```ts
-const wasmer = await Wasmer.create({
+const client = new Wasmer({
   projectRoot: "/absolute/path/to/project",
   cache: {
     directory: ".wasmer",
@@ -68,24 +68,24 @@ Other useful modes:
 
 ```ts
 // Custom absolute location.
-const shared = await Wasmer.create({
+const shared = new Wasmer({
   cache: {
     directory: "/var/cache/my-application/wasmer",
   },
 });
 
 // Process-local cache only.
-const ephemeral = await Wasmer.create({
+const ephemeral = new Wasmer({
   cache: "memory",
 });
 
 // No package or compilation cache.
-const uncached = await Wasmer.create({
+const uncached = new Wasmer({
   cache: false,
 });
 
 // Read existing entries but do not modify the cache.
-const readOnly = await Wasmer.create({
+const readOnly = new Wasmer({
   cache: {
     directory: ".wasmer",
     readOnly: true,
@@ -148,7 +148,7 @@ The default configuration captures `std::env::current_dir()` once and uses
 ### Browser
 
 ```ts
-const wasmer = await Wasmer.create({
+const client = new Wasmer({
   cache: {
     namespace: "my-editor",
     packages: true,
@@ -408,13 +408,13 @@ successfully compiled command into a guest failure.
 The client exposes inspection and scoped maintenance:
 
 ```ts
-const info = await wasmer.cache.info();
+const info = await client.cache.info();
 
-await wasmer.cache.prune({
+await client.cache.prune({
   maxBytes: 2 * 1024 * 1024 * 1024,
 });
 
-await wasmer.cache.clear({
+await client.cache.clear({
   kind: "compiled",
   target: "wasm32-browser",
 });
@@ -440,7 +440,7 @@ Exact package references can resolve offline when all required package content
 is already cached:
 
 ```ts
-const wasmer = await Wasmer.create({
+const client = new Wasmer({
   registry: { mode: "offline" },
   cache: {
     directory: ".wasmer",

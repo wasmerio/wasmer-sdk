@@ -29,7 +29,9 @@ architectural guarantee, the guarantee wins.
 The SDK has one execution boundary:
 
 ```ts
-await using sandbox = await wasmer.createSandbox({
+const client = new Wasmer();
+
+await using sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
 });
 

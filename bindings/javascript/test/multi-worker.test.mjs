@@ -5,8 +5,8 @@ import { Wasmer } from "../dist/node.js";
 import { nodeWorkerStats } from "../dist/node-worker-adapter.js";
 
 test("runs blocking WASIX processes concurrently on separate workers", async () => {
-  const wasmer = await Wasmer.create();
-  const sandbox = await wasmer.createSandbox({
+  const client = new Wasmer();
+  const sandbox = await client.createSandbox({
     packages: ["python/python@3.12"],
   });
 
@@ -28,6 +28,6 @@ test("runs blocking WASIX processes concurrently on separate workers", async () 
     assert.ok(nodeWorkerStats().workersCreated >= 2);
   } finally {
     await sandbox.close();
-    await wasmer.shutdown();
+    await client.shutdown();
   }
 });

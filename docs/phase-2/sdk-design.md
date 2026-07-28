@@ -47,7 +47,7 @@ The intended feel is **small, explicit, and composable**.
 Small means a developer can remember the common surface:
 
 ```text
-wasmer.createSandbox()
+client.createSandbox()
 sandbox.installPackage(package)
 sandbox.command(command).run()
 sandbox.command(command).spawn()
@@ -70,8 +70,8 @@ primitives rather than special execution paths.
 The first successful program introduces the one object that owns execution:
 
 ```ts
-const wasmer = await Wasmer.create();
-await using sandbox = await wasmer.createSandbox({
+const client = new Wasmer();
+await using sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
 });
 const output = await sandbox
@@ -83,7 +83,7 @@ console.log(output.text());
 The next level should not require relearning the product:
 
 ```ts
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
 });
 
@@ -197,7 +197,7 @@ Code evaluation, a compiler invocation, a CLI transformation, and any other
 independent command use an ordinary sandbox:
 
 ```ts
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
 });
 
@@ -228,7 +228,7 @@ The same sandbox type supports multiple commands, generated files, package
 installation, REPLs, servers, databases, and agent sessions:
 
 ```ts
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   limits: {
     memoryBytes: 512 * 1024 * 1024,
     maxProcesses: 16,
@@ -322,8 +322,8 @@ An explicit command reference resolves packages that export multiple commands
 or disambiguates packages that export the same command name:
 
 ```ts
-const toolbox = await wasmer.loadPackage("namespace/toolbox@1.2.3");
-await using sandbox = await wasmer.createSandbox({
+const toolbox = await client.loadPackage("namespace/toolbox@1.2.3");
+await using sandbox = await client.createSandbox({
   packages: [toolbox],
 });
 
@@ -336,7 +336,7 @@ Selecting a package without an entrypoint fails with
 `PACKAGE_HAS_NO_ENTRYPOINT`; callers never need a non-null assertion:
 
 ```ts
-const edgejs = await wasmer.loadPackage("wasmer/edgejs-quickjs@0.0.3");
+const edgejs = await client.loadPackage("wasmer/edgejs-quickjs@0.0.3");
 await sandbox.command(edgejs, ["main.js"]).run({ check: true });
 ```
 
@@ -371,10 +371,14 @@ implementation syntax.
 
 ```ts
 export class Wasmer implements AsyncDisposable {
+  constructor(options?: WasmerOptions);
+
+  /** Compatibility factory for eager initialization. */
   static create(options?: WasmerOptions): Promise<Wasmer>;
 
   readonly capabilities: Capabilities;
 
+  ready(): Promise<this>;
   loadPackage(source: PackageSource): Promise<Package>;
   preflight(options?: SandboxOptions): Promise<PreflightReport>;
 
@@ -423,12 +427,13 @@ export class Package {
 }
 ```
 
-`Wasmer.create()` absorbs target initialization. There is no required
-side-effectful `init()` call and no singleton that prevents two clients from
-using different registries or caches.
+`new Wasmer()` is synchronous and target initialization is lazy. The first
+asynchronous operation awaits the shared initialization promise, so there is
+no required side-effectful `init()` call. Call `await client.ready()` only when
+eager initialization or early startup-error reporting is useful.
 
 On native desktop and Node.js targets, no configuration uses a project-local
-`.wasmer` cache beneath the working directory captured by `Wasmer.create()`.
+`.wasmer` cache beneath the working directory captured by `new Wasmer()`.
 Package blobs are content-addressed; compiled entries are separated by target
 and engine fingerprint. Browsers use a namespaced IndexedDB-equivalent, and
 iOS uses the application cache container. See the dedicated
@@ -512,7 +517,7 @@ before atomically extending the sandbox's read-only package layers and command
 set:
 
 ```ts
-await using sandbox = await wasmer.createSandbox();
+await using sandbox = await client.createSandbox();
 
 const python = await sandbox.installPackage("python/python@3.12");
 
@@ -560,13 +565,13 @@ Without a configured shell, `sh` and `shell()` fail with
 available:
 
 ```ts
-await using sandbox = await wasmer.createSandbox();
+await using sandbox = await client.createSandbox();
 ```
 
 Documentation also shows universally compatible deterministic cleanup:
 
 ```ts
-const sandbox = await wasmer.createSandbox();
+const sandbox = await client.createSandbox();
 try {
   // ...
 } finally {
@@ -775,7 +780,7 @@ paths and paths relative to `/workspace`, normalize them predictably, and
 report the resolved guest path in errors.
 
 ```ts
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   files: {
     "main.py": "print('hello')",          // /workspace/main.py
     "/etc/app/config.json": "{}",         // remains absolute
@@ -899,7 +904,7 @@ const project = await BrowserFileSystem.fromDirectoryHandle(handle, {
   access: "read-write",
 });
 
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
   mounts: [{
     guest: "/project",
@@ -1011,7 +1016,7 @@ It combines target capabilities with every package requirement, mount, and
 requested policy:
 
 ```ts
-const report = await wasmer.preflight({
+const report = await client.preflight({
   packages: ["namespace/postgres@<tested-pin>"],
   network: { mode: "disabled" },
   limits: { memoryBytes: 512 * 1024 * 1024 },
@@ -1383,8 +1388,8 @@ The concepts line up while each language keeps its native shape:
 
 | Concept | Rust | JavaScript | Python veneer | Swift veneer |
 | --- | --- | --- | --- | --- |
-| Configure client | `Wasmer::new(config)` | `await Wasmer.create(options)` | `Wasmer(config)` / async open | `try await Wasmer(options:)` |
-| Create sandbox | `wasmer.sandbox().start()` | `wasmer.createSandbox()` | `wasmer.create_sandbox()` | `wasmer.createSandbox()` |
+| Configure client | `Wasmer::new(config)` | `new Wasmer(options)` | `Wasmer(config)` / async open | `try await Wasmer(options:)` |
+| Create sandbox | `wasmer.sandbox().start()` | `client.createSandbox()` | `client.create_sandbox()` | `client.createSandbox()` |
 | Install package | `sandbox.install_package(source)` | `sandbox.installPackage(source)` | `sandbox.install_package(source)` | `sandbox.installPackage(source:)` |
 | Captured command | `sandbox.command(cmd).output()` | `sandbox.command(cmd, args, options).run()` | `sandbox.command(cmd, args=[...]).run()` | `sandbox.command(cmd, args:, options:).run()` |
 | Live command | `sandbox.command(cmd).spawn()` | `sandbox.command(cmd, args, options).spawn()` | `sandbox.command(cmd, args=[...]).spawn()` | `sandbox.command(cmd, args:, options:).spawn()` |
@@ -1443,7 +1448,7 @@ JavaScript:
 
 ```ts
 try {
-  await wasmer.createSandbox({
+  await client.createSandbox({
     network: {
       mode: "restricted",
       allow: [{ host: "api.example.com", port: 443 }],
@@ -1533,7 +1538,7 @@ API.
 Running Python is package execution:
 
 ```ts
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
 });
 await sandbox
@@ -1544,10 +1549,10 @@ await sandbox
 Running JavaScript through EdgeJS QuickJS is the same:
 
 ```ts
-const edgejs = await wasmer.loadPackage(
+const edgejs = await client.loadPackage(
   "wasmer/edgejs-quickjs@0.0.3",
 );
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   packages: [edgejs],
   files: {
     "main.js": "console.log('hello')",
@@ -1635,8 +1640,8 @@ const output = await instance.wait();
 Proposed sandbox-scoped style:
 
 ```ts
-const wasmer = await Wasmer.create();
-await using sandbox = await wasmer.createSandbox({
+const client = new Wasmer();
+await using sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
 });
 const output = await sandbox
@@ -1647,9 +1652,9 @@ const output = await sandbox
 For callers that need package inspection, the mapping remains direct:
 
 ```ts
-const pkg = await wasmer.loadPackage("namespace/toolbox@1.2.3");
+const pkg = await client.loadPackage("namespace/toolbox@1.2.3");
 const command = pkg.command("format");
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   packages: [pkg],
   files: { "main.txt": "source" },
 });

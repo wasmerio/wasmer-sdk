@@ -17,9 +17,9 @@ test(
   async () => {
     const port = await reservePort();
     const packageBytes = await readFile(packagePath);
-    const wasmer = await Wasmer.create({ outputBytes: 256 * 1024 });
-    const postgres = await wasmer.loadPackage(packageBytes);
-    const sandbox = await wasmer.createSandbox({
+    const client = new Wasmer({ outputBytes: 256 * 1024 });
+    const postgres = await client.loadPackage(packageBytes);
+    const sandbox = await client.createSandbox({
       packages: [postgres],
       network: true,
     });
@@ -100,7 +100,7 @@ test(
     } finally {
       await Promise.allSettled([consumeStderr, consumeStdout]);
       await sandbox.close();
-      await wasmer.shutdown();
+      await client.shutdown();
     }
   },
 );

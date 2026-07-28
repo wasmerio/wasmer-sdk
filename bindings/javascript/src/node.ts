@@ -16,27 +16,36 @@ import {
 
 export * from "./index.js";
 
+let nodeInitialization: Promise<void> | undefined;
+
 /**
  * Node entrypoint. WASIX TCP listeners, outbound TCP connections, and DNS are
  * backed directly by `node:net` and `node:dns`; no native addon is involved.
  */
 export class Wasmer extends BrowserWasmer {
-  static override async create(options: WasmerOptions = {}): Promise<Wasmer> {
-    const wasm =
-      options.wasm ??
-      (await readFile(
-        new URL("../pkg/wasmer_sdk_js_bg.wasm", import.meta.url),
-      ));
-    await init({ module_or_path: wasm as never });
+  protected static override async initializeCore(
+    options: WasmerOptions,
+  ): Promise<core.WasmerCore> {
+    nodeInitialization ??= (async () => {
+      const wasm =
+        options.wasm ??
+        (await readFile(
+          new URL("../pkg/wasmer_sdk_js_bg.wasm", import.meta.url),
+        ));
+      await init({ module_or_path: wasm as never });
+    })()
+      .catch((error: unknown) => {
+        nodeInitialization = undefined;
+        throw error;
+      });
+    await nodeInitialization;
     const network = new NodeNetworkBridge();
     installNodeNetworkGlobals(network);
     configureNodeWorkerBridge(network);
     installNodeWorkers();
-    return new Wasmer(
-      core.WasmerCore.create(
-        { outputBytes: options.outputBytes },
-        network,
-      ),
+    return core.WasmerCore.create(
+      { outputBytes: options.outputBytes },
+      network,
     );
   }
 }

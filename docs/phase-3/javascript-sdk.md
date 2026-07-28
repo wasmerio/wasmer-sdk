@@ -29,7 +29,7 @@ workers instead of parking the main agent.
 Workers instantiate the same compiled SDK module with the same
 `WebAssembly.Memory`. Scheduler messages structured-clone compiled guest
 modules and guest memories where needed, while boxed Rust callbacks are
-addressed through the shared linear memory. `wasmer.shutdown()` closes the
+addressed through the shared linear memory. `client.shutdown()` closes the
 scheduler and terminates both idle and busy workers.
 
 Browser deployments must be cross-origin isolated so `SharedArrayBuffer` is
@@ -60,11 +60,18 @@ separate `node:dgram` adapter is implemented.
 
 ## Public API
 
+Construction is synchronous. Runtime initialization starts on the first
+asynchronous operation and is shared by all operations on that client. Use
+`await client.ready()` when initialization errors should surface eagerly.
+`await Wasmer.create(options)` remains as a compatibility factory.
+`await using` remains an optional cleanup convenience, not the canonical
+construction syntax.
+
 ```ts
 import { Wasmer } from "@wasmer/sdk/node";
 
-await using wasmer = await Wasmer.create();
-await using sandbox = await wasmer.createSandbox({
+const client = new Wasmer();
+const sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
   files: { "main.py": "print('hello')" },
 });
@@ -74,6 +81,9 @@ const output = await sandbox
   .run({ check: true });
 
 console.log(output.text());
+
+await sandbox.close();
+await client.shutdown();
 ```
 
 Live processes use the same command:
@@ -95,9 +105,9 @@ Local packages are passed as bytes because a browser has no ambient host path:
 
 ```ts
 const webc = new Uint8Array(await file.arrayBuffer());
-const localPackage = await wasmer.loadPackage(webc);
+const localPackage = await client.loadPackage(webc);
 
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   packages: [localPackage],
 });
 

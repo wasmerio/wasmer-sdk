@@ -32,33 +32,65 @@ export interface RunOptions {
   check?: boolean;
 }
 
-export class Wasmer {
-  readonly #core: WasmerCore;
+let browserInitialization: Promise<void> | undefined;
 
-  protected constructor(core: WasmerCore) {
-    this.#core = core;
+export class Wasmer {
+  readonly #options: WasmerOptions;
+  #core: Promise<WasmerCore> | undefined;
+
+  constructor(options: WasmerOptions = {}) {
+    this.#options = options;
   }
 
-  static async create(options: WasmerOptions = {}): Promise<Wasmer> {
-    await init(
+  /**
+   * Compatibility factory for callers that want initialization errors before
+   * receiving the client. New code should prefer `new Wasmer(options)`.
+   */
+  static async create<T extends Wasmer>(
+    this: new (options?: WasmerOptions) => T,
+    options: WasmerOptions = {},
+  ): Promise<T> {
+    const wasmer = new this(options);
+    await wasmer.ready();
+    return wasmer;
+  }
+
+  protected static async initializeCore(
+    options: WasmerOptions,
+  ): Promise<WasmerCore> {
+    browserInitialization ??= init(
       options.wasm === undefined
         ? undefined
         : { module_or_path: options.wasm as never },
-    );
-    return new Wasmer(WasmerCore.create({ outputBytes: options.outputBytes }));
+    )
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        browserInitialization = undefined;
+        throw error;
+      });
+    await browserInitialization;
+    return WasmerCore.create({ outputBytes: options.outputBytes });
+  }
+
+  /** Wait for the target runtime to finish initializing. */
+  async ready(): Promise<this> {
+    await this.getCore();
+    return this;
   }
 
   /** Resolve a registry package or decode in-memory WEBC bytes. */
   async loadPackage(source: string | Uint8Array): Promise<Package> {
+    const client = await this.getCore();
     const core =
       typeof source === "string"
-        ? await this.#core.loadPackage(source)
-        : await this.#core.loadPackageBytes(source);
+        ? await client.loadPackage(source)
+        : await client.loadPackageBytes(source);
     return new Package(core);
   }
 
   async createSandbox(options: SandboxOptions = {}): Promise<Sandbox> {
-    const builder = this.#core.sandbox();
+    const client = await this.getCore();
+    const builder = client.sandbox();
     for (const source of options.packages ?? []) {
       const pkg = source instanceof Package ? source : await this.loadPackage(source);
       builder.package(pkg.core);
@@ -71,11 +103,18 @@ export class Wasmer {
   }
 
   async shutdown(): Promise<void> {
-    await this.#core.shutdown();
+    if (!this.#core) return;
+    const client = await this.#core;
+    await client.shutdown();
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
     await this.shutdown();
+  }
+
+  private getCore(): Promise<WasmerCore> {
+    const implementation = this.constructor as typeof Wasmer;
+    return (this.#core ??= implementation.initializeCore(this.#options));
   }
 }
 

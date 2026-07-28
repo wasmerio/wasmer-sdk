@@ -11,9 +11,9 @@ const serverSource = await readFile(
 
 test("serves HTTP from EdgeJS QuickJS through the Node network bridge", async () => {
   const port = await reservePort();
-  const wasmer = await Wasmer.create();
-  const edgejs = await wasmer.loadPackage("wasmer/edgejs-quickjs");
-  const sandbox = await wasmer.createSandbox({
+  const client = new Wasmer();
+  const edgejs = await client.loadPackage("wasmer/edgejs-quickjs");
+  const sandbox = await client.createSandbox({
     packages: [edgejs],
     files: { "server.js": serverSource },
     network: true,
@@ -33,7 +33,7 @@ test("serves HTTP from EdgeJS QuickJS through the Node network bridge", async ()
     await process.kill();
     await process.wait();
     await sandbox.close();
-    await wasmer.shutdown();
+    await client.shutdown();
   }
 });
 

@@ -1,7 +1,7 @@
 import { Wasmer } from "@wasmer/sdk/node";
 
-await using wasmer = await Wasmer.create();
-await using sandbox = await wasmer.createSandbox({
+const client = new Wasmer();
+const sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
 });
 
@@ -10,3 +10,6 @@ const output = await sandbox
   .run({ check: true });
 
 console.log(output.text());
+
+await sandbox.close();
+await client.shutdown();

@@ -8,7 +8,7 @@ Last updated: 2026-07-27
 Should the universal Wasmer SDK expose a top-level operation like this?
 
 ```ts
-await wasmer.run("python/python@3.12", {
+await client.run("python/python@3.12", {
   args: ["-c", "print('hello')"],
 });
 ```
@@ -28,7 +28,7 @@ The conclusion is:
 The short path remains short:
 
 ```ts
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
 });
 
@@ -440,7 +440,7 @@ Avoid copying:
 With the earlier proposal:
 
 ```ts
-wasmer.run(packageSource, options);
+client.run(packageSource, options);
 sandbox.run(command, options);
 ```
 
@@ -450,8 +450,8 @@ Adding a `CommandRef` overload blurs the distinction further.
 With the revised proposal:
 
 ```ts
-wasmer.loadPackage(source);
-wasmer.createSandbox(options);
+client.loadPackage(source);
+client.createSandbox(options);
 sandbox.command(command, args, options).run();
 ```
 
@@ -493,7 +493,7 @@ The explicit line communicates that execution creates an isolated environment
 with a lifecycle:
 
 ```ts
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
 });
 ```
@@ -506,9 +506,9 @@ belong.
 ### 10.1 JavaScript
 
 ```ts
-const wasmer = await Wasmer.create();
+const client = new Wasmer();
 
-await using sandbox = await wasmer.createSandbox({
+await using sandbox = await client.createSandbox({
   packages: ["python/python@3.12"],
   files: {
     "main.py": "print(sum(range(10)))",
@@ -659,12 +659,12 @@ stateful contexts, rich displays, charts, dependency setup, and language-aware
 errors. That is a useful recipe or separate package:
 
 ```ts
-const python = await PythonSession.create(wasmer, options);
+const python = await PythonSession.create(client, options);
 const result = await python.evaluate(code);
 ```
 
 It should be built from `Sandbox`, `Process`, `FileSystem`, and Wasmer
-packages, not added as `wasmer.runCode()`.
+packages, not added as `client.runCode()`.
 
 ### 11.6 Let a live sandbox acquire Wasmer packages
 
