@@ -9,11 +9,19 @@ mod command;
 mod error;
 mod fs;
 mod package;
+mod process;
+mod provider_fs;
 mod sandbox;
+mod stream;
 
 pub use client::{CacheConfig, Wasmer, WasmerConfig};
-pub use command::{CapturedOutput, Command, ExitStatus, Output};
+pub use command::{CapturedOutput, Command, ExitStatus, Output, Stdio};
 pub use error::{Error, ProcessExitError, Result};
 pub use fs::SandboxFileSystem;
 pub use package::{CommandRef, CommandSelector, Package, PackageSource};
-pub use sandbox::{Sandbox, SandboxBuilder};
+pub use process::{Process, ProcessStderr, ProcessStdin, ProcessStdout};
+pub use provider_fs::{
+    Directory, DirectoryEntry, File, FileMetadata, FileOpenOptions, FileSystem,
+    FileSystemCapabilities, FileType, FsError, FsResult, MountMode, RelativePath,
+};
+pub use sandbox::{NetworkPolicy, Sandbox, SandboxBuilder};

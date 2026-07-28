@@ -9,12 +9,14 @@ repository = "https://github.com/wasmerio/wasmer-sdk"
 
 [features]
 default = ["sys"]
-sys = ["wasmer/cranelift", "wasmer-wasix/sys-default"]
+sys = ["virtual-fs/host-fs", "wasmer/cranelift", "wasmer-wasix/sys-default"]
 js = ["wasmer-wasix/js", "virtual-fs/js"]
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 bytes = "1.11"
+futures = "0.3"
 thiserror = "2.0"
 tokio = { version = "1.49", features = ["fs", "io-util", "macros", "rt", "rt-multi-thread", "sync", "time"] }
 virtual-fs = { version = "=0.702.0", default-features = false }
@@ -22,6 +24,8 @@ wasmer = { version = "=7.2.0", default-features = false }
 wasmer-config = "=0.702.0"
 wasmer-package = "=0.702.0"
 wasmer-wasix = { version = "=0.702.0", default-features = false }
+wasmer-wasix-types = "=0.702.0"
+webc = "=12.0.0"
 
 [dev-dependencies]
 tempfile = "3.23"

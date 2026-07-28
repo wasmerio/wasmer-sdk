@@ -1,0 +1,168 @@
+--- a/src/backend/tcop/postgres.c
++++ b/src/backend/tcop/postgres.c
+@@ -162,6 +162,9 @@ static volatile bool send_ready_for_query = true;
+ static volatile bool send_ready_for_query = true;
+ static volatile bool idle_in_transaction_timeout_enabled = false;
+ static volatile bool idle_session_timeout_enabled = false;
++#ifdef OLIPHAUNT_WASM_SINGLE_USER
++static bool oliphaunt_wasix_socket_client_active = false;
++#endif
+ 
+ /*
+  * If an unnamed prepared statement exists, it's stored here.
+@@ -188,6 +191,8 @@ static volatile bool idle_session_timeout_enabled = false;
+ #define OLIPHAUNT_WASM_HOST_EXPORT(name) __attribute__((export_name(name)))
+ 
+ extern volatile int is_oliphaunt_active;
++extern int ProcessStartupPacket(Port *port, bool ssl_done, bool gss_done);
++void		oliphaunt_wasix_send_conn_data(void);
+ 
+ static OliphauntWasmHostIO oliphaunt_wasix_protocol_io =
+ {
+@@ -223,6 +228,95 @@ oliphaunt_wasix_init_protocol_port(void)
+ 	MyProcPort->remote_host = MemoryContextStrdup(TopMemoryContext, "127.0.0.1");
+ 	MyProcPort->remote_port = MemoryContextStrdup(TopMemoryContext, "5432");
+ 	MemoryContextSwitchTo(oldcontext);
++}
++
++/*
++ * Serve one PostgreSQL frontend directly from a WASIX TCP socket.
++ *
++ * This deliberately preserves the embedded one-backend execution model.  The
++ * socket is created, bound, listened on, and accepted by the guest process;
++ * there is no native protocol proxy.  Set OLIPHAUNT_WASIX_SOCKET_PORT to opt
++ * into this command-mode entrypoint.
++ */
++static void
++oliphaunt_wasix_accept_socket_client(void)
++{
++	const char *port_text = getenv("OLIPHAUNT_WASIX_SOCKET_PORT");
++	char	   *port_end = NULL;
++	long		port_number;
++	int			server_fd;
++	int			reuse = 1;
++	struct sockaddr_in bind_addr;
++	ClientSocket client_sock;
++
++	if (port_text == NULL || port_text[0] == '\0')
++		return;
++
++	errno = 0;
++	port_number = strtol(port_text, &port_end, 10);
++	if (errno != 0 || port_end == port_text || *port_end != '\0' ||
++		port_number < 1 || port_number > 65535)
++		ereport(FATAL,
++				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++				 errmsg("invalid OLIPHAUNT_WASIX_SOCKET_PORT: \"%s\"",
++						port_text)));
++
++	server_fd = socket(AF_INET, SOCK_STREAM, 0);
++	if (server_fd == PGINVALID_SOCKET)
++		ereport(FATAL,
++				(errcode_for_socket_access(),
++				 errmsg("could not create WASIX server socket: %m")));
++
++	(void) setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR,
++					  (char *) &reuse, sizeof(reuse));
++
++	memset(&bind_addr, 0, sizeof(bind_addr));
++	bind_addr.sin_family = AF_INET;
++	bind_addr.sin_port = htons((unsigned short) port_number);
++	bind_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++
++	if (bind(server_fd, (struct sockaddr *) &bind_addr, sizeof(bind_addr)) < 0)
++		ereport(FATAL,
++				(errcode_for_socket_access(),
++				 errmsg("could not bind WASIX server socket on port %ld: %m",
++						port_number)));
++	if (listen(server_fd, 1) < 0)
++		ereport(FATAL,
++				(errcode_for_socket_access(),
++				 errmsg("could not listen on WASIX server socket: %m")));
++
++	fprintf(stderr, "OLIPHAUNT_WASIX_SOCKET_READY %ld\n", port_number);
++	fflush(stderr);
++
++	memset(&client_sock, 0, sizeof(client_sock));
++	if (AcceptConnection(server_fd, &client_sock) != STATUS_OK)
++		ereport(FATAL,
++				(errcode_for_socket_access(),
++				 errmsg("could not accept WASIX PostgreSQL client")));
++	close(server_fd);
++
++	/*
++	 * pq_init() must see the true standalone state so it does not register a
++	 * nonexistent postmaster-death event.  Startup options and the normal
++	 * protocol loop then use the same backend-shaped flags as the embedded
++	 * host API.
++	 */
++	IsUnderPostmaster = false;
++	MyProcPort = pq_init(&client_sock);
++	MyProcPort->oliphaunt_wasix_io = NULL;
++	IsPostmasterEnvironment = true;
++	IsUnderPostmaster = true;
++	MyBackendType = B_BACKEND;
++	whereToSendOutput = DestRemote;
++	ExitOnAnyError = false;
++
++	if (ProcessStartupPacket(MyProcPort, false, false) != STATUS_OK)
++		proc_exit(0);
++
++	oliphaunt_wasix_send_conn_data();
++	pq_flush();
++	send_ready_for_query = false;
++	oliphaunt_wasix_socket_client_active = true;
+ }
+ 
+ OLIPHAUNT_WASM_HOST_EXPORT("oliphaunt_wasix_start") void
+@@ -267,9 +361,20 @@ oliphaunt_wasix_send_conn_data(void)
+ 		len = (MyProcPort == NULL || MyProcPort->proto >= PG_PROTOCOL(3, 2))
+ 			? MAX_CANCEL_KEY_LENGTH : 4;
+ 		if (!pg_strong_random(&MyCancelKey, len))
+-			ereport(ERROR,
+-					(errcode(ERRCODE_INTERNAL_ERROR),
+-					 errmsg("could not generate random cancel key")));
++		{
++			/*
++			 * Command-mode WASIX serves exactly one local connection and has
++			 * no postmaster cancel router.  Some package-root mounts also do
++			 * not expose /dev/urandom.  Advertise an inert key in that mode;
++			 * the normal embedded host API keeps requiring strong entropy.
++			 */
++			if (getenv("OLIPHAUNT_WASIX_SOCKET_PORT") != NULL)
++				memset(&MyCancelKey, 0, len);
++			else
++				ereport(ERROR,
++						(errcode(ERRCODE_INTERNAL_ERROR),
++						 errmsg("could not generate random cancel key")));
++		}
+ 		MyCancelKeyLength = len;
+ 	}
+ 
+@@ -5249,6 +5354,13 @@ PostgresMain(const char *dbname, const char *username)
+ 	MemoryContextSwitchTo(row_description_context);
+ 	initStringInfo(&row_description_buf);
+ 	MemoryContextSwitchTo(TopMemoryContext);
++
++	/*
++	 * A command-mode WASIX build can expose this already-initialized backend
++	 * through a real guest-owned TCP listener before entering the normal
++	 * frontend/backend protocol loop.
++	 */
++	oliphaunt_wasix_accept_socket_client();
+ 
+ 	/* Fire any defined login event triggers, if appropriate */
+ 	EventTriggerOnLogin();
+@@ -5291,7 +5403,11 @@ PostgresMain(const char *dbname, const char *username)
+ 	PG_exception_stack = &local_sigjmp_buf;
+ #endif
+ 
+-	if (!ignore_till_sync)
++	if (!ignore_till_sync
++#ifdef OLIPHAUNT_WASM_SINGLE_USER
++		&& !oliphaunt_wasix_socket_client_active
++#endif
++		)
+ 		send_ready_for_query = true;	/* initially, or after error */
+ 
+ 	/*

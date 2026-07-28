@@ -1,4 +1,4 @@
-use std::{path::PathBuf, string::FromUtf8Error};
+use std::{io, path::PathBuf, string::FromUtf8Error};
 
 use thiserror::Error;
 
@@ -44,6 +44,9 @@ pub enum Error {
         packages: Vec<String>,
     },
 
+    #[error("capability `{capability}` is unavailable on this target")]
+    CapabilityUnavailable { capability: &'static str },
+
     #[error("invalid guest path `{path}`: {message}")]
     InvalidGuestPath { path: PathBuf, message: String },
 
@@ -62,6 +65,12 @@ pub enum Error {
 
     #[error("internal SDK state is unavailable: {message}")]
     InternalState { message: String },
+
+    #[error(transparent)]
+    ExternalFileSystem(#[from] crate::FsError),
+
+    #[error("stream I/O failed")]
+    Io(#[from] io::Error),
 
     #[error(transparent)]
     ProcessExit(#[from] ProcessExitError),

@@ -4342,7 +4342,9 @@ name = "wasmer-sdk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes",
+ "futures",
  "tempfile",
  "thiserror",
  "tokio",
@@ -4351,7 +4353,9 @@ dependencies = [
  "wasmer-config",
  "wasmer-package",
  "wasmer-wasix",
+ "wasmer-wasix-types",
  "wat",
+ "webc",
 ]
 
 [[package]]

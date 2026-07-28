@@ -21,7 +21,8 @@ validating that contract with executable vertical slices.
 The workspace now contains the `wasmer-sdk` crate. Its first native slice can
 load registry packages, local WEBC files, in-memory WEBC bytes, or local
 package directories; create a persistent sandbox workspace; install packages
-after creation; and execute captured commands:
+after creation; execute captured or live commands; terminate processes; and
+mount external filesystem providers:
 
 ```rust
 use wasmer_sdk::{PackageSource, Result, Wasmer, WasmerConfig};
@@ -47,8 +48,64 @@ async fn main() -> Result<()> {
 }
 ```
 
+Live process I/O uses Tokio's standard traits:
+
+```rust
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use wasmer_sdk::Stdio;
+
+let mut process = sandbox
+    .command("my-command")
+    .stdin(Stdio::Piped)
+    .spawn()
+    .await?;
+
+let mut stdin = process.take_stdin().expect("piped stdin");
+let mut stdout = process.take_stdout().expect("piped stdout");
+
+stdin.write_all(b"hello\n").await?;
+stdin.close().await?;
+
+let mut bytes = Vec::new();
+stdout.read_to_end(&mut bytes).await?;
+let output = process.wait().await?;
+```
+
+External filesystems are explicit capabilities:
+
+```rust
+use std::sync::Arc;
+use wasmer_sdk::{Directory, FileSystem, MountMode};
+
+let project = Directory::new();
+project.write_text("input.txt", "hello").await?;
+
+let provider: Arc<dyn FileSystem> = Arc::new(project);
+let sandbox = wasmer
+    .sandbox()
+    .mount("/project", provider, MountMode::ReadOnly)
+    .start()
+    .await?;
+```
+
 Run the network-free local-package proof with:
 
 ```console
-cargo test --test local_package
+cargo test --all-targets
 ```
+
+The PostgreSQL 18 WASIX proof starts a rebuilt single-backend PostgreSQL
+command through this SDK. The guest owns the loopback TCP socket, and a
+separately installed standard `psql` connects directly to it:
+
+```console
+cargo run --example postgres_wasix_psql -- \
+  <postgres-wasix-module> \
+  <oliphaunt-runtime-root> \
+  <initialized-pgdata> \
+  <psql>
+```
+
+There is no native server or PostgreSQL protocol proxy in that path. See
+[the PostgreSQL WASIX proof](docs/phase-3/postgres-wasix.md) for the source
+patch, exact artifact layout, and locally verified command.

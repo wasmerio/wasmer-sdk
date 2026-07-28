@@ -23,6 +23,16 @@ impl CaptureHandle {
             self.truncated.load(Ordering::Acquire),
         )
     }
+
+    pub(crate) fn retain(&self, bytes: &[u8], limit: usize) {
+        let mut retained = self.bytes.lock().expect("capture lock poisoned");
+        let available = limit.saturating_sub(retained.len());
+        let amount = available.min(bytes.len());
+        retained.extend_from_slice(&bytes[..amount]);
+        if amount < bytes.len() {
+            self.truncated.store(true, Ordering::Release);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -55,13 +65,7 @@ impl AsyncWrite for BoundedCapture {
         _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        let mut bytes = self.handle.bytes.lock().expect("capture lock poisoned");
-        let available = self.limit.saturating_sub(bytes.len());
-        let retained = available.min(buf.len());
-        bytes.extend_from_slice(&buf[..retained]);
-        if retained < buf.len() {
-            self.handle.truncated.store(true, Ordering::Release);
-        }
+        self.handle.retain(buf, self.limit);
         Poll::Ready(Ok(buf.len()))
     }
 
