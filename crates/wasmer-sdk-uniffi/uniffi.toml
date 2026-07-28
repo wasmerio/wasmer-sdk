@@ -1,0 +1,2 @@
+[bindings.python]
+cdylib_name = "wasmer_sdk_uniffi"

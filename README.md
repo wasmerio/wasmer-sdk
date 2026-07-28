@@ -10,7 +10,7 @@ The work is intentionally split into three phases:
 | --- | --- | --- |
 | 1. Architecture | Complete (draft for review) | [Architecture](docs/phase-1/architecture.md) and [decision log](docs/phase-1/decisions.md) |
 | 2. SDK and developer experience | Complete (draft for review) | [SDK design and migration](docs/phase-2/sdk-design.md), [sandbox SDK comparison](docs/phase-2/sandbox-sdk-comparison.md), [cache design](docs/phase-2/cache-design.md), [examples](docs/phase-2/examples.md), and [decision log](docs/phase-2/decisions.md) |
-| 3. Implementation and proofs of concept | In progress | [Rust implementation status](docs/phase-3/rust-sdk.md), followed by browser, Node.js, Python, and Swift proofs of concept |
+| 3. Implementation and proofs of concept | In progress | [Rust](docs/phase-3/rust-sdk.md), [JavaScript](docs/phase-3/javascript-sdk.md), and [Python](docs/phase-3/python-sdk.md) implementation status, followed by Swift proofs of concept |
 
 Phase 1 defines the system boundaries and feasibility constraints. Phase 2
 defines the proposed public API and developer experience. Phase 3 is now
@@ -125,6 +125,39 @@ cargo run --example edgejs_http
 
 Its JavaScript source is in
 [`examples/edgejs-http/server.js`](examples/edgejs-http/server.js).
+
+## Python SDK
+
+The Python SDK uses a generated UniFFI module internally and presents a
+handwritten async API with the same package, sandbox, command, process, output,
+filesystem, and ports model:
+
+```python
+from wasmer_sdk import Wasmer
+
+async with Wasmer() as client:
+    async with await client.create_sandbox(
+        packages=["python/python@3.12"],
+        files={"main.py": "print(sum(n * n for n in range(10)))"},
+    ) as sandbox:
+        output = await sandbox.command(
+            "python", ["/workspace/main.py"]
+        ).run(check=True, timeout=10)
+        print(output.text())
+```
+
+Build the development package and run its integration tests with:
+
+```console
+python3 bindings/python/scripts/build.py
+PYTHONPATH=bindings/python \
+  python3 -m unittest bindings/python/tests/test_runtime.py -v
+```
+
+Use `pathlib.Path` for a local package path and `bytes` for an in-memory WEBC;
+plain strings are registry package specifiers. See
+[the Python implementation notes](docs/phase-3/python-sdk.md) for the complete
+surface and packaging status.
 
 ## JavaScript SDK
 

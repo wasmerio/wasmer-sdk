@@ -2,7 +2,7 @@
 
 Status: native package, process, stream, and external-filesystem slices.
 
-This phase implements the semantic Rust core before adding UniFFI and
+This phase implements the semantic Rust core beneath the UniFFI and
 `wasm-bindgen` veneers. The crate is named `wasmer-sdk` and imported as
 `wasmer_sdk`.
 
@@ -92,7 +92,7 @@ vertical slices rather than placeholder methods:
 - package download deduplication and cache locking across OS processes;
 - cache inspection, pruning, and integrity maintenance;
 - browser runtime construction and the browser File System API adapter;
-- UniFFI and `wasm-bindgen` language veneers.
+- Swift packaging and its handwritten veneer.
 
 Live streams deliberately do not use WASIX's existing unbounded pipe. Tokio
 duplex buffers impose a configurable queue bound and backpressure, while a

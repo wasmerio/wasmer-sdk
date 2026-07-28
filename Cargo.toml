@@ -8,7 +8,7 @@ license = "MIT"
 repository = "https://github.com/wasmerio/wasmer-sdk"
 
 [workspace]
-members = [".", "crates/wasmer-sdk-js"]
+members = [".", "crates/wasmer-sdk-js", "crates/wasmer-sdk-uniffi"]
 default-members = ["."]
 resolver = "2"
 

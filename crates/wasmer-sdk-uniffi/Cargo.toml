@@ -1,0 +1,31 @@
+[package]
+name = "wasmer-sdk-uniffi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+description = "UniFFI facade for wasmer-sdk"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen-cli"]
+
+[features]
+bindgen-cli = ["uniffi/cli"]
+
+[dependencies]
+tokio = { version = "1.49", features = ["io-util", "rt-multi-thread", "sync"] }
+uniffi = "0.32.0"
+wasmer-sdk = { path = "../.." }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

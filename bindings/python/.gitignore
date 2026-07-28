@@ -1,0 +1,8 @@
+/wasmer_sdk/_native.py
+/wasmer_sdk/libwasmer_sdk_uniffi.dylib
+/wasmer_sdk/libwasmer_sdk_uniffi.so
+/wasmer_sdk/wasmer_sdk_uniffi.dll
+/build/
+/dist/
+/*.egg-info/
+/**/__pycache__/
