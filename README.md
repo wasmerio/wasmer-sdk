@@ -129,21 +129,21 @@ Its JavaScript source is in
 ## Python SDK
 
 The Python SDK uses a generated UniFFI module internally and presents a
-handwritten async API with the same package, sandbox, command, process, output,
-filesystem, and ports model:
+synchronously constructed client with the same asynchronous package, sandbox,
+command, process, output, filesystem, and ports model:
 
 ```python
 from wasmer_sdk import Wasmer
 
-async with Wasmer() as client:
-    async with await client.create_sandbox(
-        packages=["python/python@3.12"],
-        files={"main.py": "print(sum(n * n for n in range(10)))"},
-    ) as sandbox:
-        output = await sandbox.command(
-            "python", ["/workspace/main.py"]
-        ).run(check=True, timeout=10)
-        print(output.text())
+client = Wasmer()
+sandbox = await client.create_sandbox(
+    packages=["python/python@3.12"],
+    files={"main.py": "print(sum(n * n for n in range(10)))"},
+)
+output = await sandbox.command(
+    "python", ["/workspace/main.py"]
+).run(check=True, timeout=10)
+print(output.text())
 ```
 
 Build the development package and run its integration tests with:
@@ -151,7 +151,7 @@ Build the development package and run its integration tests with:
 ```console
 python3 bindings/python/scripts/build.py
 PYTHONPATH=bindings/python \
-  python3 -m unittest bindings/python/tests/test_runtime.py -v
+  python3 -m unittest discover -s bindings/python/tests -v
 ```
 
 Use `pathlib.Path` for a local package path and `bytes` for an in-memory WEBC;

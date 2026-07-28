@@ -35,17 +35,22 @@ Construction is synchronous; operations that can perform I/O are asynchronous:
 ```python
 from wasmer_sdk import Wasmer
 
-async with Wasmer(cache_root=".wasmer") as client:
-    async with await client.create_sandbox(
-        packages=["python/python@3.12"],
-        files={"main.py": "print('hello')"},
-        env={"APP_ENV": "test"},
-    ) as sandbox:
-        output = await sandbox.command(
-            "python", ["/workspace/main.py"]
-        ).run(check=True, timeout=10)
-        print(output.text())
+client = Wasmer(cache_root=".wasmer")
+sandbox = await client.create_sandbox(
+    packages=["python/python@3.12"],
+    files={"main.py": "print('hello')"},
+    env={"APP_ENV": "test"},
+)
+output = await sandbox.command(
+    "python", ["/workspace/main.py"]
+).run(check=True, timeout=10)
+print(output.text())
 ```
+
+There is no `await Wasmer(...)`. `async with Wasmer(...)` remains available as
+optional deterministic-cleanup sugar for long-lived applications and tests,
+but it does not make construction asynchronous. `await client.close()` is
+likewise optional when deterministic cleanup matters.
 
 Package sources have unambiguous Python types:
 
@@ -133,10 +138,10 @@ Use `--release` for the optimized artifact intended for packaging. Run:
 
 ```console
 PYTHONPATH=bindings/python \
-  python3 -m unittest bindings/python/tests/test_runtime.py -v
+  python3 -m unittest discover -s bindings/python/tests -v
 ```
 
-The executable test loads `python/python@3.12` and verifies:
+The runtime suite loads `python/python@3.12` and verifies:
 
 - captured checked execution;
 - reusable commands;
@@ -146,6 +151,21 @@ The executable test loads `python/python@3.12` and verifies:
 - checked nonzero exits, timeout classification, and termination;
 - dynamic package installation; and
 - Python-side numeric validation.
+
+The Edge.js HTTP regression runs by default. PostgreSQL is opt-in because its
+rebuilt package and initialized database are local build artifacts:
+
+```console
+WASMER_POSTGRES_PACKAGE=/absolute/path/postgres.webc \
+PSQL=/absolute/path/psql \
+PYTHONPATH=bindings/python \
+  python3 -m unittest \
+    bindings.python.tests.test_postgres_psql -v
+```
+
+`WASMER_POSTGRES_WEBC`, used by the JavaScript test, is accepted as an alias.
+The package must embed the rebuilt socket-enabled module, runtime root, and
+initialized `PGDATA`.
 
 The macOS development cdylib exposed an invalid compact-unwind base calculation
 in the linked Wasmer checkout: JIT functions and their personality GOT slot can
