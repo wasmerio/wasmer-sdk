@@ -1402,7 +1402,7 @@ exceptions, and stream adapters.
 
 ## 9. Errors
 
-All SDK errors carry:
+The intended v1 error contract gives all SDK errors:
 
 - a stable code;
 - the failed operation;
@@ -1411,13 +1411,21 @@ All SDK errors carry:
 - an optional cause chain;
 - sandbox, process, package, and path identifiers when safe and relevant.
 
-Initial stable families:
+The current pre-1.0 implementation exposes a provisional subset through
+`Error::code()` and `WasmerError.code`. Those codes are useful for branching
+today, but may be split or renamed until each target can classify failures
+consistently. In particular, a general package-loading failure must not be
+reported as `PACKAGE_NOT_FOUND` unless the underlying cause is known.
+
+Planned v1 families:
 
 ```text
 CLIENT_CLOSED
 SANDBOX_CLOSED
+INVALID_ARGUMENT
 INVALID_PACKAGE_SOURCE
 PACKAGE_NOT_FOUND
+PACKAGE_LOAD_FAILED
 PACKAGE_INTEGRITY_FAILED
 PACKAGE_INCOMPATIBLE
 PACKAGE_NOT_INSTALLED
@@ -1435,6 +1443,11 @@ FILESYSTEM_ERROR
 INVALID_UTF8
 PROCESS_EXITED
 PROCESS_TERMINATED
+EXECUTION_ERROR
+TASK_ERROR
+INTERNAL_ERROR
+IO_ERROR
+INITIALIZATION_ERROR
 TARGET_ERROR
 ```
 

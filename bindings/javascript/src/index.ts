@@ -67,8 +67,10 @@ export interface DirectoryEntry extends FileStat {
 export type WasmerErrorCode =
   | "CLIENT_CLOSED"
   | "SANDBOX_CLOSED"
+  | "INVALID_ARGUMENT"
   | "INVALID_PACKAGE_SOURCE"
   | "PACKAGE_NOT_FOUND"
+  | "PACKAGE_LOAD_FAILED"
   | "PACKAGE_NOT_INSTALLED"
   | "PACKAGE_HAS_NO_ENTRYPOINT"
   | "COMMAND_NOT_FOUND"
@@ -81,9 +83,14 @@ export type WasmerErrorCode =
   | "PROCESS_EXITED"
   | "PROCESS_TERMINATED"
   | "INVALID_UTF8"
+  | "EXECUTION_ERROR"
+  | "TASK_ERROR"
+  | "INTERNAL_ERROR"
+  | "IO_ERROR"
+  | "INITIALIZATION_ERROR"
   | "TARGET_ERROR";
 
-/** An SDK failure with a stable, machine-readable `code`. */
+/** An SDK failure with a machine-readable, currently provisional `code`. */
 export class WasmerError extends Error {
   constructor(
     message: string,
@@ -169,13 +176,20 @@ function toWasmerError(error: unknown): unknown {
 const packageCores = new WeakMap<Package, PackageCore>();
 
 let browserInitialization: Promise<void> | undefined;
+const MAX_WASM32_SIZE = 0xffff_ffff;
 
 export class Wasmer {
   readonly #options: WasmerOptions;
   #core: Promise<WasmerCore> | undefined;
 
   constructor(options: WasmerOptions = {}) {
-    this.#options = options;
+    this.#options = {
+      ...options,
+      outputBytes:
+        options.outputBytes === undefined
+          ? undefined
+          : validateOutputBytes(options.outputBytes),
+    };
   }
 
   /**
@@ -454,7 +468,9 @@ export class Ports {
     port: number,
     options: { timeoutMs?: number } = {},
   ): Promise<void> {
-    await rethrow(this.#core.waitForPort(port, options.timeoutMs ?? 30_000));
+    const validPort = validateInteger("port", port, 1, 65_535);
+    const timeoutMs = validateTimeoutMs(options.timeoutMs ?? 30_000);
+    await rethrow(this.#core.waitForPort(validPort, timeoutMs));
   }
 }
 
@@ -470,9 +486,17 @@ export class Command {
   }
 
   async run(options: RunOptions = {}): Promise<Output> {
+    const timeoutMs =
+      options.timeoutMs === undefined
+        ? undefined
+        : validateTimeoutMs(options.timeoutMs);
+    const outputBytes =
+      options.outputBytes === undefined
+        ? undefined
+        : validateOutputBytes(options.outputBytes);
     const core = this.#build();
-    if (options.timeoutMs !== undefined) core.timeoutMs(options.timeoutMs);
-    if (options.outputBytes !== undefined) core.outputBytes(options.outputBytes);
+    if (timeoutMs !== undefined) core.timeoutMs(timeoutMs);
+    if (outputBytes !== undefined) core.outputBytes(outputBytes);
     if (options.stdin !== undefined) core.input(encode(options.stdin));
     const output = Output.fromCore(await rethrow(core.run()));
     if (options.check && !output.ok) throw new ProcessExitError(output);
@@ -480,9 +504,17 @@ export class Command {
   }
 
   async spawn(options: SpawnOptions = {}): Promise<Process> {
+    const timeoutMs =
+      options.timeoutMs === undefined
+        ? undefined
+        : validateTimeoutMs(options.timeoutMs);
+    const outputBytes =
+      options.outputBytes === undefined
+        ? undefined
+        : validateOutputBytes(options.outputBytes);
     const core = this.#build();
-    if (options.timeoutMs !== undefined) core.timeoutMs(options.timeoutMs);
-    if (options.outputBytes !== undefined) core.outputBytes(options.outputBytes);
+    if (timeoutMs !== undefined) core.timeoutMs(timeoutMs);
+    if (outputBytes !== undefined) core.outputBytes(outputBytes);
     const stdin = options.stdin ?? "closed";
     const stdout = options.stdout ?? "pipe";
     const stderr = options.stderr ?? "pipe";
@@ -582,7 +614,11 @@ export class Process {
 
   /** Ask the guest to exit; escalate to a forced kill after the grace period. */
   async terminate(options: { gracePeriodMs?: number } = {}): Promise<void> {
-    await rethrow(this.#core.terminate(options.gracePeriodMs ?? 1_000));
+    const gracePeriodMs = validateTimeoutMs(
+      options.gracePeriodMs ?? 1_000,
+      "gracePeriodMs",
+    );
+    await rethrow(this.#core.terminate(gracePeriodMs));
   }
 
   /** Immediate forced termination. */
@@ -715,6 +751,34 @@ export class SandboxFileSystem {
 
 function encode(value: string | Uint8Array): Uint8Array {
   return typeof value === "string" ? new TextEncoder().encode(value) : value;
+}
+
+function validateTimeoutMs(value: number, name = "timeoutMs"): number {
+  return validateInteger(name, value, 0, Number.MAX_SAFE_INTEGER);
+}
+
+function validateOutputBytes(value: number): number {
+  return validateInteger("outputBytes", value, 0, MAX_WASM32_SIZE);
+}
+
+function validateInteger(
+  name: string,
+  value: number,
+  minimum: number,
+  maximum: number,
+): number {
+  if (
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new WasmerError(
+      `\`${name}\` must be an integer between ${minimum} and ${maximum}, inclusive`,
+      "INVALID_ARGUMENT",
+    );
+  }
+  return value;
 }
 
 function escapeShellValue(value: ShellValue): string {

@@ -71,7 +71,9 @@ Recent vertical slices on top of that baseline:
   disabled.
 - `SandboxFileSystem` gained `create_dir`, `read_dir`, `stat`, `remove`, and
   `rename`.
-- `Error::code()` exposes the stable cross-language error code;
+- `Error::code()` exposes the current cross-language error code. The
+  taxonomy remains provisional until the pre-1.0 implementation can
+  distinguish important causes consistently on every target;
   `ProcessExitError` names the termination reason and includes a bounded
   stderr excerpt.
 - `Process::handle()` returns a cloneable signaling handle whose `kill` and

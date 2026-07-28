@@ -56,8 +56,11 @@ pub fn set_worker_url(url: String) {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ClientOptions {
-    output_bytes: Option<usize>,
+    output_bytes: Option<f64>,
 }
+
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+const MAX_WASM32_SIZE: u64 = u32::MAX as u64;
 
 #[wasm_bindgen(js_name = WasmerCore)]
 pub struct JsWasmer {
@@ -83,7 +86,11 @@ impl JsWasmer {
             runtime.set_networking_implementation(NodeNetworking::new(bridge));
         }
         let config = WasmerConfig {
-            output_bytes: options.output_bytes.unwrap_or(16 * 1024 * 1024),
+            output_bytes: options
+                .output_bytes
+                .map(|bytes| validate_usize("outputBytes", bytes, 0))
+                .transpose()?
+                .unwrap_or(16 * 1024 * 1024),
             ..WasmerConfig::default()
         };
         let inner = Wasmer::from_js_runtime(&config, runtime).map_err(sdk_error)?;
@@ -354,8 +361,9 @@ impl JsSandbox {
 
     /// Wait until a guest TCP listener accepts connections on `port`.
     #[wasm_bindgen(js_name = waitForPort)]
-    pub async fn wait_for_port(&self, port: u16, timeout_ms: f64) -> Result<(), JsValue> {
-        let timeout = Duration::from_millis(timeout_ms.max(0.0) as u64);
+    pub async fn wait_for_port(&self, port: f64, timeout_ms: f64) -> Result<(), JsValue> {
+        let port = validate_integer("port", port, 1, u64::from(u16::MAX))? as u16;
+        let timeout = validate_duration("timeoutMs", timeout_ms)?;
         self.inner
             .ports()
             .wait(port, timeout)
@@ -397,15 +405,16 @@ impl JsCommand {
     }
 
     #[wasm_bindgen(js_name = outputBytes)]
-    pub fn output_bytes(&mut self, bytes: usize) -> Result<(), JsValue> {
+    pub fn output_bytes(&mut self, bytes: f64) -> Result<(), JsValue> {
+        let bytes = validate_usize("outputBytes", bytes, 0)?;
         self.inner_mut()?.output_bytes(bytes);
         Ok(())
     }
 
     #[wasm_bindgen(js_name = timeoutMs)]
     pub fn timeout_ms(&mut self, milliseconds: f64) -> Result<(), JsValue> {
-        self.inner_mut()?
-            .timeout(Duration::from_millis(milliseconds.max(0.0) as u64));
+        let timeout = validate_duration("timeoutMs", milliseconds)?;
+        self.inner_mut()?.timeout(timeout);
         Ok(())
     }
 
@@ -573,12 +582,14 @@ impl JsProcess {
     }
 
     #[wasm_bindgen(js_name = readStdout)]
-    pub async fn read_stdout(&self, max_bytes: usize) -> Result<JsValue, JsValue> {
+    pub async fn read_stdout(&self, max_bytes: f64) -> Result<JsValue, JsValue> {
+        let max_bytes = validate_usize("maxBytes", max_bytes, 1)?;
         read_stream(&self.stdout, max_bytes).await
     }
 
     #[wasm_bindgen(js_name = readStderr)]
-    pub async fn read_stderr(&self, max_bytes: usize) -> Result<JsValue, JsValue> {
+    pub async fn read_stderr(&self, max_bytes: f64) -> Result<JsValue, JsValue> {
+        let max_bytes = validate_usize("maxBytes", max_bytes, 1)?;
         read_stream(&self.stderr, max_bytes).await
     }
 
@@ -592,10 +603,9 @@ impl JsProcess {
             .map_err(sdk_error)
     }
 
-    pub async fn terminate(&self, grace_ms: u32) -> Result<(), JsValue> {
-        self.handle
-            .terminate(Duration::from_millis(u64::from(grace_ms)))
-            .await;
+    pub async fn terminate(&self, grace_ms: f64) -> Result<(), JsValue> {
+        let grace = validate_duration("gracePeriodMs", grace_ms)?;
+        self.handle.terminate(grace).await;
         Ok(())
     }
 
@@ -622,12 +632,12 @@ where
     Ok(Uint8Array::from(bytes.as_slice()).into())
 }
 
-/// Convert an SDK error into a JavaScript error carrying its stable `code`.
+/// Convert an SDK error into a JavaScript error carrying its provisional code.
 fn sdk_error(error: wasmer_sdk::Error) -> JsValue {
     custom_error(error.code(), &error.to_string())
 }
 
-/// A JavaScript error with the SDK's stable name and machine-readable code.
+/// A JavaScript error with the SDK name and a machine-readable code.
 fn custom_error(code: &str, message: &str) -> JsValue {
     let error = js_sys::Error::new(message);
     error.set_name("WasmerError");
@@ -638,4 +648,31 @@ fn custom_error(code: &str, message: &str) -> JsValue {
 /// Fallback for non-SDK failures (stream I/O, serialization).
 fn js_error(error: impl std::fmt::Display) -> JsValue {
     custom_error("TARGET_ERROR", &error.to_string())
+}
+
+fn validate_duration(name: &str, value: f64) -> Result<Duration, JsValue> {
+    validate_integer(name, value, 0, MAX_SAFE_INTEGER).map(Duration::from_millis)
+}
+
+fn validate_usize(name: &str, value: f64, minimum: u64) -> Result<usize, JsValue> {
+    let value = validate_integer(name, value, minimum, MAX_WASM32_SIZE)?;
+    usize::try_from(value).map_err(|_| invalid_numeric_argument(name, minimum, MAX_WASM32_SIZE))
+}
+
+fn validate_integer(name: &str, value: f64, minimum: u64, maximum: u64) -> Result<u64, JsValue> {
+    #[allow(clippy::cast_precision_loss)]
+    let minimum_f64 = minimum as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let maximum_f64 = maximum as f64;
+    if !value.is_finite() || value.fract() != 0.0 || value < minimum_f64 || value > maximum_f64 {
+        return Err(invalid_numeric_argument(name, minimum, maximum));
+    }
+    Ok(value as u64)
+}
+
+fn invalid_numeric_argument(name: &str, minimum: u64, maximum: u64) -> JsValue {
+    custom_error(
+        "INVALID_ARGUMENT",
+        &format!("`{name}` must be an integer between {minimum} and {maximum}, inclusive"),
+    )
 }

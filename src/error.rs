@@ -86,14 +86,18 @@ pub enum Error {
 }
 
 impl Error {
-    /// The stable, machine-readable error code shared by every language.
+    /// The current machine-readable error code shared by language bindings.
+    ///
+    /// This taxonomy is provisional while the SDK is pre-1.0. Consumers can
+    /// branch on it today, but should expect codes to be refined before the
+    /// cross-language contract is declared stable.
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
             Self::ClientClosed => "CLIENT_CLOSED",
             Self::SandboxClosed => "SANDBOX_CLOSED",
             Self::InvalidPackageSource { .. } => "INVALID_PACKAGE_SOURCE",
-            Self::PackageLoad { .. } => "PACKAGE_NOT_FOUND",
+            Self::PackageLoad { .. } => "PACKAGE_LOAD_FAILED",
             Self::PackageNotInstalled { .. } => "PACKAGE_NOT_INSTALLED",
             Self::PackageHasNoEntrypoint { .. } => "PACKAGE_HAS_NO_ENTRYPOINT",
             Self::CommandNotFound { .. } => "COMMAND_NOT_FOUND",
@@ -104,11 +108,11 @@ impl Error {
             Self::Timeout { .. } => "TIMEOUT",
             Self::ProcessExit(error) => error.code(),
             Self::Utf8(_) => "INVALID_UTF8",
-            Self::Execution { .. }
-            | Self::Task { .. }
-            | Self::InternalState { .. }
-            | Self::Io(_)
-            | Self::Initialization { .. } => "TARGET_ERROR",
+            Self::Execution { .. } => "EXECUTION_ERROR",
+            Self::Task { .. } => "TASK_ERROR",
+            Self::InternalState { .. } => "INTERNAL_ERROR",
+            Self::Io(_) => "IO_ERROR",
+            Self::Initialization { .. } => "INITIALIZATION_ERROR",
         }
     }
 }
@@ -134,7 +138,7 @@ impl ProcessExitError {
         }
     }
 
-    /// The stable, machine-readable error code for this failure.
+    /// The current machine-readable error code for this failure.
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self.output.reason {
@@ -175,5 +179,38 @@ impl ProcessExitError {
             let ellipsis = if start > 0 { "…" } else { "" };
             format!("{base}\nstderr: {ellipsis}{excerpt}")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+
+    #[test]
+    fn operational_failures_have_distinct_provisional_codes() {
+        let package = Error::PackageLoad {
+            package_source: "example/package".to_owned(),
+            message: "registry unavailable".to_owned(),
+        };
+        let execution = Error::Execution {
+            message: "runner failed".to_owned(),
+        };
+        let task = Error::Task {
+            message: "worker failed".to_owned(),
+        };
+        let internal = Error::InternalState {
+            message: "state missing".to_owned(),
+        };
+        let io = Error::Io(std::io::Error::other("stream failed"));
+        let initialization = Error::Initialization {
+            message: "runtime failed".to_owned(),
+        };
+
+        assert_eq!(package.code(), "PACKAGE_LOAD_FAILED");
+        assert_eq!(execution.code(), "EXECUTION_ERROR");
+        assert_eq!(task.code(), "TASK_ERROR");
+        assert_eq!(internal.code(), "INTERNAL_ERROR");
+        assert_eq!(io.code(), "IO_ERROR");
+        assert_eq!(initialization.code(), "INITIALIZATION_ERROR");
     }
 }

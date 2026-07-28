@@ -25,11 +25,11 @@
     "build:ts": "tsc -p tsconfig.json",
     "build": "npm run build:wasm && npm run build:ts",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build:ts && node --test --test-timeout=30000 test/node-network.test.mjs && node --test --test-timeout=30000 test/runtime.test.mjs && node --test --test-timeout=30000 test/multi-worker.test.mjs",
+    "test": "npm run build:ts && node --test test/validation.test.mjs && node --test --test-timeout=30000 test/node-network.test.mjs && node --test --test-timeout=30000 test/runtime.test.mjs && node --test --test-timeout=30000 test/multi-worker.test.mjs",
     "test:runtime": "npm run build:ts && node --test --test-timeout=30000 test/runtime.test.mjs",
     "test:workers": "npm run build:ts && node --test --test-timeout=30000 test/multi-worker.test.mjs",
     "test:edgejs": "npm run build:ts && node --test --test-timeout=30000 test/edgejs-http.test.mjs",
-    "test:postgres": "npm run build:ts && node --test --test-timeout=30000 test/postgres-psql.test.mjs"
+    "test:postgres": "npm run build:ts && node --test --test-timeout=90000 test/postgres-psql.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.1.0",

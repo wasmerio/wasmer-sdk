@@ -125,6 +125,18 @@ retry delays. A successful probe opens and immediately closes a real TCP
 connection, so one-shot and connection-count-sensitive services should expose
 an application-level readiness signal instead.
 
+The handwritten TypeScript layer validates every numeric public input before
+calling wasm. Ports must be integers from 1 through 65535; timeouts and grace
+periods must be non-negative safe integers; output-retention sizes must fit a
+wasm32 `usize`. Invalid values fail with `WasmerError.code ===
+"INVALID_ARGUMENT"`. The wasm-bindgen facade repeats these checks defensively
+for callers that bypass the TypeScript layer.
+
+Other machine-readable error codes are still provisional in this pre-1.0
+implementation. Broad failures such as package loading, initialization, I/O,
+execution, task scheduling, and internal state have distinct codes, but the
+taxonomy is not presented as a stable cross-language contract yet.
+
 Local packages are passed as bytes because a browser has no ambient host path:
 
 ```ts

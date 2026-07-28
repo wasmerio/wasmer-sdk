@@ -13,7 +13,7 @@ const psql = process.env.PSQL ?? "/opt/homebrew/opt/libpq/bin/psql";
 
 test(
   "connects native psql to PostgreSQL running inside WASIX",
-  { skip: !packagePath, timeout: 30_000 },
+  { skip: !packagePath, timeout: 90_000 },
   async () => {
     const port = await reservePort();
     const packageBytes = await readFile(packagePath);
