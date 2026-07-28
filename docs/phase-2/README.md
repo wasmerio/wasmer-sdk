@@ -72,7 +72,9 @@ Wasmer ── resolves ──> Package
 ```
 
 `Command.run()` captures completed execution. `Command.spawn()` returns a live
-process. `shell()` constructs a command with explicit shell parsing. Package
-resolution, filesystem access, network access, and resource grants never
-happen implicitly. Running one command is simply short-lived use of the same
+process. `sandbox.installPackage()` can extend the package and command set
+after creation. Shell behavior exists only when an installed package provides
+a shell and the application invokes it explicitly. Package resolution,
+filesystem access, network access, and resource grants never happen
+implicitly. Running one command is simply short-lived use of the same
 `Sandbox`; there is no base `Wasmer.run()`.

@@ -14,9 +14,9 @@ consequences are in [architecture.md](architecture.md).
 | D-004 | Use UniFFI for Swift, Python, and later Kotlin bindings; use `wasm-bindgen` plus handwritten TypeScript for browser and Node.js. | Accepted |
 | D-005 | Keep the UniFFI and `wasm-bindgen` façades thin: both call the public Rust API rather than a separate runtime or backend abstraction. | Accepted |
 | D-006 | Make the SDK instance-based. Do not rely on mutable process-wide global initialization in the core design. | Accepted |
-| D-007 | Make a sandbox a persistent virtual OS context containing a filesystem, package command set, process table, policy, and optional virtual network. | Accepted |
+| D-007 | Make a sandbox a stateful virtual OS context containing a filesystem, package command set, process table, policy, and optional virtual network for its explicit lifetime. | Accepted |
 | D-008 | Make packages immutable and content-addressed after resolution. Keep mutable execution state in sandboxes. | Accepted |
-| D-009 | Resolve package specifications into an explicit lock before execution and key caches by content plus engine identity. | Accepted |
+| D-009 | Resolve package specifications to immutable content identities before execution and key caches by content plus engine identity. | Accepted |
 | D-010 | Support WASI/WASIX command runners first, behind an extensible runner registry. Unknown runner URIs fail explicitly. | Accepted |
 | D-011 | Deny host filesystem, host environment, networking, and host process access by default. Grants are explicit and scoped. | Accepted |
 | D-012 | Report capabilities enabled by the current target build and limit-enforcement strength at runtime. Unsupported requested guarantees fail closed; they never silently degrade. | Accepted |
@@ -25,10 +25,9 @@ consequences are in [architecture.md](architecture.md).
 | D-015 | Keep registry credentials and content acquisition in the trusted host. Never inject credentials into a guest implicitly. | Accepted |
 | D-016 | State clearly that embedded Wasm/WASIX is an in-process, userspace isolation boundary, not a VM or kernel boundary. | Accepted |
 | D-017 | Do not introduce a Wasmer runtime-backend trait or host-adapter layer. Select Wasmer behavior with Cargo features and small target-specific modules only where compilation requires them. | Accepted |
-| D-018 | Define filesystem snapshots as the portable persistence primitive. Treat live-memory snapshots as an optional target-specific extension. | Accepted |
 | D-019 | Do not claim that every registry package runs on every target. Provide package preflight, capability diagnostics, and a tested compatibility matrix. | Accepted |
 | D-020 | Ship handwritten idiomatic public veneers over generated bindings rather than exposing generated UniFFI code as the whole product API. | Accepted |
-| D-021 | Version the SDK contract, package lock format, snapshot format, and compiled cache identity separately. | Accepted |
+| D-021 | Version the SDK contract and compiled cache identity separately. | Accepted |
 | D-022 | Make cross-target conformance tests and event traces release gates. | Accepted |
 | D-023 | Keep Wasmer Edge/remote execution out of the Phase 1 SDK. A future remote client should be a separate layer rather than a runtime backend hidden inside the Rust API. | Accepted |
 | D-024 | Treat iOS package download/execution as both a technical and App Store policy risk; support bundled packages first and validate distribution policy separately. | Accepted |
@@ -36,8 +35,9 @@ consequences are in [architecture.md](architecture.md).
 | D-026 | Treat a requested browser filesystem mount as live only when the target can implement it correctly. Copy/import into a portable `Directory` is an explicit alternative, never a silent fallback. | Accepted |
 | D-027 | Default native desktop and Node.js clients to a project-local `.wasmer` cache rooted at the working directory captured during client creation; allow explicit location, memory-only, read-only, and disabled modes. | Accepted |
 | D-028 | Store package blobs by cryptographic content digest and partition compiled artifacts by target plus a complete engine/code-generation fingerprint. | Accepted |
-| D-029 | Treat `.wasmer` as disposable optimization state and keep the commit-worthy `wasmer.lock` outside it. | Accepted |
+| D-029 | Treat `.wasmer` as disposable optimization state. Removing it may repeat downloads and compilation but does not alter guest-visible semantics. | Accepted |
 | D-030 | Never deserialize attacker-controlled native compiled artifacts. Project-local compiled entries require authenticated local provenance or are treated as misses. | Accepted |
+| D-031 | Allow a live sandbox to install additional Wasmer packages atomically. Installation resolves and verifies content, extends the package command set, and never executes an entrypoint or install script implicitly. | Accepted |
 
 ## Questions intentionally deferred
 
@@ -48,5 +48,5 @@ consequences are in [architecture.md](architecture.md).
   device prototype.
 - Fine-grained network allowlists require a concrete virtual-network
   implementation and should not be promised until it exists.
-- PTY behavior, background services, memory snapshots, and host-command bindings
-  require focused proofs of concept.
+- PTY behavior, background services, and host-command bindings require focused
+  proofs of concept.

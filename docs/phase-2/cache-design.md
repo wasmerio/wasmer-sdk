@@ -17,8 +17,7 @@ The cache stores two fundamentally different things:
    engine/code-generation fingerprint.
 
 A cache is disposable. Deleting it may make the next run download or compile
-again, but cannot change package resolution recorded in `wasmer.lock` or alter
-program correctness.
+again, but does not alter guest-visible program semantics.
 
 ## 2. Defaults
 
@@ -37,9 +36,6 @@ The default native layout should be added to source control ignore rules:
 ```gitignore
 .wasmer/
 ```
-
-`wasmer.lock` is separate from `.wasmer` and should normally be committed.
-The lock is reproducibility input; `.wasmer` is an optimization.
 
 ## 3. Client configuration
 
@@ -240,7 +236,7 @@ A registry reference such as `python/python@3.12` is not a content key.
 registry identity + normalized specifier + resolution policy
 ```
 
-to the exact package lock and content digest.
+to the exact resolved version and content digest.
 
 Mutable or unversioned references obey refresh policy. Exact versions and
 digests remain stable, but their content is still integrity-checked.
@@ -401,7 +397,7 @@ Eviction follows these rules:
 - prepared package trees before canonical package blobs;
 - package blobs last;
 - entries actively leased by a client are not evicted;
-- eviction never edits `wasmer.lock` or snapshots.
+- eviction never mutates sandbox files or mounted filesystems.
 
 If space cannot be reclaimed, writes fail as cache writes while execution may
 continue using in-memory results. Cache-write failure does not turn a
@@ -440,7 +436,8 @@ Useful diagnostics include:
 
 ## 11. Offline behavior
 
-With a lock and complete package cache, package resolution can run offline:
+Exact package references can resolve offline when all required package content
+is already cached:
 
 ```ts
 const wasmer = await Wasmer.create({
@@ -453,9 +450,9 @@ const wasmer = await Wasmer.create({
 });
 ```
 
-A missing package blob produces an offline cache-miss error naming the digest.
-A missing compiled artifact does not require network access; it is compiled
-from the cached module bytes.
+A missing package blob produces an offline cache-miss error naming the package
+reference or digest. A missing compiled artifact does not require network
+access; it is compiled from the cached module bytes.
 
 ## 12. Mount interaction
 
@@ -466,8 +463,8 @@ The active cache directory is trusted host control-plane state.
   default because a guest could race cache creation or tamper with artifacts.
 - An application requiring that unusual layout must choose a separate cache
   root or make a narrowly reviewed explicit override.
-- Portable filesystem snapshots never contain `.wasmer` unless the
-  application deliberately copied it into the guest filesystem.
+- The guest never sees `.wasmer` unless the application deliberately mounts or
+  copies it into the guest filesystem.
 
 ## 13. Phase 3 proofs
 
@@ -494,4 +491,3 @@ The active cache directory is trusted host control-plane state.
 - [Wasmer cache crate](https://docs.rs/wasmer-cache/latest/wasmer_cache/)
 - [Wasmer module serialization and deserialization](https://docs.rs/wasmer/latest/wasmer/struct.Module.html)
 - [Wasmer CLI cache directory option](https://docs.wasmer.io/runtime/cli/)
-

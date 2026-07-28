@@ -69,6 +69,9 @@ available on 2026-07-27:
 These products evolve quickly. The observations below describe their APIs at
 that date, not a permanent claim about every release.
 
+References to snapshots and forks below describe competitor capabilities only.
+They are not part of the proposed Wasmer SDK surface.
+
 ## 3. The shared shape
 
 Despite substantial differences in runtime and persistence, all four products
@@ -282,8 +285,8 @@ sandbox-scoped.
 The namespaces keep a large surface navigable. However, accepting command-line
 text as the default makes shell parsing, quoting, and injection part of the
 common path. A Wasmer SDK spanning browsers, Rust, Python, and Swift should
-keep program and arguments separate and reserve script parsing for
-`sandbox.shell()`.
+keep program and arguments separate. If an application needs shell parsing,
+it should install a shell package and execute that command explicitly.
 
 ### 6.3 Lifecycle and persistence
 
@@ -309,7 +312,7 @@ artifacts.
 
 This validates the proposed Wasmer split:
 
-- packages and snapshots construct the general environment;
+- packages construct the general environment;
 - language-aware code interpretation can be a recipe or separate package;
 - it should not distort the universal core around `runCode(language, code)`.
 
@@ -320,7 +323,6 @@ Adopt:
 - capability grouping once a subsystem becomes large;
 - specialized code-interpreter APIs above the general sandbox;
 - IDs and explicit process ownership;
-- snapshot/fork semantics that survive the source sandbox where supported;
 - dedicated PTY behavior rather than pretending a terminal is ordinary stdio.
 
 Avoid copying:
@@ -422,8 +424,8 @@ Avoid copying:
 | Sandbox timeout | Yes | Lifetime + idle | TTL/timeout | Several lifecycle timers | Optional lifetime; precise name |
 | Command timeout | Abort/detached control | Yes | Yes | Yes | `timeoutMs` |
 | Readiness | User workflow | Built-in probes | Template ready command | Sessions/previews | Add service readiness deliberately |
-| Persistence | Named sandbox + sessions | Snapshot/volume oriented | Pause/snapshot/fork | Persistent by default | Snapshot and external FS; no hidden persistence |
-| Cleanup | Stop/delete | Terminate/detach | Pause/kill | Stop/pause/delete | `close`; snapshot is separate |
+| Persistence | Named sandbox + sessions | Snapshot/volume oriented | Pause/snapshot/fork | Persistent by default | External mounted FS only; no hidden persistence |
+| Cleanup | Stop/delete | Terminate/detach | Pause/kill | Stop/pause/delete | `close()` |
 
 ## 9. Why base `Wasmer.run()` is the wrong abstraction
 
@@ -468,7 +470,7 @@ makes the defaults harder to inspect and extend.
 
 ### 9.3 It makes future features awkward
 
-Snapshots, service readiness, package collisions, multiple packages, mounted
+Service readiness, dynamic package installation, package collisions, mounted
 browser filesystems, background children, and port connections all need an
 environment handle. A top-level `run()` either grows into a second
 `SandboxOptions` or becomes the path that cannot use important features.
@@ -528,12 +530,13 @@ const process = await sandbox.command("python", {
 });
 ```
 
-Shell parsing remains explicit:
+Shell parsing remains explicit and package-provided:
 
 ```ts
-const output = await sandbox.shell(
-  "find /workspace -type f | sort",
-).run();
+await sandbox.installPackage("wasmer/bash@1.0.25");
+const output = await sandbox.command("bash", {
+  args: ["-lc", "find /workspace -type f | sort"],
+}).run();
 ```
 
 ### 10.2 Rust
@@ -582,7 +585,7 @@ There is no separate “one-shot sandbox” type:
 - create, run once, close is short-lived use;
 - create, run many times, close is session use;
 - create, spawn services, wait for readiness, close is service use;
-- create from a snapshot or fork is reuse.
+- mount an external persistent filesystem when state must outlive the sandbox.
 
 `await using` and language-specific context management make deterministic
 cleanup concise without inventing a parallel execution path.
@@ -624,7 +627,6 @@ object that separates description from execution:
 const command = sandbox.command("python", { args });
 await command.run();
 await command.spawn();
-await sandbox.shell(script).run();
 ```
 
 This matches Rust's command-builder grammar, keeps `Sandbox` focused on the
@@ -645,20 +647,7 @@ An exec-based readiness probe can be composed with
 how guest networking and scheduling behave on browser, Node.js, native, and
 iOS targets.
 
-### 11.5 Keep snapshots narrower than cloud memory snapshots
-
-Hosted systems can preserve a VM's memory. The portable Wasmer snapshot should
-continue to mean:
-
-- writable filesystem state;
-- package lock;
-- portable configuration and metadata.
-
-It excludes live processes, memories, sockets, terminals, and external mount
-contents. A future memory snapshot must have a different type and explicit
-target capability.
-
-### 11.6 Keep code interpreters above the core
+### 11.5 Keep code interpreters above the core
 
 E2B and Daytona show that a good interpreter API may eventually deserve
 stateful contexts, rich displays, charts, dependency setup, and language-aware
@@ -671,6 +660,22 @@ const result = await python.evaluate(code);
 
 It should be built from `Sandbox`, `Process`, `FileSystem`, and Wasmer
 packages, not added as `wasmer.runCode()`.
+
+### 11.6 Let a live sandbox acquire Wasmer packages
+
+Hosted competitors usually install operating-system packages by executing
+`apt`, `dnf`, or another tool, or they bake dependencies into an image or
+template. Wasmer packages are already the SDK's software distribution unit, so
+the universal API can provide a safer operation:
+
+```ts
+const pkg = await sandbox.installPackage("namespace/tool@1.2.3");
+await sandbox.command(pkg.command("tool"), { args }).run();
+```
+
+This is not shorthand for a shell command. It uses the trusted host resolver,
+does not execute package code, and commits the package and its command names
+only after resolution and compatibility checks succeed.
 
 ## 12. Phase 3 validation consequences
 
@@ -685,7 +690,7 @@ The proofs of concept should now validate one execution model:
 7. mount native and browser filesystem providers;
 8. enforce separate command timeout, output bound, and sandbox resource
    limits;
-9. snapshot and fork only the documented portable state;
+9. install a package after sandbox creation and prove failure is atomic;
 10. prove Python, EdgeJS QuickJS, Bash, and a service package use the same
     sandbox-scoped execution path.
 

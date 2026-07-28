@@ -48,12 +48,11 @@ Small means a developer can remember the common surface:
 
 ```text
 wasmer.createSandbox()
+sandbox.installPackage(package)
 sandbox.command(command).run()
 sandbox.command(command).spawn()
-sandbox.shell(script).run()
 sandbox.fs
 sandbox.ports
-sandbox.snapshot()
 sandbox.close()
 ```
 
@@ -116,7 +115,7 @@ content identity, and compatibility requirements.
 A package source may be:
 
 - a registry specification such as `python/python@3.12`;
-- an exact package lock or content digest;
+- an exact version or content digest;
 - WEBC bytes;
 - a URL when URL acquisition is explicitly enabled;
 - a native filesystem path on targets that support it;
@@ -130,17 +129,17 @@ An unambiguous reference to a command exported by a package. Sandboxes also
 make non-conflicting installed command names available through a virtual
 `PATH`.
 
-If two packages export the same command name, sandbox creation fails with a
-collision report unless the application supplies an alias. Picking whichever
-package resolved first would make lockfile changes alter behavior invisibly.
+If two installed packages export the same command name, selecting that bare
+name fails with an ambiguity report. An explicit `CommandRef` remains
+deterministic.
 
 ### `Command`
 
-A process-free execution description created by `sandbox.command()` or
-`sandbox.shell()`. It contains the selected program or script, arguments,
-environment overrides, and working directory, but it is not a running
-process. JavaScript exposes it as an immutable reusable value; Rust exposes
-the same concept as a conventional mutable builder.
+A process-free execution description created by `sandbox.command()`. It
+contains the selected program, arguments, environment overrides, and working
+directory, but it is not a running process. JavaScript exposes it as an
+immutable reusable value; Rust exposes the same concept as a conventional
+mutable builder.
 
 `Command.run()` starts a process and returns bounded completed output.
 `Command.spawn()` starts a process and returns live ownership. Reusing a
@@ -152,7 +151,7 @@ A mutable, isolated virtual OS context with:
 
 - a writable `/workspace`, which is the default working directory;
 - a writable `/tmp`;
-- a package lock and virtual command set;
+- an installed package set and virtual command set;
 - a filesystem and explicit mounts;
 - environment values supplied by the application;
 - a process table;
@@ -162,8 +161,8 @@ A mutable, isolated virtual OS context with:
 It does not inherit the host working directory, files, environment, processes,
 or network.
 
-Its mutable state lasts until `close()`. Only an explicit `Snapshot` or
-externally persistent mounted filesystem outlives the sandbox; “long-lived”
+Its mutable state lasts until `close()`. State outlives the sandbox only when
+it is stored in an explicitly persistent mounted filesystem; “long-lived”
 does not imply a hidden remote persistence service.
 
 ### `Process`
@@ -182,14 +181,8 @@ policy violations, unsupported capabilities, and SDK failures are errors.
 ### `Directory`
 
 A portable mutable filesystem value that can be populated, mounted into
-sandboxes, snapshotted, and—when explicitly requested—shared between them.
-Native host-directory mounts are a separate target-dependent type.
-
-### `Snapshot`
-
-A portable, versioned capture of filesystem state, package lock,
-configuration, and application metadata. It does not contain running process
-memory, open sockets, or host mounts.
+sandboxes, and—when explicitly requested—shared between them. Native
+host-directory mounts are a separate target-dependent type.
 
 ## 4. One execution model
 
@@ -224,23 +217,26 @@ boundary even when only one command executes.
 
 ### 4.2 Session use
 
-The same sandbox type supports multiple commands, generated files, dependency
-installation, REPLs, servers, databases, agent sessions, or snapshots:
+The same sandbox type supports multiple commands, generated files, package
+installation, REPLs, servers, databases, and agent sessions:
 
 ```ts
 await using sandbox = await wasmer.createSandbox({
-  packages: ["python/python@3.12", "wasmer/bash@1.0.25"],
   limits: {
     memoryBytes: 512 * 1024 * 1024,
     maxProcesses: 16,
   },
 });
 
+await sandbox.installPackage("python/python@3.12");
+await sandbox.installPackage("wasmer/bash@1.0.25");
 await sandbox.fs.writeText("/workspace/main.py", "print('persistent')");
 const first = await sandbox.command("python", {
   args: ["/workspace/main.py"],
 }).run();
-const second = await sandbox.shell("ls -la /workspace").run();
+const second = await sandbox.command("bash", {
+  args: ["-lc", "ls -la /workspace"],
+}).run();
 ```
 
 The sandbox remains alive until `close()`. Closing it terminates remaining
@@ -249,7 +245,7 @@ runtime resources.
 
 ## 5. Command semantics
 
-### 5.1 `command`, `run`, `spawn`, and `shell`
+### 5.1 `command`, `run`, and `spawn`
 
 These names carry one meaning in every language:
 
@@ -258,7 +254,6 @@ These names carry one meaning in every language:
 | `command` | program plus argument list | immutable `Command` description | No | Describe argv execution |
 | `Command.run` | run options | completed `Output` | No | Scripts, tools, tests |
 | `Command.spawn` | spawn options | live `Process` | No | Streams, servers, REPLs |
-| `shell` | script text | shell-backed `Command` description | Yes, explicitly | Pipes, redirects, compound scripts |
 
 JavaScript:
 
@@ -267,7 +262,9 @@ await sandbox.command("python", { args: ["-c", userCode] }).run();
 await sandbox.command("python", { args: ["-i"] }).spawn({
   terminal: true,
 });
-await sandbox.shell("find /workspace -type f | sort").run();
+await sandbox.command("bash", {
+  args: ["-lc", "find /workspace -type f | sort"],
+}).run();
 ```
 
 Rust:
@@ -275,24 +272,27 @@ Rust:
 ```rust
 sandbox.command("python").args(["-c", user_code]).output().await?;
 sandbox.command("python").arg("-i").terminal(true).spawn().await?;
-sandbox.shell("find /workspace -type f | sort").output().await?;
+sandbox.command("bash")
+    .args(["-lc", "find /workspace -type f | sort"])
+    .output()
+    .await?;
 ```
 
 The program supplied to `command()` is never tokenized. To execute a shell
-script, the application must call `shell()` or invoke a shell package
-explicitly. Applications must not interpolate untrusted text into shell
-scripts.
+script, the sandbox must contain a shell package and the application invokes
+that shell explicitly, such as `command("bash", { args: ["-lc", script] })`.
+Applications must not interpolate untrusted text into shell scripts.
 
 ### 5.2 Command resolution
 
-Commands may be selected in three ways:
+Commands may be selected in two ways:
 
 1. an installed, non-conflicting command name such as `"python"`;
 2. an explicit `CommandRef`, for example
    `python.command("python")`.
 
 An explicit command reference resolves packages that export multiple commands
-or collide with another installed command:
+or disambiguates packages that export the same command name:
 
 ```ts
 const toolbox = await wasmer.loadPackage("namespace/toolbox@1.2.3");
@@ -371,8 +371,7 @@ export type PackageSource =
   | URL
   | Uint8Array
   | Package
-  | { path: string }
-  | { lock: PackageLock };
+  | { path: string };
 
 export class Package {
   readonly id: string;
@@ -408,14 +407,8 @@ export class Sandbox implements AsyncDisposable {
     command: string | CommandRef,
     options?: CommandOptions,
   ): Command;
-  shell(
-    script: string,
-    options?: Omit<CommandOptions, "args">,
-  ): Command;
 
-  snapshot(options?: SnapshotOptions): Promise<Snapshot>;
-  fork(options?: ForkOptions): Promise<Sandbox>;
-  packageLock(): Promise<PackageLock>;
+  installPackage(source: PackageSource): Promise<Package>;
   close(): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
 }
@@ -429,7 +422,6 @@ export interface SandboxOptions {
   limits?: Limits;
   network?: NetworkPolicy;
   minimumEnforcement?: EnforcementLevel;
-  snapshot?: Snapshot;
   metadata?: Readonly<Record<string, string>>;
 }
 
@@ -446,8 +438,30 @@ export class Command {
 ```
 
 `Command` is an immutable execution description and may be reused. Calling
-`run()` or `spawn()` starts a new process each time. `shell()` produces the
-same type but records that the source is a shell script rather than argv.
+`run()` or `spawn()` starts a new process each time.
+
+`installPackage()` uses the same source types and resolver as
+`createSandbox({ packages })`. It resolves and validates the complete package
+before atomically extending the sandbox's read-only package layers and command
+set:
+
+```ts
+await using sandbox = await wasmer.createSandbox();
+
+const python = await sandbox.installPackage("python/python@3.12");
+
+const output = await sandbox.command(python.command("python"), {
+  args: ["-c", "print('installed after creation')"],
+}).run();
+```
+
+Installation never runs an entrypoint or package-provided setup script.
+Existing processes keep running. Commands started after installation see the
+new package. If resolution, compatibility validation, or installation fails,
+the sandbox remains unchanged. Installing the same exact package again is
+idempotent. Command-name collisions do not make installation order
+significant: the bare name becomes ambiguous and an explicit
+`package.command(name)` remains available.
 
 `await using` is a welcome convenience where explicit resource management is
 available:
@@ -784,8 +798,8 @@ provider event.
 const imported = await BrowserFileSystem.importDirectory(handle);
 ```
 
-The copy is portable and snapshot-friendly but does not observe later external
-changes. A requested live mount never silently becomes an imported copy.
+The copy is portable but does not observe later external changes. A requested
+live mount never silently becomes an imported copy.
 
 ### 6.5.3 Mount descriptors
 
@@ -847,7 +861,6 @@ export interface Capabilities {
   readonly guestNetworking: Availability;
   readonly restrictedNetworking: Availability;
   readonly localPortForwarding: Availability;
-  readonly snapshots: Availability;
   readonly enforcement: EnforcementReport;
 }
 ```
@@ -978,10 +991,9 @@ let output = sandbox
     .await?;
 ```
 
-The builder accepts resolved `Package` values as well as package sources. The
-resolved lock is available from the sandbox for reproducibility and audit.
-It creates a process-free environment; commands can only be constructed from
-an open `Sandbox`.
+The builder accepts resolved `Package` values as well as package sources. It
+creates a process-free environment; commands can only be constructed from an
+open `Sandbox`.
 
 ### 7.3 Commands
 
@@ -1011,13 +1023,14 @@ Proposed shape:
 impl Sandbox {
     pub fn command(&self, command: impl Into<CommandSelector>)
         -> Command<'_>;
-    pub fn shell(&self, script: impl Into<String>) -> Command<'_>;
+    pub async fn install_package(
+        &self,
+        source: impl Into<PackageSource>,
+    ) -> Result<Package>;
     pub fn fs(&self) -> &FileSystem;
     pub fn ports(&self) -> &Ports;
     pub fn capabilities(&self) -> &Capabilities;
 
-    pub async fn snapshot(&self) -> Result<Snapshot>;
-    pub async fn fork(&self) -> Result<Sandbox>;
     pub async fn close(&self) -> Result<()>;
 }
 
@@ -1049,8 +1062,10 @@ pub enum Stdio {
 
 The real signatures may consume the builder instead of borrowing it if that
 produces clearer ownership through UniFFI. The behavior is the contract.
-Stdin defaults to `Stdio::Null`; stdout and stderr default to `Stdio::Piped`.
-Terminal mode replaces all three ordinary streams.
+`install_package()` performs the same atomic installation as the JavaScript
+method and returns the resolved package. Stdin defaults to `Stdio::Null`;
+stdout and stderr default to `Stdio::Piped`. Terminal mode replaces all three
+ordinary streams.
 
 ### 7.4 Process I/O
 
@@ -1217,8 +1232,8 @@ let sandbox = wasmer
 
 Mount mode intersects capabilities: placing a writable provider in a
 read-only mount removes guest write, create, rename, and delete rights.
-External provider contents are excluded from portable snapshots unless the
-application explicitly materializes them into a `Directory`.
+External provider contents remain owned by that provider unless the
+application explicitly copies them into a `Directory`.
 
 ## 8. Cross-language mapping
 
@@ -1228,6 +1243,7 @@ The concepts line up while each language keeps its native shape:
 | --- | --- | --- | --- | --- |
 | Configure client | `Wasmer::new(config)` | `await Wasmer.create(options)` | `Wasmer(config)` / async open | `try await Wasmer(options:)` |
 | Create sandbox | `wasmer.sandbox().start()` | `wasmer.createSandbox()` | `wasmer.create_sandbox()` | `wasmer.createSandbox()` |
+| Install package | `sandbox.install_package(source)` | `sandbox.installPackage(source)` | `sandbox.install_package(source)` | `sandbox.installPackage(source:)` |
 | Captured command | `sandbox.command(cmd).output()` | `sandbox.command(cmd, options).run()` | `sandbox.command(cmd, args=[...]).run()` | `sandbox.command(cmd, options:).run()` |
 | Live command | `sandbox.command(cmd).spawn()` | `sandbox.command(cmd, options).spawn()` | `sandbox.command(cmd, args=[...]).spawn()` | `sandbox.command(cmd, options:).spawn()` |
 | Cleanup | `close().await`, RAII fallback | `close()`, `await using` | `async with` | `close()`, scoped helper |
@@ -1314,7 +1330,7 @@ Good DX here includes making authority visible:
 - package registry credentials remain in the host resolver;
 - environment variables are documented as visible to all code in the sandbox;
 - unsupported policy enforcement fails before execution;
-- `shell` advertises shell parsing in its name;
+- shell parsing requires explicitly executing an installed shell package;
 - output, package extraction, and filesystem growth are bounded;
 - every long-lived resource is closeable.
 
@@ -1420,28 +1436,18 @@ turning the core into a telemetry framework:
 Log sinks receive host control-plane diagnostics, not an automatic duplicate
 of guest stdout/stderr. Applications decide how guest output is stored.
 
-## 14. Reproducibility
+## 14. Package identity and cache behavior
 
-Every resolved sandbox can export its package lock:
-
-```ts
-const lock = await sandbox.packageLock();
-```
-
-The lock records exact content identities and dependency resolution. A
-snapshot references or embeds this lock. Cache contents are an optimization,
-never the source of truth.
-
-`wasmer.lock` is intended for source control. `.wasmer/` is not:
+Resolved packages expose their exact version and content digest. Applications
+that need reproducible execution should retain those exact package references
+in their own configuration. `.wasmer/` remains disposable cache state:
 
 ```gitignore
 .wasmer/
 ```
 
-Deleting `.wasmer` may cost downloads and compilation time, but the same lock,
-package content, target, and engine contract produces the same logical
-execution. Compiled artifacts from another target or engine fingerprint are
-never considered candidates.
+Deleting `.wasmer` may cost downloads and compilation time. Compiled artifacts
+from another target or engine fingerprint are never considered candidates.
 
 Examples in conceptual documentation may use a stable channel such as
 `python/python@3.12`. Release tests and production guides should use a verified
@@ -1458,7 +1464,6 @@ shown as placeholders rather than fabricated.
 - an SDK-specific terminal renderer;
 - a universal “secret” object implemented as guest environment variables;
 - automatic host file synchronization;
-- live process-memory snapshots;
 - claims of fine-grained egress control without an enforcing network path.
 
 These can be built above the SDK or introduced later with explicit capability
@@ -1527,9 +1532,9 @@ It also incorporates useful patterns from current sandbox products:
   persistent environment lifecycle;
 - Modal's process streams, command timeout, idle timeout, and readiness model;
 - E2B's approachable command, file, and PTY namespaces;
-- Daytona's persistent sandbox lifecycle and snapshots;
+- Daytona's persistent sandbox lifecycle;
 - Cloudflare Sandbox's clear completed-command result;
-- CodeSandbox SDK's lifecycle and fork concepts;
+- CodeSandbox SDK's lifecycle concepts;
 - Beam's code, process, filesystem, and service workflows;
 - Riza's concise code/input/limits workflow;
 - agentOS's deny-by-default permissions and virtual OS model;

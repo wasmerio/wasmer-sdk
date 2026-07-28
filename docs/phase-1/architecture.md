@@ -93,8 +93,8 @@ architecture decision relies on undocumented assumptions about it.
   defaults, and the Wasmer runtime objects used by this build.
 - **Package spec**: an unresolved reference such as `python/python@3.12`, a
   registry URL, a local WEBC path, or WEBC bytes.
-- **Resolved package**: immutable package content, dependency graph, manifest,
-  commands, digests, and an explicit lock.
+- **Resolved package**: immutable package content, resolved dependencies,
+  manifest, commands, and content digests.
 - **Runner**: code that interprets a package command's runner URI and prepares
   it for execution. WASI/WASIX command runners are the first implementation.
 - **Sandbox**: a mutable isolated virtual OS context with a root filesystem,
@@ -127,10 +127,9 @@ flowchart TB
 
     subgraph RustAPI["Public Rust API"]
         MODEL["Contract model\nerrors, capabilities, policies"]
-        PKG["Package service\nresolve, lock, verify, cache"]
+        PKG["Package service\nresolve, verify, cache"]
         SANDBOX["Sandbox and process API"]
         LIFE["Lifecycle and event model"]
-        SNAP["Portable filesystem snapshots"]
         RUNNERS["Runner selection\nWASI/WASIX first"]
     end
 
@@ -196,7 +195,7 @@ contains:
 
 - package identity and version;
 - the canonical manifest;
-- the complete dependency lock;
+- resolved dependencies and their content identities;
 - command descriptors and optional entrypoint;
 - command runner URIs and annotations;
 - the package filesystem layers;
@@ -221,9 +220,9 @@ A sandbox owns mutable execution state:
 - a capability policy;
 - lifecycle state and event channel.
 
-The default sandbox is ephemeral and isolated from other sandboxes. A portable
-filesystem snapshot can seed a new sandbox. Sharing a mutable `Directory`
-between sandboxes must be explicit.
+The default sandbox is ephemeral and isolated from other sandboxes. State
+survives only through an explicitly persistent mounted filesystem. Sharing a
+mutable `Directory` between sandboxes must be explicit.
 
 ### Process
 
@@ -290,8 +289,8 @@ revocation becomes a guest filesystem error and a structured host event.
 
 A browser mount is live only when the target can bridge asynchronous provider
 operations to Wasmer correctly. Importing a directory into a portable
-`Directory` is a separate snapshot/copy operation; the SDK never silently
-substitutes it for a requested live mount.
+`Directory` is a separate copy operation; the SDK never silently substitutes
+it for a requested live mount.
 
 ## Execution flow
 
@@ -306,7 +305,7 @@ sequenceDiagram
     participant Guest
 
     App->>SDK: load(package spec)
-    SDK->>Packages: resolve + verify + lock
+    SDK->>Packages: resolve + verify
     Packages-->>SDK: immutable resolved package
     App->>SDK: create sandbox(config)
     SDK-->>App: sandbox + capability report
@@ -345,7 +344,7 @@ The architecture supports:
 - registry or HTTPS URLs;
 - WEBC bytes;
 - local WEBC files on hosts with a filesystem;
-- pre-resolved package locks and offline bundles;
+- exact content references and offline package bundles;
 - programmatically created packages in a later increment.
 
 Platform veneers may expose only applicable sources. For example, a browser
@@ -360,7 +359,6 @@ PackageSpec
   -> digest verification
   -> WEBC parse and validation
   -> dependency resolution
-  -> canonical PackageLock
   -> content-addressed blob admission
   -> ResolvedPackage
 ```
@@ -370,8 +368,26 @@ perform no guest execution. Registry redirects and authentication are host
 policy decisions. Registry tokens never become guest environment variables.
 
 Unversioned registry specs are allowed for development, but resolution records
-the exact version and digest. Reproducible/production mode may require an exact
-version, lock, or expected digest.
+the exact version and digest for the lifetime of the resolved package.
+Reproducible or production usage may require an exact version or expected
+digest.
+
+### Installing into a live sandbox
+
+Packages supplied during sandbox creation and packages installed afterward use
+the same resolver and validation pipeline. Installing a package into a live
+sandbox:
+
+1. resolves, verifies, and prepares the package and its dependencies;
+2. validates target capabilities and computes the updated command namespace;
+3. atomically extends the sandbox's read-only package layers and command set.
+
+A failure leaves the sandbox unchanged. Installation does not run the package
+entrypoint, execute an install script, or invoke a guest operating-system
+package manager. Existing processes continue running; commands started after
+installation can use the newly installed package. Reinstalling the same exact
+package is idempotent. If packages export the same bare command name, callers
+must select one through its package's explicit command reference.
 
 ### Caches
 
@@ -401,7 +417,6 @@ The logical layout is:
 │   └── refs/
 ├── compiled/
 │   └── <target>/<engine-fingerprint>/modules/sha256/
-├── locks/
 └── tmp/
 ```
 
@@ -422,9 +437,8 @@ against replacement of both files.
 
 Writes use temporary files plus atomic publication, and concurrent processes
 coordinate per cache key. Eviction is an implementation policy and does not
-change package identity. `wasmer.lock` remains outside `.wasmer` and is
-reproducibility input; `.wasmer` is disposable and normally ignored by source
-control.
+change package identity. `.wasmer` is disposable and normally ignored by
+source control.
 
 The complete cache contract, layout, trust policy, and configuration are
 specified in Phase 2's
@@ -576,7 +590,6 @@ includes at least:
 - interactive stdio and PTY;
 - filesystem implementations and host mounts;
 - network modes;
-- filesystem snapshots and memory snapshots;
 - interruption modes;
 - each resource limit's enforcement level;
 - deployment prerequisites and detected failures.
@@ -607,9 +620,6 @@ This table is a design target, not a claim of completed support:
 | Raw host networking | Explicit opt-in | No | Explicit opt-in | Constrained opt-in |
 | Virtual/proxied network | Target | Target | Target | Target/validate |
 | PTY | Target/validate | Emulated/validate | Emulated/validate | Validate |
-| Filesystem snapshot | Target | Target | Target | Target |
-| Live memory snapshot | Optional | Optional | Optional | Not initially |
-
 No cell becomes a release claim until a conformance test proves it.
 
 ## Filesystem architecture
@@ -637,27 +647,6 @@ Required invariants:
 - Cross-sandbox sharing is explicit.
 - File APIs are binary-first; text helpers require UTF-8.
 - Quotas are enforced inside the portable VFS before allocation/write.
-
-### Persistence
-
-The portable persistence format is a versioned filesystem snapshot containing:
-
-- normalized paths and entry kinds;
-- file bytes and metadata the contract chooses to preserve;
-- mount-independent writable state;
-- content digests;
-- format and contract versions.
-
-It intentionally excludes:
-
-- host mount contents unless explicitly exported;
-- registry credentials;
-- open file descriptors;
-- live process memory;
-- network connections.
-
-This format can move between native, browser, Node.js, and iOS. Target-specific
-live memory snapshots may exist later but are not called portable.
 
 ## Process and I/O architecture
 
@@ -1033,15 +1022,15 @@ result = await process.wait()
 Long-running and multi-package behavior uses the same model:
 
 ```text
-sandbox.install(bash)
-sandbox.install(coreutils)
-postgres = await sandbox.spawn(postgres_package.command("postgres"), ...)
+await sandbox.install_package(bash)
+await sandbox.install_package(coreutils)
+postgres = await sandbox.command(postgres_package.command("postgres")).spawn()
 endpoint = await sandbox.network.bridge(postgres, guest_port=5432)
 ```
 
-The architecture does not require `install` to copy package bytes. It means the
-package's commands and filesystem layers become available to the sandbox's
-package resolver/process namespace.
+The architecture does not require installation to copy package bytes. It means
+the package's commands and filesystem layers become available to the sandbox's
+package resolver and process namespace.
 
 ## Versioning
 
@@ -1050,8 +1039,6 @@ Track separate identities:
 - **SDK semantic version**: source-level product API.
 - **Contract version**: records, events, errors, lifecycle semantics, and
   cross-target conformance.
-- **Package lock version**: canonical dependency and digest format.
-- **Filesystem snapshot version**: portable persisted state.
 - **Runtime build fingerprint**: Wasmer/engine/compiler/target/features and
   configuration identity for compiled cache safety.
 - **Runner implementation identity**: behavior relevant to package execution.
@@ -1067,6 +1054,7 @@ The same black-box suite runs against every target build and language façade.
 ### Contract tests
 
 - package resolution and digest failures;
+- atomic package installation after sandbox creation;
 - command and entrypoint selection;
 - args, environment, cwd, and exit status;
 - binary stdin/stdout/stderr with chunk boundaries;
@@ -1079,7 +1067,6 @@ The same black-box suite runs against every target build and language façade.
 - output, filesystem, process, thread, and memory limits;
 - lifecycle cleanup and repeated creation;
 - stable error codes and events;
-- snapshot export/import;
 - concurrent independent sandboxes.
 
 ### Package compatibility matrix
@@ -1175,9 +1162,10 @@ It should compare at least:
 ## Phase 3 order of implementation
 
 1. Prove the direct Rust API with a native minimal WASI package.
-2. Implement package resolution/locking, the project-local package cache, and
+2. Implement package resolution, the project-local package cache, and
    the portable VFS.
 3. Add WASIX package commands, streamed process I/O, and capability reporting.
+   Prove package installation both during and after sandbox creation.
 4. Add target-partitioned compiled caching and prove authenticated provenance
    before enabling persistent native deserialization.
 5. Compile the same Rust API with Wasmer's `js` feature and prove one browser
@@ -1188,8 +1176,7 @@ It should compare at least:
 9. Add Bash, Python, EdgeJS/QuickJS, and PostgreSQL compatibility fixtures.
 10. Prove the object-safe filesystem provider with a native test filesystem,
    OPFS, and a user-selected browser directory handle.
-11. Add snapshots, advanced networking, and PTY only after the basic contract is
-   stable.
+11. Add advanced networking and PTY only after the basic contract is stable.
 
 ## Phase 1 completion criteria
 
@@ -1208,7 +1195,6 @@ Phase 1 is complete when the project agrees on:
 - runner extensibility;
 - an object-safe filesystem-provider boundary with capability-gated live
   browser mounts;
-- portable filesystem snapshots;
 - cross-target conformance as a release gate;
 - the iOS and browser risks that must be proved before broad claims.
 

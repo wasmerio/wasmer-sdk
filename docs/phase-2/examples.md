@@ -175,19 +175,16 @@ sandbox.close().await?;
 The exact EdgeJS command contract remains a Phase 3 compatibility test. The
 important SDK property is that no JavaScript-specific branch is involved.
 
-## 3. Keep a workspace across commands
+## 3. Install packages into a live sandbox
 
-Session use keeps files, environment, package resolution, and process state
-together.
+Packages can be supplied at creation or installed later. Both paths use the
+same resolver and cache. Dynamic installation is useful when an agent or
+application discovers the required tool after the sandbox already exists.
 
 ### JavaScript
 
 ```ts
 await using sandbox = await wasmer.createSandbox({
-  packages: [
-    "python/python@3.12",
-    "wasmer/bash@1.0.25",
-  ],
   env: {
     APP_ENV: "test",
   },
@@ -197,6 +194,9 @@ await using sandbox = await wasmer.createSandbox({
   },
 });
 
+const python = await sandbox.installPackage("python/python@3.12");
+await sandbox.installPackage("wasmer/bash@1.0.25");
+
 await sandbox.fs.writeText(
   "/workspace/build.py",
   `
@@ -205,13 +205,16 @@ Path("/workspace/result.txt").write_text("built in " + __import__("os").environ[
 `,
 );
 
-(await sandbox.command("python", {
+(await sandbox.command(python.command("python"), {
   args: ["/workspace/build.py"],
 }).run()).check();
 
-const listing = await sandbox.shell(
-  "wc -c /workspace/result.txt && cat /workspace/result.txt",
-).run();
+const listing = await sandbox.command("bash", {
+  args: [
+    "-lc",
+    "wc -c /workspace/result.txt && cat /workspace/result.txt",
+  ],
+}).run();
 
 console.log(await listing.check().stdout.text());
 ```
@@ -221,12 +224,17 @@ console.log(await listing.check().stdout.text());
 ```rust
 let sandbox = wasmer
     .sandbox()
-    .package("python/python@3.12")
-    .package("wasmer/bash@1.0.25")
     .env("APP_ENV", "test")
     .memory_limit(512 * 1024 * 1024)
     .max_processes(8)
     .start()
+    .await?;
+
+let python = sandbox
+    .install_package("python/python@3.12")
+    .await?;
+sandbox
+    .install_package("wasmer/bash@1.0.25")
     .await?;
 
 sandbox
@@ -243,21 +251,26 @@ Path("/workspace/result.txt").write_text(
     .await?;
 
 sandbox
-    .command("python")
+    .command(python.command("python")?)
     .arg("/workspace/build.py")
     .output()
     .await?
     .check()?;
 
 let listing = sandbox
-    .shell("wc -c /workspace/result.txt && cat /workspace/result.txt")
+    .command("bash")
+    .args([
+        "-lc",
+        "wc -c /workspace/result.txt && cat /workspace/result.txt",
+    ])
     .output()
     .await?
     .check()?;
 ```
 
-`shell()` is concise for a trusted script. User-controlled values should be
-passed through `args` to a command instead of interpolated into the script.
+The shell comes from the explicitly installed Bash package. It is not an
+ambient sandbox facility. User-controlled values should be passed as ordinary
+arguments instead of interpolated into a shell script.
 
 ## 4. Treat files as inputs and artifacts
 
@@ -831,57 +844,7 @@ must not make process ownership ambiguous. Foreign-future cancellation alone
 is insufficient because Python, Swift, Rust, and JavaScript cancel
 differently.
 
-## 13. Snapshot and branch a workspace
-
-Snapshots make experimental work cheap without claiming to clone live process
-memory.
-
-### JavaScript
-
-```ts
-await using base = await wasmer.createSandbox({
-  packages: ["python/python@3.12"],
-  files: {
-    "/workspace/app.py": "print('base')",
-  },
-  metadata: {
-    project: "demo",
-  },
-});
-
-(await base.command("python", {
-  args: ["/workspace/app.py"],
-}).run()).check();
-
-const checkpoint = await base.snapshot();
-
-await using experimentA = await wasmer.createSandbox({
-  snapshot: checkpoint,
-});
-await using experimentB = await base.fork();
-
-await experimentA.fs.writeText("/workspace/config.txt", "strategy=A");
-await experimentB.fs.writeText("/workspace/config.txt", "strategy=B");
-```
-
-### Rust
-
-```rust
-let checkpoint = base.snapshot().await?;
-
-let experiment_a = wasmer
-    .sandbox()
-    .snapshot(checkpoint.clone())
-    .start()
-    .await?;
-
-let experiment_b = base.fork().await?;
-```
-
-The package lock and files are reproduced. Running processes, open sockets,
-port forwards, and native host mounts are not.
-
-## 14. Share a portable directory
+## 13. Share a portable directory
 
 A `Directory` can be an input bundle, dependency cache, database volume, or
 artifact exchange without exposing a host path.
@@ -915,9 +878,9 @@ const output = await consumer.command("inspect", {
 ```
 
 Concurrent read-write sharing has explicit filesystem consistency semantics.
-For branch-style isolation, use a snapshot or cloned directory instead.
+For isolated copies, create or import a separate `Directory`.
 
-## 15. Mount source code on a native host
+## 14. Mount source code on a native host
 
 Node.js and native Rust can deliberately grant a host directory. It is
 read-only by default and unavailable in browser builds.
@@ -957,7 +920,7 @@ let sandbox = wasmer
 The guest output goes to `/workspace`; source code is not writable unless the
 application consciously changes the mount mode.
 
-## 16. Mount a browser File System API directory
+## 15. Mount a browser File System API directory
 
 The application obtains a browser handle during a user gesture, then gives the
 SDK a scoped filesystem rather than an ambient host path.
@@ -1039,7 +1002,7 @@ read-only mount cannot write even if the browser handle itself has write
 permission. Permission revocation is surfaced as a filesystem permission
 error, not as an empty directory.
 
-## 17. Select a package command without ambiguity
+## 16. Select a package command without ambiguity
 
 Package objects are useful when a package has several commands or two packages
 export the same name.
@@ -1095,7 +1058,7 @@ sandbox
 If `"format"` is ambiguous in the virtual `PATH`, using the explicit
 `CommandRef` remains deterministic.
 
-## 18. Build a safe shell tool for an AI agent
+## 17. Build a safe command tool for an AI agent
 
 An agent tool is a small wrapper over a long-lived sandbox. The tool accepts a
 program and argument list rather than an arbitrary shell string.
@@ -1139,17 +1102,17 @@ async function runTool(call: ToolCall) {
 
 The surrounding sandbox can add:
 
-- a read-only project mount or seeded project snapshot;
+- a read-only project mount or seeded `Directory`;
 - a writable `/workspace`;
-- a fixed package lock;
+- exact package versions or content digests;
 - no guest network, or an enforceable allowlist;
 - process, memory, time, filesystem, and output limits;
-- a new snapshot before each risky step.
 
-The wrapper intentionally does not expose `shell()` unless the product wants
-the model to have shell-language authority.
+The wrapper intentionally accepts argv rather than shell text. A product that
+wants shell-language authority can install Bash and expose
+`command("bash", { args: ["-lc", script] })` deliberately.
 
-## 19. Run isolated jobs concurrently
+## 18. Run isolated jobs concurrently
 
 `Wasmer` is shareable; sandboxes are independent.
 
@@ -1212,7 +1175,7 @@ The implementation may schedule work differently by target, but filesystem,
 environment, process table, limits, and guest identity never leak between
 sandboxes.
 
-## 20. Inspect compatibility before presenting a feature
+## 19. Inspect compatibility before presenting a feature
 
 Applications can use preflight to make their UI honest.
 
@@ -1251,7 +1214,7 @@ Useful issues include:
 - the package runner URI is unsupported;
 - restricted networking cannot be enforced on the selected target.
 
-## 21. What Phase 3 should turn into tests
+## 20. What Phase 3 should turn into tests
 
 Each example above should become one or more conformance fixtures. The first
 implementation milestone is not “all examples compile”; it is a vertical slice:
@@ -1261,10 +1224,11 @@ implementation milestone is not “all examples compile”; it is a vertical sli
 3. create a short-lived sandbox and run one command with bytes, text, status,
    timeout, and deterministic cleanup;
 4. keep a sandbox open and run two commands against the same files;
-5. expose the same behavior in browser JavaScript, Node.js, Python, and Swift;
-6. mount an OPFS root and a user-selected browser directory through the
+5. install a package after creation and use one of its commands;
+6. expose the same behavior in browser JavaScript, Node.js, Python, and Swift;
+7. mount an OPFS root and a user-selected browser directory through the
    filesystem-provider contract;
-7. then add streams, PTYs, services, network policy, and snapshots in measured
+8. then add streams, PTYs, services, and network policy in measured
    increments.
 
 The PostgreSQL and EdgeJS examples are especially valuable compatibility
