@@ -7,6 +7,17 @@ description = "A portable, package-first sandbox SDK powered by Wasmer"
 license = "MIT"
 repository = "https://github.com/wasmerio/wasmer-sdk"
 
+[workspace]
+members = [".", "crates/wasmer-sdk-js"]
+default-members = ["."]
+resolver = "2"
+
+[patch.crates-io]
+virtual-fs = { path = "vendor/virtual-fs" }
+wasmer = { path = "vendor/wasmer" }
+wasmer-c-api-imports = { path = "vendor/wasmer-c-api-imports" }
+wasmer-wasix = { path = "vendor/wasmer-wasix" }
+
 [features]
 default = ["sys"]
 sys = ["virtual-fs/host-fs", "wasmer/cranelift", "wasmer-wasix/sys-default"]
@@ -18,7 +29,7 @@ async-trait = "0.1"
 bytes = "1.11"
 futures = "0.3"
 thiserror = "2.0"
-tokio = { version = "1.49", features = ["fs", "io-util", "macros", "rt", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.49", features = ["io-util", "macros", "rt", "sync", "time"] }
 virtual-fs = { version = "=0.702.1", default-features = false }
 wasmer = { version = "=7.2.1", default-features = false }
 wasmer-c-api-imports = { version = "=7.2.1", default-features = false }
@@ -27,6 +38,9 @@ wasmer-package = "=0.702.1"
 wasmer-wasix = { version = "=0.702.1", default-features = false }
 wasmer-wasix-types = "=0.702.1"
 webc = "=12.0.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.49", features = ["fs", "rt-multi-thread"] }
 
 [dev-dependencies]
 tempfile = "3.23"

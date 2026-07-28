@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "sys"), allow(dead_code))]
+
 use std::{
     fmt::Debug,
     future::Future,

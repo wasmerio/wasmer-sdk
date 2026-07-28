@@ -521,6 +521,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -943,6 +953,17 @@ name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+
+[[package]]
+name = "derivative"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "derive_builder"
@@ -1777,6 +1798,18 @@ dependencies = [
  "similar",
  "strip-ansi-escapes",
  "tempfile",
+]
+
+[[package]]
+name = "instant"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
+dependencies = [
+ "cfg-if",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -3100,6 +3133,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "send_wrapper"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd0b0ec5f1c1ca621c432a25813d8d60c88abe6d3e08a3eb9cf37d97a0fe3d73"
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3864,8 +3903,6 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "virtual-fs"
 version = "0.702.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18f2136946b8a66d2bc7548fc4396c72e7a8671e8ab878342f5483e6c6dfd61f"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4150,8 +4187,6 @@ dependencies = [
 [[package]]
 name = "wasmer"
 version = "7.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05af716b1bf3de5b8081133223f77f37916e9b4f41e0781c7fbe3e0d7b6da43a"
 dependencies = [
  "bindgen",
  "bytes",
@@ -4189,8 +4224,6 @@ dependencies = [
 [[package]]
 name = "wasmer-c-api-imports"
 version = "7.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee73479a2849e7263c5e5b3e7834839766c9e522ac498b0ee272fe4968b83b11"
 dependencies = [
  "anyhow",
  "wasmer",
@@ -4370,6 +4403,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmer-sdk-js"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "console_error_panic_hook",
+ "derivative",
+ "futures",
+ "instant",
+ "js-sys",
+ "once_cell",
+ "send_wrapper",
+ "serde",
+ "serde-wasm-bindgen",
+ "tokio",
+ "tracing",
+ "virtual-mio",
+ "virtual-net",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasmer",
+ "wasmer-sdk",
+ "wasmer-types",
+ "wasmer-wasix",
+ "wasmer-wasix-types",
+ "web-sys",
+]
+
+[[package]]
 name = "wasmer-types"
 version = "7.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4427,8 +4490,6 @@ dependencies = [
 [[package]]
 name = "wasmer-wasix"
 version = "0.702.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90a93bb66bc9bb1c766d53c68676f8a4f23582b0feef6135c184dfd3bf762e2e"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -120,3 +120,30 @@ cargo run --example edgejs_http
 
 Its JavaScript source is in
 [`examples/edgejs-http/server.js`](examples/edgejs-http/server.js).
+
+## JavaScript SDK
+
+The JavaScript SDK is a `wasm-bindgen` facade over this Rust crate, compiled
+with Wasmer's `js` backend, WASIX, atomics, and shared memory. Blocking WASIX
+work runs in a dynamic Web Worker pool modeled on `wasmer-js`. Node networking
+is supplied by a JavaScript virtual-network adapter over `node:net` and
+`node:dns`; it is not a native addon.
+
+```ts
+import { Wasmer } from "@wasmer/sdk/node";
+
+await using wasmer = await Wasmer.create();
+await using sandbox = await wasmer.createSandbox({
+  packages: ["python/python@3.12"],
+});
+
+const output = await sandbox
+  .command("python", ["--version"])
+  .run({ check: true });
+
+console.log(output.text());
+```
+
+See [the JavaScript implementation notes](docs/phase-3/javascript-sdk.md) for
+the package layout, worker scheduler, Node network bridge, and build
+instructions.

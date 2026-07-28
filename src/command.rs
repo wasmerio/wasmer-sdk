@@ -1,23 +1,28 @@
-use std::{borrow::Cow, collections::BTreeMap, path::PathBuf, sync::Arc};
+#[cfg(feature = "sys")]
+use std::borrow::Cow;
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use bytes::Bytes;
-use virtual_fs::{AsyncSeekExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(feature = "sys")]
+use wasmer_wasix::runtime::ModuleInput;
 #[cfg(feature = "sys")]
 use wasmer_wasix::virtual_net::host::LocalNetworking;
 use wasmer_wasix::{
-    Runtime, UnsupportedVirtualNetworking, WasiError,
+    Runtime, UnsupportedVirtualNetworking,
     bin_factory::spawn_exec,
     fs::WasiFsRoot,
     runners::wasi::{PackageOrHash, RuntimeOrEngine, WasiRunner},
-    runtime::{ModuleInput, OverriddenRuntime},
+    runtime::OverriddenRuntime,
 };
 
+#[cfg(feature = "sys")]
+use crate::provider_fs::ProviderAdapter;
 use crate::{
     CommandSelector, Error, NetworkPolicy, Package, Process, ProcessExitError, ProcessStderr,
     ProcessStdin, ProcessStdout, Result, Sandbox,
     capture::BoundedCapture,
     fs::validate_guest_path,
-    provider_fs::ProviderAdapter,
     stream::{DuplexVirtualFile, RetainedOutput},
 };
 
@@ -128,97 +133,38 @@ impl Command {
     /// Returns an error if the sandbox is closed, command selection fails,
     /// stdin cannot be prepared, or the guest cannot be started or executed.
     pub async fn output(&mut self) -> Result<Output> {
-        self.sandbox.ensure_open()?;
-        let current_dir = validate_guest_path(&self.current_dir)?;
-        let (package, command_name, packages) = self.resolve()?;
-        let limit = self
-            .output_bytes
-            .unwrap_or(self.sandbox.inner.client.inner.output_bytes);
-
-        let mut stdin = virtual_fs::BufferFile::default();
-        stdin
-            .write_all(&self.input)
-            .await
-            .map_err(|error| Error::Execution {
-                message: format!("unable to prepare stdin: {error}"),
-            })?;
-        stdin.rewind().await.map_err(|error| Error::Execution {
-            message: format!("unable to rewind stdin: {error}"),
-        })?;
-
-        let (stdout, stdout_handle) = BoundedCapture::new(limit);
-        let (stderr, stderr_handle) = BoundedCapture::new(limit);
-        let args = self.args.clone();
-        let env = self.env.clone();
-        let runtime = sandbox_runtime(&self.sandbox);
-        let tasks = Arc::clone(&self.sandbox.inner.client.inner.tasks);
-        let workspace = self.sandbox.inner.workspace.clone();
-        let mounts = self.sandbox.inner.mounts.clone();
-        let selected = package.clone();
-
-        let task = tokio::task::spawn_blocking(move || {
-            let _runtime_guard = tasks.runtime_handle().enter();
-            let mut runner = WasiRunner::new();
-            runner
-                .with_args(args)
-                .with_envs(env)
-                .with_forward_host_env(false)
-                .with_current_dir(current_dir)
-                .with_mount("/workspace".to_owned(), Arc::new(workspace))
-                .with_injected_packages(
-                    packages
-                        .into_iter()
-                        .filter(|candidate| !candidate.same_as(&selected))
-                        .map(|candidate| candidate.inner.binary.clone()),
-                )
-                .with_stdin(Box::new(stdin))
-                .with_stdout(Box::new(stdout))
-                .with_stderr(Box::new(stderr));
-            for mount in mounts {
-                runner.with_mount(
-                    mount.guest_path.to_string_lossy().into_owned(),
-                    Arc::new(ProviderAdapter::new(
-                        mount.filesystem,
-                        mount.mode,
-                        tasks.runtime_handle(),
-                    )),
-                );
-            }
-
-            runner.run_command(
-                &command_name,
-                &selected.inner.binary,
-                RuntimeOrEngine::Runtime(runtime),
-            )
-        })
-        .await
-        .map_err(|error| Error::Task {
-            message: error.to_string(),
-        })?;
-
-        let status = match task {
-            Ok(()) => ExitStatus { code: 0 },
-            Err(error) => {
-                if let Some(WasiError::Exit(code)) = error
-                    .chain()
-                    .find_map(|cause| cause.downcast_ref::<WasiError>())
-                {
-                    ExitStatus { code: code.raw() }
-                } else {
-                    return Err(Error::Execution {
-                        message: format!("{error:#}"),
-                    });
-                }
-            }
+        let mut command = self.clone();
+        command.stdin = if command.input.is_empty() {
+            Stdio::Null
+        } else {
+            Stdio::Piped
         };
-        let (stdout, stdout_truncated) = stdout_handle.snapshot();
-        let (stderr, stderr_truncated) = stderr_handle.snapshot();
+        command.stdout = Stdio::Piped;
+        command.stderr = Stdio::Piped;
 
-        Ok(Output {
-            status,
-            stdout: CapturedOutput::from_parts(stdout, stdout_truncated),
-            stderr: CapturedOutput::from_parts(stderr, stderr_truncated),
+        let input = command.input.clone();
+        let mut process = Box::pin(command.spawn()).await?;
+        let stdin = process.take_stdin();
+        let stdout = process.take_stdout();
+        let stderr = process.take_stderr();
+
+        let feed_stdin = async move {
+            if let Some(mut stdin) = stdin {
+                stdin.write_all(&input).await?;
+                stdin.shutdown().await?;
+            }
+            Ok::<(), std::io::Error>(())
+        };
+        let drain_stdout = drain_stream(stdout);
+        let drain_stderr = drain_stream(stderr);
+        let (input_result, stdout_result, stderr_result, output) = Box::pin(async move {
+            tokio::join!(feed_stdin, drain_stdout, drain_stderr, process.wait())
         })
+        .await;
+        input_result?;
+        stdout_result?;
+        stderr_result?;
+        output
     }
 
     /// Spawn a live process with bounded streams and diagnostic retention.
@@ -290,11 +236,14 @@ impl Command {
         let runtime = sandbox_runtime(&self.sandbox);
         let selected = package.clone();
         let mut runner = WasiRunner::new();
+        #[cfg(feature = "sys")]
         let root_fs = apply_local_package_mounts(
             &mut runner,
             &selected,
             &self.sandbox.inner.client.inner.tasks.runtime_handle(),
         )?;
+        #[cfg(not(feature = "sys"))]
+        let root_fs = apply_local_package_mounts(&mut runner, &selected)?;
         runner
             .with_args(self.args.clone())
             .with_envs(self.env.clone())
@@ -313,6 +262,7 @@ impl Command {
             .with_stdin(guest_stdin)
             .with_stdout(guest_stdout)
             .with_stderr(guest_stderr);
+        #[cfg(feature = "sys")]
         for mount in &self.sandbox.inner.mounts {
             runner.with_mount(
                 mount.guest_path.to_string_lossy().into_owned(),
@@ -444,21 +394,30 @@ impl Command {
     }
 }
 
+async fn drain_stream<S>(stream: Option<S>) -> std::io::Result<()>
+where
+    S: tokio::io::AsyncRead + Unpin,
+{
+    if let Some(mut stream) = stream {
+        let mut scratch = [0_u8; 8192];
+        while stream.read(&mut scratch).await? != 0 {}
+    }
+    Ok(())
+}
+
 fn sandbox_runtime(sandbox: &Sandbox) -> Arc<dyn Runtime + Send + Sync> {
     let base: Arc<dyn Runtime + Send + Sync> =
         Arc::clone(&sandbox.inner.client.inner.runtime) as Arc<_>;
     let networking = match sandbox.inner.network {
         NetworkPolicy::Disabled => Arc::new(UnsupportedVirtualNetworking::default()) as Arc<_>,
-        NetworkPolicy::Host => host_networking(),
+        NetworkPolicy::Host => host_networking(&base),
     };
     let runtime: Arc<dyn Runtime + Send + Sync> =
         Arc::new(OverriddenRuntime::new(base).with_networking(networking));
     let runtime_for_resolver = Arc::clone(&runtime);
     let hooks =
         wasmer_c_api_imports::WasmCapiRuntimeHooks::new().with_resolve_module_sync(move |bytes| {
-            runtime_for_resolver
-                .resolve_module_sync(ModuleInput::Bytes(Cow::Owned(bytes)), None, None)
-                .map_err(anyhow::Error::from)
+            resolve_capi_module(runtime_for_resolver.as_ref(), bytes)
         });
 
     Arc::new(
@@ -474,15 +433,39 @@ fn sandbox_runtime(sandbox: &Sandbox) -> Arc<dyn Runtime + Send + Sync> {
 }
 
 #[cfg(feature = "sys")]
-fn host_networking() -> wasmer_wasix::virtual_net::DynVirtualNetworking {
+fn resolve_capi_module(
+    runtime: &(dyn Runtime + Send + Sync),
+    bytes: Vec<u8>,
+) -> anyhow::Result<wasmer::Module> {
+    runtime
+        .resolve_module_sync(ModuleInput::Bytes(Cow::Owned(bytes)), None, None)
+        .map_err(anyhow::Error::from)
+}
+
+#[cfg(all(not(feature = "sys"), feature = "js"))]
+fn resolve_capi_module(
+    runtime: &(dyn Runtime + Send + Sync),
+    bytes: Vec<u8>,
+) -> anyhow::Result<wasmer::Module> {
+    let store = runtime.new_store();
+    wasmer::Module::new(&store, bytes).map_err(anyhow::Error::from)
+}
+
+#[cfg(feature = "sys")]
+fn host_networking(
+    _base: &Arc<dyn Runtime + Send + Sync>,
+) -> wasmer_wasix::virtual_net::DynVirtualNetworking {
     Arc::new(LocalNetworking::default())
 }
 
 #[cfg(not(feature = "sys"))]
-fn host_networking() -> wasmer_wasix::virtual_net::DynVirtualNetworking {
-    Arc::new(UnsupportedVirtualNetworking::default())
+fn host_networking(
+    base: &Arc<dyn Runtime + Send + Sync>,
+) -> wasmer_wasix::virtual_net::DynVirtualNetworking {
+    Arc::clone(base.networking())
 }
 
+#[cfg(feature = "sys")]
 fn apply_local_package_mounts(
     runner: &mut WasiRunner,
     package: &Package,
@@ -560,6 +543,25 @@ fn apply_local_package_mounts(
     }
 
     Ok(Some(WasiFsRoot::from_filesystem(Arc::new(root))))
+}
+
+#[cfg(not(feature = "sys"))]
+fn apply_local_package_mounts(
+    _runner: &mut WasiRunner,
+    package: &Package,
+) -> Result<Option<WasiFsRoot>> {
+    if package
+        .inner
+        .binary
+        .additional_host_mapped_directories
+        .is_empty()
+    {
+        Ok(None)
+    } else {
+        Err(Error::CapabilityUnavailable {
+            capability: "local package directory mounts",
+        })
+    }
 }
 
 /// A process exit status.

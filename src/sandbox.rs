@@ -64,9 +64,10 @@ impl SandboxBuilder {
 
     /// Configure guest networking.
     ///
-    /// Networking is disabled by default. [`NetworkPolicy::Host`] gives guest
-    /// sockets direct access to the native host network and is therefore an
-    /// explicit, unrestricted capability grant.
+    /// Networking is disabled by default. [`NetworkPolicy::Host`] selects the
+    /// target's explicitly installed host bridge (native sockets on `sys`,
+    /// the injected JavaScript bridge on Node) and is therefore an
+    /// unrestricted capability grant.
     #[must_use]
     pub fn network(mut self, policy: NetworkPolicy) -> Self {
         self.network = policy;
@@ -81,12 +82,6 @@ impl SandboxBuilder {
     /// a seeded workspace file cannot be written.
     pub async fn start(self) -> Result<Sandbox> {
         self.client.ensure_open()?;
-        #[cfg(not(feature = "sys"))]
-        if self.network == NetworkPolicy::Host {
-            return Err(Error::CapabilityUnavailable {
-                capability: "host networking",
-            });
-        }
 
         let mut packages = Vec::with_capacity(self.packages.len());
         for source in self.packages {
@@ -140,6 +135,7 @@ pub struct Sandbox {
     pub(crate) inner: Arc<SandboxInner>,
 }
 
+#[cfg_attr(not(feature = "sys"), allow(dead_code))]
 pub(crate) struct SandboxInner {
     pub(crate) client: Wasmer,
     pub(crate) packages: RwLock<Vec<Package>>,
@@ -162,6 +158,7 @@ pub enum NetworkPolicy {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(not(feature = "sys"), allow(dead_code))]
 pub(crate) struct MountSpec {
     pub(crate) guest_path: PathBuf,
     pub(crate) filesystem: Arc<dyn FileSystem>,
