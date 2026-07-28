@@ -15,7 +15,7 @@ The architectural decisions in
 | DX-005 | Never parse the canonical command argument as a shell command line. Commands and argument arrays remain distinct to avoid quoting ambiguity and accidental injection. | Accepted |
 | DX-006 | Treat a nonzero guest exit as an execution result, not an SDK failure. Provide `check()` to opt into exception-style handling. | Accepted |
 | DX-007 | Make captured output byte-oriented with convenient UTF-8 text decoding. Apply an output limit by default and report truncation. | Accepted |
-| DX-008 | Use standard host-language streaming abstractions in public veneers: Web Streams in JavaScript and asynchronous byte readers/writers in Rust. | Accepted |
+| DX-008 | Use idiomatic host-language streaming abstractions. JavaScript byte streams guarantee `AsyncIterable`, add `lines()`, and expose Web Stream adapters; Rust uses asynchronous byte readers and writers. | Accepted |
 | DX-009 | Prefer conceptual parity over mechanically identical APIs. Rust uses builders and `snake_case`; JavaScript uses async factories, options objects, and `camelCase`. | Accepted |
 | DX-010 | Give a sandbox a writable `/workspace` default working directory and `/tmp`. Do not inherit host files, environment variables, working directory, or network access. | Accepted |
 | DX-011 | Keep `command()` directly on `Sandbox`; put execution terminals on the returned `Command`. Group secondary facilities under `fs`, `ports`, and `capabilities`. | Accepted |
@@ -46,9 +46,16 @@ The architectural decisions in
 | DX-037 | Make `preflight()` validate the same complete `SandboxOptions` accepted by `createSandbox()`, including all packages, mounts, policies, and requested enforcement. | Accepted |
 | DX-038 | For `spawn()`, default stdin to closed and stdout/stderr to bounded pipes. Request writable stdin explicitly; closing it sends EOF and does not terminate the process. | Accepted |
 | DX-039 | Require applications to drain live stdout and stderr concurrently. `wait()` joins the process but does not implicitly close application-owned stdin or replace pipe backpressure with unbounded buffering. | Accepted |
-| DX-040 | In JavaScript, make `sandbox.command(program, options)` return an immutable, reusable `Command` description. `run()` or `spawn()` starts a new process. | Accepted |
-| DX-041 | Do not expose `sandbox.shell()` in the universal core. Shell syntax is available only by installing a shell package and executing its command explicitly, such as `command("bash", { args: ["-lc", script] })`. | Accepted |
+| DX-040 | In JavaScript, make `sandbox.command(program, args?, options?)` return an immutable, reusable `Command` description. `run()` or `spawn()` starts a new process. | Accepted |
+| DX-041 | Expose `sandbox.sh` and `sandbox.shell()` only over an explicitly configured shell command supplied by an installed package. Tagged `sh` interpolation escapes each value as argument data; `shell(script)` accepts trusted opaque script text. | Accepted |
 | DX-042 | Expose `sandbox.installPackage(source)` and Rust `install_package(source)` for atomic installation after creation. It uses the normal resolver, returns the resolved `Package`, does not run package code, and leaves the sandbox unchanged on failure. | Accepted |
+| DX-043 | Decode captured bytes synchronously. `CapturedOutput.text()` returns `string`; `Output.text()` checks the result and returns decoded stdout as the common-case convenience. | Accepted |
+| DX-044 | Add `RunOptions.check`. `run({ check: true })` throws `ProcessExitError` for an unsuccessful completed process while retaining the same successful `Output` return type. Avoid parenthesized `(await run()).check()` examples. | Accepted |
+| DX-045 | Make positional argv the concise JavaScript form: `command(selector, args, options?)`. Keep `command(selector, options?)` for commands without arguments. | Accepted |
+| DX-046 | Resolve relative `SandboxOptions.files` keys and JavaScript filesystem paths against `/workspace`; retain absolute guest paths unchanged. `Directory.create()` resolves relative keys against the directory root. | Accepted |
+| DX-047 | Accept `Package` as a `CommandSelector`, meaning its declared entrypoint. A package without one fails with `PACKAGE_HAS_NO_ENTRYPOINT`. | Accepted |
+| DX-048 | Guarantee async iteration on JavaScript process output and add incremental `lines()` decoding. Web Streams remain available through explicit adapters. | Accepted |
+| DX-049 | Configure live-output retention with `SpawnOptions.outputBytes` before the process starts. `Process.wait()` cannot retroactively change the retained diagnostic bound. | Accepted |
 
 ## Names deliberately rejected
 
@@ -73,7 +80,8 @@ The architectural decisions in
 These decisions remain drafts until Phase 3 proves:
 
 1. the proposed async shapes can be exposed cleanly through UniFFI;
-2. Web Streams can be implemented without buffering or ownership surprises;
+2. async-iterable JavaScript byte streams, `lines()`, and Web Stream adapters
+   can be implemented without buffering or ownership surprises;
 3. deterministic close and cancellation work on every initial target;
 4. the capability and preflight reports accurately reflect browser, Node.js,
    desktop Rust, and iOS behavior;

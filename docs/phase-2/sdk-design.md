@@ -51,6 +51,7 @@ wasmer.createSandbox()
 sandbox.installPackage(package)
 sandbox.command(command).run()
 sandbox.command(command).spawn()
+sandbox.sh`command ${value}`.run()
 sandbox.fs
 sandbox.ports
 sandbox.close()
@@ -73,10 +74,10 @@ const wasmer = await Wasmer.create();
 await using sandbox = await wasmer.createSandbox({
   packages: ["python/python@3.12"],
 });
-const output = await sandbox.command("python", {
-  args: ["-c", "print('hello')"],
-}).run();
-console.log(await output.stdout.text());
+const output = await sandbox
+  .command("python", ["-c", "print('hello')"])
+  .run({ check: true });
+console.log(output.text());
 ```
 
 The next level should not require relearning the product:
@@ -87,9 +88,9 @@ await using sandbox = await wasmer.createSandbox({
 });
 
 await sandbox.fs.writeText("/workspace/main.py", "print('hello')");
-const output = await sandbox.command("python", {
-  args: ["/workspace/main.py"],
-}).run();
+const output = await sandbox
+  .command("python", ["main.py"])
+  .run({ check: true });
 ```
 
 Only users who need a live process should meet streams, process IDs,
@@ -135,11 +136,11 @@ deterministic.
 
 ### `Command`
 
-A process-free execution description created by `sandbox.command()`. It
-contains the selected program, arguments, environment overrides, and working
-directory, but it is not a running process. JavaScript exposes it as an
-immutable reusable value; Rust exposes the same concept as a conventional
-mutable builder.
+A process-free execution description created by `sandbox.command()`,
+`sandbox.sh`, or `sandbox.shell()`. It contains the selected program,
+arguments, environment overrides, and working directory, but it is not a
+running process. JavaScript exposes it as an immutable reusable value; Rust
+exposes the same concept as a conventional mutable builder.
 
 `Command.run()` starts a process and returns bounded completed output.
 `Command.spawn()` starts a process and returns live ownership. Reusing a
@@ -175,6 +176,10 @@ and explicit graceful and forced termination operations.
 The completed, bounded result of `Command.run()` or `process.wait()`: exit
 status, captured stdout and stderr, truncation metadata, and resource usage.
 
+`Output.text()` is the checked stdout convenience: it calls `check()` and then
+decodes stdout as UTF-8. `CapturedOutput.text()` decodes already captured bytes
+synchronously without changing exit behavior.
+
 A guest program exiting with code 1 is a valid `Output`. Resolution failures,
 policy violations, unsupported capabilities, and SDK failures are errors.
 
@@ -196,9 +201,11 @@ await using sandbox = await wasmer.createSandbox({
   packages: ["python/python@3.12"],
 });
 
-const output = await sandbox.command("python", {
-  args: ["-c", "print(sum(range(10)))"],
-}).run({
+const output = await sandbox.command(
+  "python",
+  ["-c", "print(sum(range(10)))"],
+).run({
+  check: true,
   timeoutMs: 5_000,
 });
 ```
@@ -229,14 +236,16 @@ await using sandbox = await wasmer.createSandbox({
 });
 
 await sandbox.installPackage("python/python@3.12");
-await sandbox.installPackage("wasmer/bash@1.0.25");
+await sandbox.installPackage("wasmer/bash@1.0.25", {
+  asShell: "bash",
+});
 await sandbox.fs.writeText("/workspace/main.py", "print('persistent')");
-const first = await sandbox.command("python", {
-  args: ["/workspace/main.py"],
-}).run();
-const second = await sandbox.command("bash", {
-  args: ["-lc", "ls -la /workspace"],
-}).run();
+const first = await sandbox
+  .command("python", ["main.py"])
+  .run({ check: true });
+const second = await sandbox.sh`ls -la /workspace`.run({
+  check: true,
+});
 ```
 
 The sandbox remains alive until `close()`. Closing it terminates remaining
@@ -245,26 +254,28 @@ runtime resources.
 
 ## 5. Command semantics
 
-### 5.1 `command`, `run`, and `spawn`
+### 5.1 `command`, `run`, `spawn`, `sh`, and `shell`
 
-These names carry one meaning in every language:
+`command`, `run`, and `spawn` carry one meaning in every language. JavaScript
+adds `sh` and `shell()` as command-building conveniences because tagged
+templates can make interpolation safe:
 
 | Operation | Input | Returns | Shell parsing | Typical use |
 | --- | --- | --- | --- | --- |
 | `command` | program plus argument list | immutable `Command` description | No | Describe argv execution |
 | `Command.run` | run options | completed `Output` | No | Scripts, tools, tests |
 | `Command.spawn` | spawn options | live `Process` | No | Streams, servers, REPLs |
+| `sh` | tagged template | `Command` using the configured shell | Literal syntax only; interpolations become escaped arguments | Safe shell composition |
+| `shell` | opaque script text | `Command` using the configured shell | Yes | Trusted static scripts |
 
 JavaScript:
 
 ```ts
-await sandbox.command("python", { args: ["-c", userCode] }).run();
-await sandbox.command("python", { args: ["-i"] }).spawn({
+await sandbox.command("python", ["-c", userCode]).run({ check: true });
+await sandbox.command("python", ["-i"]).spawn({
   terminal: true,
 });
-await sandbox.command("bash", {
-  args: ["-lc", "find /workspace -type f | sort"],
-}).run();
+await sandbox.sh`find /workspace -type f | sort`.run({ check: true });
 ```
 
 Rust:
@@ -278,18 +289,34 @@ sandbox.command("bash")
     .await?;
 ```
 
-The program supplied to `command()` is never tokenized. To execute a shell
-script, the sandbox must contain a shell package and the application invokes
-that shell explicitly, such as `command("bash", { args: ["-lc", script] })`.
-Applications must not interpolate untrusted text into shell scripts.
+Rust keeps shell invocation visible as ordinary argv. Python and Swift veneers
+may add an escaped shell builder only if they can preserve the same semantics;
+the Rust core does not need a special shell execution path.
+
+The program supplied to `command()` is never tokenized. `sh` and `shell()`
+exist only when the sandbox has an explicitly configured shell provider from
+an installed package. They never install or assume a host shell.
+
+Tagged interpolation is safe by default:
+
+```ts
+const userQuery = "hello; rm -rf /";
+await sandbox.sh`grep -r ${userQuery} /workspace`.run({ check: true });
+```
+
+The interpolated value becomes one shell argument; its punctuation cannot
+become shell syntax. An interpolated array expands to multiple individually
+escaped arguments. `shell(script)` is the escape hatch for trusted opaque
+script text and performs no interpolation protection.
 
 ### 5.2 Command resolution
 
-Commands may be selected in two ways:
+Commands may be selected in three ways:
 
 1. an installed, non-conflicting command name such as `"python"`;
 2. an explicit `CommandRef`, for example
-   `python.command("python")`.
+   `python.command("python")`;
+3. a `Package`, meaning its declared entrypoint.
 
 An explicit command reference resolves packages that export multiple commands
 or disambiguates packages that export the same command name:
@@ -300,10 +327,21 @@ await using sandbox = await wasmer.createSandbox({
   packages: [toolbox],
 });
 
-await sandbox.command(toolbox.command("formatter"), {
-  args: ["src/main.c"],
-}).run();
+await sandbox
+  .command(toolbox.command("formatter"), ["src/main.c"])
+  .run({ check: true });
 ```
+
+Selecting a package without an entrypoint fails with
+`PACKAGE_HAS_NO_ENTRYPOINT`; callers never need a non-null assertion:
+
+```ts
+const edgejs = await wasmer.loadPackage("wasmer/edgejs-quickjs@0.0.3");
+await sandbox.command(edgejs, ["main.js"]).run({ check: true });
+```
+
+The package must already be installed in that sandbox. A resolved but
+uninstalled package fails with `PACKAGE_NOT_INSTALLED`.
 
 ### 5.3 Defaults
 
@@ -373,6 +411,8 @@ export type PackageSource =
   | Package
   | { path: string };
 
+export type CommandSelector = string | CommandRef | Package;
+
 export class Package {
   readonly id: string;
   readonly digest: string;
@@ -403,12 +443,20 @@ export class Sandbox implements AsyncDisposable {
   readonly ports: Ports;
   readonly capabilities: Capabilities;
 
+  command(command: CommandSelector, options?: CommandOptions): Command;
   command(
-    command: string | CommandRef,
+    command: CommandSelector,
+    args: readonly string[],
     options?: CommandOptions,
   ): Command;
 
-  installPackage(source: PackageSource): Promise<Package>;
+  readonly sh: ShellTag;
+  shell(script: string, options?: CommandOptions): Command;
+
+  installPackage(
+    source: PackageSource,
+    options?: InstallPackageOptions,
+  ): Promise<Package>;
   close(): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
 }
@@ -423,12 +471,30 @@ export interface SandboxOptions {
   network?: NetworkPolicy;
   minimumEnforcement?: EnforcementLevel;
   metadata?: Readonly<Record<string, string>>;
+  shell?: CommandSelector;
 }
 
 export interface CommandOptions {
-  args?: readonly string[];
   env?: Readonly<Record<string, string>>;
   cwd?: string;
+}
+
+export interface InstallPackageOptions {
+  // Select one command exported by this package as the sandbox's shell.
+  asShell?: string;
+}
+
+export type ShellValue =
+  | string
+  | number
+  | URL
+  | readonly (string | number | URL)[];
+
+export interface ShellTag {
+  (
+    strings: TemplateStringsArray,
+    ...values: readonly ShellValue[]
+  ): Command;
 }
 
 export class Command {
@@ -450,9 +516,12 @@ await using sandbox = await wasmer.createSandbox();
 
 const python = await sandbox.installPackage("python/python@3.12");
 
-const output = await sandbox.command(python.command("python"), {
-  args: ["-c", "print('installed after creation')"],
-}).run();
+const output = await sandbox
+  .command(python.command("python"), [
+    "-c",
+    "print('installed after creation')",
+  ])
+  .run({ check: true });
 ```
 
 Installation never runs an entrypoint or package-provided setup script.
@@ -462,6 +531,30 @@ the sandbox remains unchanged. Installing the same exact package again is
 idempotent. Command-name collisions do not make installation order
 significant: the bare name becomes ambiguous and an explicit
 `package.command(name)` remains available.
+
+The shell convenience has the same explicit provenance. A shell can be
+selected from creation-time packages with `SandboxOptions.shell`, or from a
+dynamically installed package:
+
+```ts
+await sandbox.installPackage("wasmer/bash@1.0.25", {
+  asShell: "bash",
+});
+
+const output = await sandbox.sh`printf "%s\\n" ${userValue}`.run({
+  check: true,
+});
+
+await sandbox.shell(`
+  set -eu
+  make build
+  make test
+`).run({ check: true });
+```
+
+The selected command must implement the documented POSIX-style `-c` contract.
+Without a configured shell, `sh` and `shell()` fail with
+`SHELL_NOT_CONFIGURED`.
 
 `await using` is a welcome convenience where explicit resource management is
 available:
@@ -488,10 +581,12 @@ export interface RunOptions {
   stdin?: string | Uint8Array;
   timeoutMs?: number;
   outputBytes?: number;
+  check?: boolean;
 }
 
 export interface SpawnOptions {
   timeoutMs?: number;
+  outputBytes?: number;
   stdin?: "pipe" | "closed";
   stdout?: "pipe" | "discard";
   stderr?: "pipe" | "discard";
@@ -514,22 +609,25 @@ export class Output {
   readonly usage: ResourceUsage;
 
   check(): this;
+  text(encoding?: "utf-8"): string;
 }
 
 export class CapturedOutput {
   readonly bytes: Uint8Array;
   readonly truncated: boolean;
-  text(encoding?: "utf-8"): Promise<string>;
+  text(encoding?: "utf-8"): string;
 }
 ```
 
 `run()` is the concise form when all input is already available:
 
 ```ts
-const output = await sandbox.command("python", {
-  args: ["-c", "import sys; print(sys.stdin.read().upper())"],
-}).run({
+const output = await sandbox.command(
+  "python",
+  ["-c", "import sys; print(sys.stdin.read().upper())"],
+).run({
   stdin: "hello\n",
+  check: true,
 });
 ```
 
@@ -541,12 +639,21 @@ application never intended to provide. A discarded stream is explicit.
 `ProcessExitError` containing the output otherwise:
 
 ```ts
-const output = (await sandbox.command("tests").run()).check();
-console.log(await output.stdout.text());
+const output = await sandbox.command("tests").run({ check: true });
+console.log(output.text());
 ```
 
 Output is bytes first. Text decoding is explicit because compiler artifacts,
 images, protocol frames, and invalid UTF-8 are legitimate output.
+`CapturedOutput.text()` is synchronous because capture is already complete.
+`Output.text()` is sugar for `output.check().stdout.text()`.
+
+`run({ check: true })` performs the same check before resolving. It changes
+error behavior, not the return type: successful calls still return `Output`,
+and the thrown `ProcessExitError` still contains the completed output.
+
+`RunOptions.outputBytes` is applied to the internal process before it starts.
+For live processes, the equivalent bound is `SpawnOptions.outputBytes`.
 
 Once a process has started, an exit, signal, requested termination, timeout, or
 resource-limit event is represented by `Output.reason`, preserving captured
@@ -559,22 +666,36 @@ SDK errors.
 ```ts
 export class Process {
   readonly id: number;
-  readonly stdin: WritableStream<Uint8Array> | null;
-  readonly stdout: ReadableStream<Uint8Array> | null;
-  readonly stderr: ReadableStream<Uint8Array> | null;
+  readonly stdin: WritableBytes | null;
+  readonly stdout: ReadableBytes | null;
+  readonly stderr: ReadableBytes | null;
   readonly terminal: Terminal | null;
 
   wait(options?: {
-    outputBytes?: number;
     signal?: AbortSignal;
   }): Promise<Output>;
   terminate(options?: { gracePeriodMs?: number }): Promise<void>;
   kill(): Promise<void>;
 }
 
+export class ReadableBytes implements AsyncIterable<Uint8Array> {
+  [Symbol.asyncIterator](): AsyncIterator<Uint8Array>;
+  lines(options?: {
+    encoding?: "utf-8";
+    keepNewline?: boolean;
+  }): AsyncIterable<string>;
+  toReadableStream(): ReadableStream<Uint8Array>;
+}
+
+export class WritableBytes {
+  write(data: string | Uint8Array): Promise<void>;
+  close(): Promise<void>;
+  toWritableStream(): WritableStream<Uint8Array>;
+}
+
 export class Terminal {
-  readonly readable: ReadableStream<Uint8Array>;
-  readonly writable: WritableStream<Uint8Array>;
+  readonly readable: ReadableBytes;
+  readonly writable: WritableBytes;
   resize(columns: number, rows: number): Promise<void>;
 }
 ```
@@ -583,20 +704,24 @@ A PTY merges terminal output by design; `stdout` and `stderr` are `null` when
 `terminal` is present. `terminate()` asks the guest to exit and may escalate
 after the grace period. `kill()` is immediate forced termination.
 
-Piped stdin is an ordinary Web `WritableStream`. Closing its writer sends EOF
-to the guest:
+SDK byte streams guarantee async iteration and provide Web Stream adapters for
+interoperability. `lines()` incrementally decodes across chunk boundaries and
+never assumes that one byte chunk is one line. Streams are single-consumer:
+iteration, `lines()`, or `toReadableStream()` claims the read side.
+
+Closing piped stdin sends EOF to the guest:
 
 ```ts
-const process = await sandbox.command("python", {
-  args: ["-u", "/workspace/worker.py"],
-}).spawn({
+const process = await sandbox.command(
+  "python",
+  ["-u", "worker.py"],
+).spawn({
   stdin: "pipe",
 });
 
-const writer = process.stdin!.getWriter();
-await writer.write(new TextEncoder().encode("first request\n"));
-await writer.write(new TextEncoder().encode("second request\n"));
-await writer.close(); // EOF
+await process.stdin!.write("first request\n");
+await process.stdin!.write("second request\n");
+await process.stdin!.close(); // EOF
 
 const output = await process.wait();
 ```
@@ -611,10 +736,11 @@ does not guess whether the caller meant graceful or forced termination.
 `Command.run()` is defined in terms of a sandbox-owned process, so
 foreign-promise cancellation is never the only process-control mechanism.
 
-For a spawned process, piped output is also retained up to the configured
-shared capture bound, so `wait()` can return a complete bounded `Output` even
-when the application observed chunks live. Reading a stream does not make the
-final diagnostics disappear.
+For a spawned process, piped output is retained from process start up to
+`SpawnOptions.outputBytes`, so `wait()` can return a complete bounded `Output`
+even when the application observed chunks live. Reading a stream does not make
+the final diagnostics disappear. The limit cannot be supplied retroactively
+to `wait()`.
 
 ### 6.5 Filesystem
 
@@ -641,9 +767,21 @@ export class Directory {
 }
 ```
 
-Paths are absolute guest paths in the core contract. JavaScript conveniences
-may accept workspace-relative paths but must normalize them predictably and
+Paths are absolute guest paths in the core contract. In
+`SandboxOptions.files`, relative keys resolve against `/workspace`; absolute
+keys remain absolute. In `Directory.create()`, relative keys resolve against
+that directory's root. JavaScript filesystem methods accept both absolute
+paths and paths relative to `/workspace`, normalize them predictably, and
 report the resolved guest path in errors.
+
+```ts
+await using sandbox = await wasmer.createSandbox({
+  files: {
+    "main.py": "print('hello')",          // /workspace/main.py
+    "/etc/app/config.json": "{}",         // remains absolute
+  },
+});
+```
 
 ### 6.5.1 Mountable filesystem providers
 
@@ -1014,8 +1152,12 @@ if !output.status.success() {
 }
 
 let output = output.check()?;
-let text = output.stdout.text()?;
+let text = output.text()?;
 ```
+
+Rust `Output::text()` mirrors the JavaScript convenience: it checks the exit
+status and synchronously decodes captured stdout. Call
+`output.stdout.text()` when decoding should not imply a successful exit.
 
 Proposed shape:
 
@@ -1244,10 +1386,10 @@ The concepts line up while each language keeps its native shape:
 | Configure client | `Wasmer::new(config)` | `await Wasmer.create(options)` | `Wasmer(config)` / async open | `try await Wasmer(options:)` |
 | Create sandbox | `wasmer.sandbox().start()` | `wasmer.createSandbox()` | `wasmer.create_sandbox()` | `wasmer.createSandbox()` |
 | Install package | `sandbox.install_package(source)` | `sandbox.installPackage(source)` | `sandbox.install_package(source)` | `sandbox.installPackage(source:)` |
-| Captured command | `sandbox.command(cmd).output()` | `sandbox.command(cmd, options).run()` | `sandbox.command(cmd, args=[...]).run()` | `sandbox.command(cmd, options:).run()` |
-| Live command | `sandbox.command(cmd).spawn()` | `sandbox.command(cmd, options).spawn()` | `sandbox.command(cmd, args=[...]).spawn()` | `sandbox.command(cmd, options:).spawn()` |
+| Captured command | `sandbox.command(cmd).output()` | `sandbox.command(cmd, args, options).run()` | `sandbox.command(cmd, args=[...]).run()` | `sandbox.command(cmd, args:, options:).run()` |
+| Live command | `sandbox.command(cmd).spawn()` | `sandbox.command(cmd, args, options).spawn()` | `sandbox.command(cmd, args=[...]).spawn()` | `sandbox.command(cmd, args:, options:).spawn()` |
 | Cleanup | `close().await`, RAII fallback | `close()`, `await using` | `async with` | `close()`, scoped helper |
-| Byte stream | async reader/writer | Web Streams | async iterator/writer | `AsyncSequence`/writer |
+| Byte stream | async reader/writer | `AsyncIterable` + Web Stream adapter | async iterator/writer | `AsyncSequence`/writer |
 
 Generated UniFFI names are internal implementation details. The handwritten
 Python and Swift veneers own the public names, context-management behavior,
@@ -1270,8 +1412,11 @@ Initial stable families:
 PACKAGE_NOT_FOUND
 PACKAGE_INTEGRITY_FAILED
 PACKAGE_INCOMPATIBLE
+PACKAGE_NOT_INSTALLED
+PACKAGE_HAS_NO_ENTRYPOINT
 COMMAND_NOT_FOUND
 COMMAND_AMBIGUOUS
+SHELL_NOT_CONFIGURED
 CAPABILITY_UNAVAILABLE
 POLICY_DENIED
 LIMIT_UNENFORCEABLE
@@ -1289,10 +1434,10 @@ still returns `Output`; a command that could not be resolved returns
 `COMMAND_NOT_FOUND`.
 
 `TIMEOUT`, `LIMIT_EXCEEDED`, and `PROCESS_TERMINATED` are exposed by
-`ProcessExitError` when an application calls `Output.check()`. The original
-`run()`/`wait()` call still returns the bounded `Output`, including its
-termination reason and diagnostics. `Output.ok` is true only for
-`reason === "exited"` with exit code zero.
+`ProcessExitError` when an application calls `Output.check()` or opts into
+`run({ check: true })`. By default, `run()` and `wait()` return bounded
+`Output`, including termination reason and diagnostics. `Output.ok` is true
+only for `reason === "exited"` with exit code zero.
 
 JavaScript:
 
@@ -1391,9 +1536,9 @@ Running Python is package execution:
 await using sandbox = await wasmer.createSandbox({
   packages: ["python/python@3.12"],
 });
-await sandbox.command("python", {
-  args: ["-c", "print('hello')"],
-}).run();
+await sandbox
+  .command("python", ["-c", "print('hello')"])
+  .run({ check: true });
 ```
 
 Running JavaScript through EdgeJS QuickJS is the same:
@@ -1405,12 +1550,12 @@ const edgejs = await wasmer.loadPackage(
 await using sandbox = await wasmer.createSandbox({
   packages: [edgejs],
   files: {
-    "/workspace/main.js": "console.log('hello')",
+    "main.js": "console.log('hello')",
   },
 });
-await sandbox.command(edgejs.entrypoint!, {
-  args: ["/workspace/main.js"],
-}).run();
+await sandbox
+  .command(edgejs, ["main.js"])
+  .run({ check: true });
 ```
 
 A later `recipes/python` helper may package defaults, decode a conventional
@@ -1479,7 +1624,9 @@ Current Wasmer JS style:
 ```ts
 await init();
 const pkg = await Wasmer.fromRegistry("python/python@3.12");
-const instance = await pkg.entrypoint!.run({
+const entrypoint = pkg.entrypoint;
+if (!entrypoint) throw new Error("Package has no entrypoint");
+const instance = await entrypoint.run({
   args: ["-c", "print(42)"],
 });
 const output = await instance.wait();
@@ -1492,9 +1639,9 @@ const wasmer = await Wasmer.create();
 await using sandbox = await wasmer.createSandbox({
   packages: ["python/python@3.12"],
 });
-const output = await sandbox.command("python", {
-  args: ["-c", "print(42)"],
-}).run();
+const output = await sandbox
+  .command("python", ["-c", "print(42)"])
+  .run({ check: true });
 ```
 
 For callers that need package inspection, the mapping remains direct:
@@ -1504,11 +1651,11 @@ const pkg = await wasmer.loadPackage("namespace/toolbox@1.2.3");
 const command = pkg.command("format");
 await using sandbox = await wasmer.createSandbox({
   packages: [pkg],
-  files: { "/workspace/main.txt": "source" },
+  files: { "main.txt": "source" },
 });
-const output = await sandbox.command(command, {
-  args: ["/workspace/main.txt"],
-}).run();
+const output = await sandbox
+  .command(command, ["main.txt"])
+  .run({ check: true });
 ```
 
 Current `Directory` and package command concepts survive. A current

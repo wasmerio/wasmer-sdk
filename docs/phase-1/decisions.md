@@ -20,7 +20,7 @@ consequences are in [architecture.md](architecture.md).
 | D-010 | Support WASI/WASIX command runners first, behind an extensible runner registry. Unknown runner URIs fail explicitly. | Accepted |
 | D-011 | Deny host filesystem, host environment, networking, and host process access by default. Grants are explicit and scoped. | Accepted |
 | D-012 | Report capabilities enabled by the current target build and limit-enforcement strength at runtime. Unsupported requested guarantees fail closed; they never silently degrade. | Accepted |
-| D-013 | Use bounded byte-oriented I/O primitives at the Rust/FFI boundary. Build Web Streams, async iterators, and `AsyncSequence` in language veneers. | Accepted |
+| D-013 | Use bounded byte-oriented I/O primitives at the Rust/FFI boundary. Build guaranteed async-iterable byte streams with Web Stream adapters in JavaScript, async iterators in Python, and `AsyncSequence` in Swift. | Accepted |
 | D-014 | Use explicit process cancellation and termination APIs; do not depend on foreign-future cancellation as the only control path. | Accepted |
 | D-015 | Keep registry credentials and content acquisition in the trusted host. Never inject credentials into a guest implicitly. | Accepted |
 | D-016 | State clearly that embedded Wasm/WASIX is an in-process, userspace isolation boundary, not a VM or kernel boundary. | Accepted |

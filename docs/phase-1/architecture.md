@@ -464,6 +464,11 @@ Possible later plug-ins:
 Unknown runners return `unsupported_runner` with the URI and available runners.
 They are never guessed.
 
+The sandbox has no ambient shell. A shell is an ordinary installed package
+command selected explicitly by an application. Language veneers may provide
+safe shell-building syntax, but it must compile to that package command and
+must not introduce a second execution engine or consult a host shell.
+
 ## Direct Wasmer integration
 
 The public Rust API calls Wasmer directly. It is responsible for:
@@ -520,7 +525,8 @@ Characteristics:
 - exported through a narrow `wasm-bindgen` façade;
 - execution off the main thread;
 - Web Workers for scheduling and WASIX threads;
-- Web Streams in the TypeScript veneer;
+- async-iterable byte streams with Web Stream adapters in the TypeScript
+  veneer;
 - portable in-memory directories;
 - content caching through browser storage;
 - virtual/proxied networking only—never an implied raw host socket;
@@ -663,7 +669,8 @@ The cross-language boundary uses byte chunks:
 
 This avoids UTF-8 corruption and keeps memory bounded. Veneers add:
 
-- JavaScript `ReadableStream`/`WritableStream`;
+- JavaScript async-iterable byte streams with `ReadableStream` and
+  `WritableStream` adapters;
 - Python async iterators and file-like helpers;
 - Swift `AsyncSequence<Data>`;
 - text decoding helpers with explicit error policy.

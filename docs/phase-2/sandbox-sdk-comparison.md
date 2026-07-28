@@ -32,9 +32,9 @@ await using sandbox = await wasmer.createSandbox({
   packages: ["python/python@3.12"],
 });
 
-const output = await sandbox.command("python", {
-  args: ["-c", "print('hello')"],
-}).run();
+const output = await sandbox
+  .command("python", ["-c", "print('hello')"])
+  .run({ check: true });
 ```
 
 This costs one explicit creation step, but it leaves packages, files, mounts,
@@ -65,6 +65,12 @@ available on 2026-07-27:
   [`Sandbox` reference](https://www.daytona.io/docs/en/typescript-sdk/sandbox/),
   [`Process` reference](https://www.daytona.io/docs/en/typescript-sdk/process/),
   and [persistence](https://www.daytona.io/docs/en/persistence/)
+- [Bun Shell](https://bun.sh/docs/runtime/shell) for safe tagged-template
+  interpolation
+- [zx quoting](https://google.github.io/zx/quotes) for escaped scalar and
+  array interpolation
+- [MDN `ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream)
+  for Web Stream interoperability and async iteration
 
 These products evolve quickly. The observations below describe their APIs at
 that date, not a permanent claim about every release.
@@ -446,7 +452,7 @@ With the revised proposal:
 ```ts
 wasmer.loadPackage(source);
 wasmer.createSandbox(options);
-sandbox.command(command, options).run();
+sandbox.command(command, args, options).run();
 ```
 
 Every verb has one job.
@@ -505,27 +511,24 @@ const wasmer = await Wasmer.create();
 await using sandbox = await wasmer.createSandbox({
   packages: ["python/python@3.12"],
   files: {
-    "/workspace/main.py": "print(sum(range(10)))",
+    "main.py": "print(sum(range(10)))",
   },
   network: { mode: "disabled" },
 });
 
-const output = await sandbox.command("python", {
-  args: ["/workspace/main.py"],
-}).run({
+const output = await sandbox.command("python", ["main.py"]).run({
+  check: true,
   timeoutMs: 5_000,
   outputBytes: 1024 * 1024,
 });
 
-console.log(await output.check().stdout.text());
+console.log(output.text());
 ```
 
 Live execution remains visibly different:
 
 ```ts
-const process = await sandbox.command("python", {
-  args: ["-i"],
-}).spawn({
+const process = await sandbox.command("python", ["-i"]).spawn({
   terminal: true,
 });
 ```
@@ -533,10 +536,12 @@ const process = await sandbox.command("python", {
 Shell parsing remains explicit and package-provided:
 
 ```ts
-await sandbox.installPackage("wasmer/bash@1.0.25");
-const output = await sandbox.command("bash", {
-  args: ["-lc", "find /workspace -type f | sort"],
-}).run();
+await sandbox.installPackage("wasmer/bash@1.0.25", {
+  asShell: "bash",
+});
+const output = await sandbox
+  .sh`find /workspace -type f | sort`
+  .run({ check: true });
 ```
 
 ### 10.2 Rust
@@ -609,7 +614,7 @@ Do not copy `detached: true` or `background: true`. A boolean should not change
 the return type:
 
 ```ts
-const command = sandbox.command(program, commandOptions);
+const command = sandbox.command(program, args, commandOptions);
 const output: Output = await command.run(runOptions);
 const process: Process = await command.spawn(spawnOptions);
 ```
@@ -624,7 +629,7 @@ put execution directly on `Sandbox`. Wasmer benefits from a small intermediate
 object that separates description from execution:
 
 ```ts
-const command = sandbox.command("python", { args });
+const command = sandbox.command("python", args);
 await command.run();
 await command.spawn();
 ```
@@ -670,12 +675,63 @@ the universal API can provide a safer operation:
 
 ```ts
 const pkg = await sandbox.installPackage("namespace/tool@1.2.3");
-await sandbox.command(pkg.command("tool"), { args }).run();
+await sandbox.command(pkg.command("tool"), args).run({ check: true });
 ```
 
 This is not shorthand for a shell command. It uses the trusted host resolver,
 does not execute package code, and commits the package and its command names
 only after resolution and compatibility checks succeed.
+
+### 11.7 Keep argv and the common success path compact
+
+Vercel's positional executable-plus-argv form demonstrates that argv-first
+does not require an `args` property:
+
+```ts
+const output = await sandbox
+  .command("python", ["-c", code])
+  .run({ check: true });
+
+console.log(output.text());
+```
+
+`run({ check: true })` preserves the `Output` return type while removing the
+recurring `(await run()).check()` shape. Captured text decoding is synchronous,
+and `Output.text()` means checked stdout. Relative file-seed keys and
+JavaScript filesystem paths resolve against `/workspace`.
+
+A `Package` is also a command selector for its entrypoint, so single-command
+packages do not require non-null assertions or manual entrypoint extraction.
+
+### 11.8 Make shell interpolation safe, but keep its origin explicit
+
+Bun and zx demonstrate the value of tagged shell templates whose interpolated
+values become escaped arguments. Wasmer adopts that safety property:
+
+```ts
+await sandbox.sh`grep -r ${userQuery} /workspace`.run({
+  check: true,
+});
+```
+
+Unlike Bun, the SDK does not implement a shell language itself. `sh` and
+`shell(script)` require a shell command explicitly selected from an installed
+Wasmer package. `shell(script)` remains available for trusted opaque scripts.
+
+### 11.9 Own stream ergonomics and configure retention before spawn
+
+JavaScript process streams guarantee `AsyncIterable` and provide incremental
+`lines()` decoding:
+
+```ts
+for await (const line of process.stdout!.lines()) {
+  console.log(line);
+}
+```
+
+Web Stream adapters remain available for ecosystem integration. Diagnostic
+retention starts with the process, so `outputBytes` belongs on `spawn()`.
+`wait()` cannot retroactively recover bytes that were not retained.
 
 ## 12. Phase 3 validation consequences
 

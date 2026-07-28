@@ -68,14 +68,15 @@ await using sandbox = await wasmer.createSandbox({
   packages: ["python/python@3.12"],
 });
 
-const output = await sandbox.command("python", {
-  args: ["-c", "print(sum(n * n for n in range(10)))"],
-}).run({
+const output = await sandbox.command(
+  "python",
+  ["-c", "print(sum(n * n for n in range(10)))"],
+).run({
+  check: true,
   timeoutMs: 5_000,
 });
 
-output.check();
-console.log((await output.stdout.text()).trim()); // 285
+console.log(output.text().trim()); // 285
 ```
 
 ### Rust
@@ -102,7 +103,7 @@ async fn main() -> Result<()> {
         .await?
         .check()?;
 
-    println!("{}", output.stdout.text()?.trim());
+    println!("{}", output.text()?.trim());
     sandbox.close().await?;
     Ok(())
 }
@@ -126,18 +127,18 @@ const edgejs = await wasmer.loadPackage(
 await using sandbox = await wasmer.createSandbox({
   packages: [edgejs],
   files: {
-    "/workspace/main.js": `
+    "main.js": `
       const name = process.argv[2] ?? "world";
       console.log(JSON.stringify({ greeting: \`Hello, \${name}\` }));
     `,
   },
 });
 
-const output = await sandbox.command(edgejs.entrypoint!, {
-  args: ["/workspace/main.js", "Ada"],
-}).run();
+const output = await sandbox
+  .command(edgejs, ["main.js", "Ada"])
+  .run({ check: true });
 
-const value = JSON.parse(await output.check().stdout.text());
+const value = JSON.parse(output.text());
 console.log(value.greeting);
 ```
 
@@ -152,18 +153,16 @@ let source = r#"
 let edgejs = wasmer
     .load_package("wasmer/edgejs-quickjs@0.0.3")
     .await?;
-let entrypoint = edgejs.entrypoint()
-    .ok_or_else(|| Error::command_not_found("package entrypoint"))?;
 
 let sandbox = wasmer
     .sandbox()
-    .package(edgejs)
+    .package(edgejs.clone())
     .file("/workspace/main.js", source.as_bytes())
     .start()
     .await?;
 
 let output = sandbox
-    .command(entrypoint)
+    .command(edgejs)
     .args(["/workspace/main.js", "Ada"])
     .output()
     .await?
@@ -195,28 +194,27 @@ await using sandbox = await wasmer.createSandbox({
 });
 
 const python = await sandbox.installPackage("python/python@3.12");
-await sandbox.installPackage("wasmer/bash@1.0.25");
+await sandbox.installPackage("wasmer/bash@1.0.25", {
+  asShell: "bash",
+});
 
 await sandbox.fs.writeText(
-  "/workspace/build.py",
+  "build.py",
   `
 from pathlib import Path
 Path("/workspace/result.txt").write_text("built in " + __import__("os").environ["APP_ENV"])
 `,
 );
 
-(await sandbox.command(python.command("python"), {
-  args: ["/workspace/build.py"],
-}).run()).check();
+await sandbox
+  .command(python.command("python"), ["build.py"])
+  .run({ check: true });
 
-const listing = await sandbox.command("bash", {
-  args: [
-    "-lc",
-    "wc -c /workspace/result.txt && cat /workspace/result.txt",
-  ],
-}).run();
+const listing = await sandbox
+  .sh`wc -c result.txt && cat result.txt`
+  .run({ check: true });
 
-console.log(await listing.check().stdout.text());
+console.log(listing.text());
 ```
 
 ### Rust
@@ -269,8 +267,9 @@ let listing = sandbox
 ```
 
 The shell comes from the explicitly installed Bash package. It is not an
-ambient sandbox facility. User-controlled values should be passed as ordinary
-arguments instead of interpolated into a shell script.
+ambient sandbox facility. Values interpolated through the `sh` tag become
+escaped single arguments; only `shell(script)` treats its complete input as
+opaque shell syntax.
 
 ## 4. Treat files as inputs and artifacts
 
@@ -287,23 +286,21 @@ const input = new Uint8Array(await fetch("/photo.png").then((r) =>
 await using sandbox = await wasmer.createSandbox({
   packages: ["namespace/image-tools@<tested-pin>"],
   files: {
-    "/workspace/input.png": input,
-    "/workspace/config.json": JSON.stringify({ width: 320 }),
+    "input.png": input,
+    "config.json": JSON.stringify({ width: 320 }),
   },
   limits: {
     filesystemBytes: 64 * 1024 * 1024,
   },
 });
 
-(await sandbox.command("resize", {
-  args: [
-    "--config", "/workspace/config.json",
-    "/workspace/input.png",
-    "/workspace/output.webp",
-  ],
-}).run()).check();
+await sandbox.command("resize", [
+  "--config", "config.json",
+  "input.png",
+  "output.webp",
+]).run({ check: true });
 
-const artifact = await sandbox.fs.readFile("/workspace/output.webp");
+const artifact = await sandbox.fs.readFile("output.webp");
 ```
 
 ### Rust
@@ -346,7 +343,7 @@ let artifact = sandbox
 await using sandbox = await wasmer.createSandbox({
   packages: ["python/python@3.12"],
   files: {
-    "/workspace/progress.py": `
+    "progress.py": `
 import time
 for i in range(5):
     print(f"step={i}", flush=True)
@@ -355,17 +352,12 @@ for i in range(5):
   },
 });
 
-const process = await sandbox.command("python", {
-  args: ["-u", "/workspace/progress.py"],
-}).spawn();
+const process = await sandbox
+  .command("python", ["-u", "progress.py"])
+  .spawn({ outputBytes: 1024 * 1024 });
 
-const reader = process.stdout!.getReader();
-const decoder = new TextDecoder();
-
-while (true) {
-  const { value, done } = await reader.read();
-  if (done) break;
-  console.log(decoder.decode(value, { stream: true }));
+for await (const line of process.stdout!.lines()) {
+  console.log(line);
 }
 
 const output = await process.wait();
@@ -405,7 +397,7 @@ guest cannot block on a full pipe.
 await using sandbox = await wasmer.createSandbox({
   packages: ["python/python@3.12"],
   files: {
-    "/workspace/uppercase.py": `
+    "uppercase.py": `
 import sys
 for line in sys.stdin:
     print(line.rstrip().upper(), flush=True)
@@ -413,36 +405,29 @@ for line in sys.stdin:
   },
 });
 
-const process = await sandbox.command("python", {
-  args: ["-u", "/workspace/uppercase.py"],
-}).spawn({
+const process = await sandbox.command(
+  "python",
+  ["-u", "uppercase.py"],
+).spawn({
   stdin: "pipe",
   stdout: "pipe",
   stderr: "pipe",
 });
 
-async function collectText(
-  stream: ReadableStream<Uint8Array>,
-): Promise<string> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
+async function collectLines(stream: ReadableBytes): Promise<string> {
   let text = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) return text + decoder.decode();
-    text += decoder.decode(value, { stream: true });
+  for await (const line of stream.lines({ keepNewline: true })) {
+    text += line;
   }
+  return text;
 }
 
-const stdoutPromise = collectText(process.stdout!);
-const stderrPromise = collectText(process.stderr!);
+const stdoutPromise = collectLines(process.stdout!);
+const stderrPromise = collectLines(process.stderr!);
 
-const writer = process.stdin!.getWriter();
-const encoder = new TextEncoder();
-await writer.write(encoder.encode("hello\n"));
-await writer.write(encoder.encode("from wasmer\n"));
-await writer.close(); // Sends EOF; it does not terminate the process.
+await process.stdin!.write("hello\n");
+await process.stdin!.write("from wasmer\n");
+await process.stdin!.close(); // Sends EOF; it does not terminate the process.
 
 const [stdout, stderr, output] = await Promise.all([
   stdoutPromise,
@@ -491,9 +476,8 @@ If the entire input is already available and live output is unnecessary,
 prefer the smaller captured form:
 
 ```ts
-const output = await sandbox.command("python", {
-  args: ["/workspace/uppercase.py"],
-}).run({
+const output = await sandbox.command("python", ["uppercase.py"]).run({
+  check: true,
   stdin: "hello\nfrom wasmer\n",
 });
 ```
@@ -510,27 +494,21 @@ await using sandbox = await wasmer.createSandbox({
   packages: ["wasmer/bash@1.0.25"],
 });
 
-const process = await sandbox.command("bash", {
-  args: ["--norc"],
-}).spawn({
+const process = await sandbox.command("bash", ["--norc"]).spawn({
   terminal: { columns: 100, rows: 30 },
 });
 
 const terminal = process.terminal!;
-const writer = terminal.writable.getWriter();
 
 xterm.onData((text) => {
-  void writer.write(new TextEncoder().encode(text));
+  void terminal.writable.write(text);
 });
 
 xterm.onResize(({ cols, rows }) => {
   void terminal.resize(cols, rows);
 });
 
-const reader = terminal.readable.getReader();
-while (true) {
-  const { value, done } = await reader.read();
-  if (done) break;
+for await (const value of terminal.readable) {
   xterm.write(value);
 }
 ```
@@ -561,9 +539,10 @@ without PTY support returns a capability error before starting the process.
 Process lifetime is not tied to a single `wait()` future.
 
 ```ts
-const worker = await sandbox.command("python", {
-  args: ["-u", "/workspace/worker.py"],
-}).spawn({
+const worker = await sandbox.command(
+  "python",
+  ["-u", "worker.py"],
+).spawn({
   stdin: "pipe",
   stdout: "pipe",
   stderr: "pipe",
@@ -600,9 +579,9 @@ await using sandbox = await wasmer.createSandbox({
   packages: ["namespace/http-app@<tested-pin>"],
 });
 
-const server = await sandbox.command("serve", {
-  args: ["--host", "0.0.0.0", "--port", "8080"],
-}).spawn();
+const server = await sandbox
+  .command("serve", ["--host", "0.0.0.0", "--port", "8080"])
+  .spawn();
 
 try {
   await sandbox.ports.wait(8080, { timeoutMs: 10_000 });
@@ -687,12 +666,13 @@ await using sandbox = await wasmer.createSandbox({
   },
 });
 
-const postgres = await sandbox.command("postgres", {
-  args: [
+const postgres = await sandbox.command(
+  "postgres",
+  [
     "-D", "/var/lib/postgresql/data",
     "-p", "5432",
   ],
-}).spawn();
+).spawn();
 
 try {
   await sandbox.ports.wait(5432, { timeoutMs: 30_000 });
@@ -773,9 +753,10 @@ await using sandbox = await wasmer.createSandbox({
   },
 });
 
-const output = await sandbox.command("python", {
-  args: ["-c", "while True: print('x' * 1024)"],
-}).run({
+const output = await sandbox.command(
+  "python",
+  ["-c", "while True: print('x' * 1024)"],
+).run({
   timeoutMs: 1_000,
   outputBytes: 64 * 1024,
 });
@@ -821,9 +802,7 @@ ownership:
 
 ```ts
 const controller = new AbortController();
-const process = await sandbox.command("python", {
-  args: ["/workspace/task.py"],
-}).spawn();
+const process = await sandbox.command("python", ["task.py"]).spawn();
 
 setTimeout(() => controller.abort(), 1_000);
 
@@ -861,9 +840,9 @@ await using producer = await wasmer.createSandbox({
   ],
 });
 
-(await producer.command("produce", {
-  args: ["/shared/input.json", "/shared/output.bin"],
-}).run()).check();
+await producer
+  .command("produce", ["/shared/input.json", "/shared/output.bin"])
+  .run({ check: true });
 
 await using consumer = await wasmer.createSandbox({
   packages: ["namespace/consumer@<tested-pin>"],
@@ -872,9 +851,9 @@ await using consumer = await wasmer.createSandbox({
   ],
 });
 
-const output = await consumer.command("inspect", {
-  args: ["/shared/output.bin"],
-}).run();
+const output = await consumer
+  .command("inspect", ["/shared/output.bin"])
+  .run({ check: true });
 ```
 
 Concurrent read-write sharing has explicit filesystem consistency semantics.
@@ -899,9 +878,9 @@ await using sandbox = await wasmer.createSandbox({
   ],
 });
 
-const output = await sandbox.command("compile", {
-  args: ["/src/main.c", "-o", "/workspace/main.wasm"],
-}).run();
+const output = await sandbox
+  .command("compile", ["/src/main.c", "-o", "main.wasm"])
+  .run({ check: true });
 ```
 
 ### Rust
@@ -960,15 +939,14 @@ await using sandbox = await wasmer.createSandbox({
   }],
 });
 
-const output = await sandbox.command("python", {
-  args: ["-c", `
+const output = await sandbox.command("python", [
+  "-c",
+  `
 from pathlib import Path
 source = Path("/project/input.txt").read_text()
 Path("/project/output.txt").write_text(source.upper())
-  `],
-}).run();
-
-output.check();
+  `,
+]).run({ check: true });
 ```
 
 For origin-private persistent storage:
@@ -1024,13 +1002,13 @@ const formatter = tools.command("format");
 await using sandbox = await wasmer.createSandbox({
   packages: [tools],
   files: {
-    "/workspace/main.txt": "unformatted",
+    "main.txt": "unformatted",
   },
 });
 
-const output = await sandbox.command(formatter, {
-  args: ["/workspace/main.txt"],
-}).run();
+const output = await sandbox
+  .command(formatter, ["main.txt"])
+  .run({ check: true });
 ```
 
 ### Rust
@@ -1081,9 +1059,7 @@ async function runTool(call: ToolCall) {
     throw new Error(`Command not allowed: ${call.command}`);
   }
 
-  const output = await sandbox.command(call.command, {
-    args: call.args,
-  }).run({
+  const output = await sandbox.command(call.command, call.args).run({
     stdin: call.stdin,
     timeoutMs: 15_000,
     outputBytes: 256 * 1024,
@@ -1092,8 +1068,8 @@ async function runTool(call: ToolCall) {
   return {
     ok: output.ok,
     exitCode: output.exitCode,
-    stdout: await output.stdout.text(),
-    stderr: await output.stderr.text(),
+    stdout: output.stdout.text(),
+    stderr: output.stderr.text(),
     stdoutTruncated: output.stdout.truncated,
     stderrTruncated: output.stderr.truncated,
   };
@@ -1109,8 +1085,9 @@ The surrounding sandbox can add:
 - process, memory, time, filesystem, and output limits;
 
 The wrapper intentionally accepts argv rather than shell text. A product that
-wants shell-language authority can install Bash and expose
-`command("bash", { args: ["-lc", script] })` deliberately.
+wants shell-language authority can configure an installed shell and expose
+the escaped `sh` tag deliberately; opaque `shell(script)` should remain a
+more privileged operation.
 
 ## 18. Run isolated jobs concurrently
 
@@ -1123,7 +1100,7 @@ const jobs = inputs.map(async (input) => {
   await using sandbox = await wasmer.createSandbox({
     packages: ["namespace/worker@<tested-pin>"],
     files: {
-      "/workspace/input.json": JSON.stringify(input),
+      "input.json": JSON.stringify(input),
     },
     limits: {
       memoryBytes: 128 * 1024 * 1024,
@@ -1131,11 +1108,11 @@ const jobs = inputs.map(async (input) => {
     },
   });
 
-  const output = await sandbox.command("worker", {
-    args: ["/workspace/input.json"],
-  }).run();
+  const output = await sandbox
+    .command("worker", ["input.json"])
+    .run({ check: true });
 
-  return JSON.parse(await output.check().stdout.text());
+  return JSON.parse(output.text());
 });
 
 const results = await Promise.all(jobs);

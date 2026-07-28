@@ -33,10 +33,10 @@ await using sandbox = await wasmer.createSandbox({
   packages: ["python/python@3.12"],
 });
 
-await sandbox.fs.writeText("/workspace/main.py", "print(6 * 7)");
-const result = await sandbox.command("python", {
-  args: ["/workspace/main.py"],
-}).run();
+await sandbox.fs.writeText("main.py", "print(6 * 7)");
+const result = await sandbox
+  .command("python", ["main.py"])
+  .run({ check: true });
 ```
 
 The equivalent Rust API follows Rust conventions rather than mechanically
@@ -74,7 +74,8 @@ Wasmer ── resolves ──> Package
 `Command.run()` captures completed execution. `Command.spawn()` returns a live
 process. `sandbox.installPackage()` can extend the package and command set
 after creation. Shell behavior exists only when an installed package provides
-a shell and the application invokes it explicitly. Package resolution,
-filesystem access, network access, and resource grants never happen
-implicitly. Running one command is simply short-lived use of the same
-`Sandbox`; there is no base `Wasmer.run()`.
+a configured shell; JavaScript's `sh` tag escapes interpolated argument values,
+while `shell(script)` is the explicit opaque-script form. Package resolution,
+filesystem access, network access, and resource grants never happen implicitly.
+Running one command is simply short-lived use of the same `Sandbox`; there is
+no base `Wasmer.run()`.
