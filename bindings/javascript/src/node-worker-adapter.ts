@@ -114,7 +114,9 @@ async function respondToNetworkRequest(request: NetworkRequest): Promise<void> {
     encodeResult(control, payload, result);
   } catch (error) {
     control[1] = 5;
-    control[2] = writeText(payload, String(error));
+    // Truncating is acceptable only here: this is a human-readable error
+    // message, never data the caller will parse.
+    control[2] = writeTruncatedText(payload, String(error));
   }
   Atomics.store(control, 0, 1);
   Atomics.notify(control, 0);
@@ -145,10 +147,22 @@ function encodeResult(
     return;
   }
   control[1] = 1;
-  control[2] = writeText(payload, JSON.stringify(result));
+  control[2] = writeJson(payload, JSON.stringify(result));
 }
 
-function writeText(destination: Uint8Array, value: string): number {
+/** Write a JSON result; a truncated JSON payload would parse as garbage. */
+function writeJson(destination: Uint8Array, value: string): number {
+  const encoded = new TextEncoder().encode(value);
+  if (encoded.byteLength > destination.byteLength) {
+    throw new Error(
+      `network response is ${encoded.byteLength} bytes, exceeding ${destination.byteLength}`,
+    );
+  }
+  destination.set(encoded);
+  return encoded.byteLength;
+}
+
+function writeTruncatedText(destination: Uint8Array, value: string): number {
   const encoded = new TextEncoder().encode(value);
   const length = Math.min(encoded.byteLength, destination.byteLength);
   destination.set(encoded.subarray(0, length));

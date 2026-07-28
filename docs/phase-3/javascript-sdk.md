@@ -29,8 +29,9 @@ workers instead of parking the main agent.
 Workers instantiate the same compiled SDK module with the same
 `WebAssembly.Memory`. Scheduler messages structured-clone compiled guest
 modules and guest memories where needed, while boxed Rust callbacks are
-addressed through the shared linear memory. `client.shutdown()` closes the
-scheduler and terminates both idle and busy workers.
+addressed through the shared linear memory. `client.close()` closes the
+scheduler and terminates both idle and busy workers, and dropping the last
+client reference closes them as a leak guard.
 
 Browser deployments must be cross-origin isolated so `SharedArrayBuffer` is
 available. In practice that means serving appropriate COOP and COEP headers.
@@ -52,7 +53,8 @@ small synchronous RPC protocol backed by `SharedArrayBuffer` and
 `Atomics.wait`; readiness events call back into WASIX interest handlers in
 shared Rust state.
 
-A sandbox only uses networking after the caller grants `network: true`;
+A sandbox only uses networking after the caller grants
+`network: { mode: "host" }`;
 otherwise the shared Rust core installs `UnsupportedVirtualNetworking`.
 
 UDP is intentionally not represented as TCP. It remains unsupported until a
@@ -83,13 +85,15 @@ const output = await sandbox
 console.log(output.text());
 
 await sandbox.close();
-await client.shutdown();
+await client.close();
 ```
 
 Live processes use the same command:
 
 ```ts
-const process = await sandbox.command("python", ["-u", "worker.py"]).spawn();
+const process = await sandbox
+  .command("python", ["-u", "worker.py"])
+  .spawn({ stdin: "pipe" });
 
 await process.stdin.write("first job\n");
 await process.stdin.close();
@@ -99,6 +103,15 @@ for await (const line of process.stdout.lines()) {
 }
 
 await process.wait({ check: true });
+```
+
+Spawn stdin defaults to `"closed"`; stdout and stderr default to bounded
+`"pipe"` streams. `"capture"` retains bounded diagnostics without a live
+reader, so a service process never blocks on an unread pipe. Readiness uses
+the sandbox's own network policy:
+
+```ts
+await sandbox.ports.wait(port, { timeoutMs: 30_000 });
 ```
 
 Local packages are passed as bytes because a browser has no ambient host path:

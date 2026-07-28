@@ -13,7 +13,7 @@ const psql = process.env.PSQL ?? "/opt/homebrew/opt/libpq/bin/psql";
 
 test(
   "connects native psql to PostgreSQL running inside WASIX",
-  { skip: !packagePath, timeout: 60_000 },
+  { skip: !packagePath, timeout: 30_000 },
   async () => {
     const port = await reservePort();
     const packageBytes = await readFile(packagePath);
@@ -21,8 +21,23 @@ test(
     const postgres = await client.loadPackage(packageBytes);
     const sandbox = await client.createSandbox({
       packages: [postgres],
-      network: true,
+      network: { mode: "host" },
+      env: {
+        OLIPHAUNT_WASIX_SOCKET_PORT: String(port),
+        PREFIX: "/",
+        PGDATA: "/base",
+        PGUSER: "postgres",
+        PGDATABASE: "postgres",
+        PGSYSCONFDIR: "/base",
+        PGCLIENTENCODING: "UTF8",
+        LC_CTYPE: "C.UTF-8",
+        TZ: "UTC",
+        PGTZ: "UTC",
+        PG_COLOR: "never",
+      },
     });
+    // Capture mode retains bounded diagnostics without live readers, so the
+    // guest never blocks and no stream-draining tasks are needed.
     const process = await sandbox
       .command(
         postgres,
@@ -37,45 +52,12 @@ test(
           "/base",
           "postgres",
         ],
-        {
-          cwd: "/",
-          env: {
-            OLIPHAUNT_WASIX_SOCKET_PORT: String(port),
-            PREFIX: "/",
-            PGDATA: "/base",
-            PGUSER: "postgres",
-            PGDATABASE: "postgres",
-            PGSYSCONFDIR: "/base",
-            PGCLIENTENCODING: "UTF8",
-            LC_CTYPE: "C.UTF-8",
-            TZ: "UTC",
-            PGTZ: "UTC",
-            PG_COLOR: "never",
-          },
-          outputBytes: 256 * 1024,
-        },
+        { cwd: "/" },
       )
-      .spawn();
-
-    const marker = `OLIPHAUNT_WASIX_SOCKET_READY ${port}`;
-    const stderr = [];
-    let signalReady;
-    const ready = new Promise((resolve) => {
-      signalReady = resolve;
-    });
-    const consumeStderr = (async () => {
-      for await (const line of process.stderr.lines()) {
-        stderr.push(line);
-        if (line === marker) signalReady();
-      }
-    })();
-    const consumeStdout = collectText(process.stdout);
+      .spawn({ stdout: "capture", stderr: "capture", outputBytes: 256 * 1024 });
 
     try {
-      await Promise.race([
-        ready,
-        rejectAfter(30_000, "PostgreSQL did not open its WASIX TCP socket"),
-      ]);
+      await sandbox.ports.wait(port, { timeoutMs: 20_000 });
       const uri =
         `postgresql://postgres@127.0.0.1:${port}/postgres?sslmode=disable`;
       const result = await execFileAsync(
@@ -89,28 +71,24 @@ test(
           "-c",
           "select version(), 40 + 2 as answer;",
         ],
-        { timeout: 20_000 },
+        { timeout: 10_000 },
       );
       assert.match(result.stdout, /wasm32-unknown-wasix.*\|42/m);
       const output = await process.wait({ check: true });
-      assert.equal(output.code, 0);
+      assert.equal(output.exitCode, 0);
+      assert.equal(output.reason, "exited");
     } catch (error) {
       await process.kill();
-      throw new Error(`${error}\nPostgreSQL stderr:\n${stderr.join("\n")}`);
+      const output = await process.wait();
+      throw new Error(
+        `${error}\nPostgreSQL stderr:\n${output.stderr.text()}`,
+      );
     } finally {
-      await Promise.allSettled([consumeStderr, consumeStdout]);
       await sandbox.close();
-      await client.shutdown();
+      await client.close();
     }
   },
 );
-
-async function collectText(stream) {
-  const decoder = new TextDecoder();
-  let output = "";
-  for await (const chunk of stream) output += decoder.decode(chunk, { stream: true });
-  return output + decoder.decode();
-}
 
 async function reservePort() {
   const server = net.createServer();
@@ -124,11 +102,4 @@ async function reservePort() {
     server.close((error) => (error ? reject(error) : resolve())),
   );
   return address.port;
-}
-
-function rejectAfter(milliseconds, message) {
-  return new Promise((_, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), milliseconds);
-    timer.unref();
-  });
 }

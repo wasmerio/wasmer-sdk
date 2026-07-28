@@ -96,15 +96,13 @@ impl VirtualFile for DuplexVirtualFile {
 pub(crate) struct RetainedOutput {
     inner: DuplexVirtualFile,
     capture: CaptureHandle,
-    limit: usize,
 }
 
 impl RetainedOutput {
-    pub(crate) fn new(inner: DuplexStream, capture: CaptureHandle, limit: usize) -> Self {
+    pub(crate) fn new(inner: DuplexStream, capture: CaptureHandle) -> Self {
         Self {
             inner: DuplexVirtualFile::new(inner),
             capture,
-            limit,
         }
     }
 }
@@ -127,7 +125,7 @@ impl AsyncWrite for RetainedOutput {
     ) -> Poll<io::Result<usize>> {
         match Pin::new(&mut self.inner).poll_write(cx, bytes) {
             Poll::Ready(Ok(written)) => {
-                self.capture.retain(&bytes[..written], self.limit);
+                self.capture.retain(&bytes[..written]);
                 Poll::Ready(Ok(written))
             }
             result => result,

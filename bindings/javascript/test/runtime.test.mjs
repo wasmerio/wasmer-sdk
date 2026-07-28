@@ -12,12 +12,14 @@ test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
     check: true,
   });
   assert.match(output.text(), /^Python 3\./);
+  assert.equal(output.reason, "exited");
+  assert.ok(output.ok);
   await sandbox.close();
-  await client.shutdown();
+  await client.close();
 });
 
 test("keeps Wasmer.create as an eager compatibility factory", async () => {
   const client = await Wasmer.create();
   assert.equal(await client.ready(), client);
-  await client.shutdown();
+  await client.close();
 });

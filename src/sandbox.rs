@@ -1,9 +1,24 @@
+#[cfg(feature = "sys")]
+use std::borrow::Cow;
 use std::{
+    collections::BTreeMap,
+    net::SocketAddr,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, RwLock, Weak,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
+};
+
+#[cfg(feature = "sys")]
+use wasmer_wasix::runtime::ModuleInput;
+#[cfg(feature = "sys")]
+use wasmer_wasix::virtual_net::host::LocalNetworking;
+use wasmer_wasix::{
+    Runtime, UnsupportedVirtualNetworking,
+    runtime::OverriddenRuntime,
+    virtual_net::{DynVirtualNetworking, NetworkError},
 };
 
 use crate::{
@@ -17,8 +32,32 @@ pub struct SandboxBuilder {
     client: Wasmer,
     packages: Vec<PackageSource>,
     files: Vec<(PathBuf, Vec<u8>)>,
+    env: BTreeMap<String, String>,
     mounts: Vec<MountSpec>,
     network: NetworkPolicy,
+}
+
+/// A value that can be mounted into a sandbox as an external filesystem.
+///
+/// Implemented for every [`FileSystem`] provider (including [`Directory`]) and
+/// for `Arc<dyn FileSystem>`, so shared providers mount without manual
+/// coercion.
+///
+/// [`Directory`]: crate::Directory
+pub trait IntoFileSystem {
+    fn into_filesystem(self) -> Arc<dyn FileSystem>;
+}
+
+impl IntoFileSystem for Arc<dyn FileSystem> {
+    fn into_filesystem(self) -> Arc<dyn FileSystem> {
+        self
+    }
+}
+
+impl<T: FileSystem> IntoFileSystem for T {
+    fn into_filesystem(self) -> Arc<dyn FileSystem> {
+        Arc::new(self)
+    }
 }
 
 impl SandboxBuilder {
@@ -27,6 +66,7 @@ impl SandboxBuilder {
             client,
             packages: Vec::new(),
             files: Vec::new(),
+            env: BTreeMap::new(),
             mounts: Vec::new(),
             network: NetworkPolicy::Disabled,
         }
@@ -46,17 +86,40 @@ impl SandboxBuilder {
         self
     }
 
+    /// Set one sandbox-wide environment value.
+    ///
+    /// Sandbox values apply to every command; per-command values override
+    /// them. Environment variables are visible to all code in the sandbox.
+    #[must_use]
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.insert(key.into(), value.into());
+        self
+    }
+
+    /// Set several sandbox-wide environment values.
+    #[must_use]
+    pub fn envs<I, K, V>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        self.env
+            .extend(values.into_iter().map(|(key, value)| (key.into(), value.into())));
+        self
+    }
+
     /// Mount an external filesystem provider at an absolute guest path.
     #[must_use]
     pub fn mount(
         mut self,
         guest_path: impl Into<PathBuf>,
-        filesystem: Arc<dyn FileSystem>,
+        filesystem: impl IntoFileSystem,
         mode: MountMode,
     ) -> Self {
         self.mounts.push(MountSpec {
             guest_path: guest_path.into(),
-            filesystem,
+            filesystem: filesystem.into_filesystem(),
             mode,
         });
         self
@@ -114,14 +177,24 @@ impl SandboxBuilder {
             mounts.push(mount);
         }
 
+        let networking = match self.network {
+            NetworkPolicy::Disabled => {
+                Arc::new(UnsupportedVirtualNetworking::default()) as DynVirtualNetworking
+            }
+            NetworkPolicy::Host => host_networking(&self.client),
+        };
+        let runtime = build_sandbox_runtime(&self.client, Arc::clone(&networking));
+
         Ok(Sandbox {
             inner: Arc::new(SandboxInner {
                 client: self.client,
                 packages: RwLock::new(packages),
                 workspace,
                 fs,
+                env: self.env,
                 mounts,
-                network: self.network,
+                networking,
+                runtime,
                 processes: Mutex::new(Vec::new()),
                 closed: AtomicBool::new(false),
             }),
@@ -141,8 +214,10 @@ pub(crate) struct SandboxInner {
     pub(crate) packages: RwLock<Vec<Package>>,
     pub(crate) workspace: virtual_fs::mem_fs::FileSystem,
     pub(crate) fs: SandboxFileSystem,
+    pub(crate) env: BTreeMap<String, String>,
     pub(crate) mounts: Vec<MountSpec>,
-    pub(crate) network: NetworkPolicy,
+    pub(crate) networking: DynVirtualNetworking,
+    pub(crate) runtime: Arc<dyn Runtime + Send + Sync>,
     processes: Mutex<Vec<Weak<ProcessControl>>>,
     closed: AtomicBool,
 }
@@ -150,10 +225,10 @@ pub(crate) struct SandboxInner {
 /// Guest network authority for a sandbox.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum NetworkPolicy {
-    /// Guest socket operations use an unsupported network backend.
+    /// Guest socket operations fail; no external network is reachable.
     #[default]
     Disabled,
-    /// Guest sockets use the native host network without address filtering.
+    /// Guest sockets use the host network without address filtering.
     Host,
 }
 
@@ -231,12 +306,19 @@ impl Sandbox {
         &self.inner.fs
     }
 
-    /// Close the sandbox and reject future commands or installations.
+    /// Access guest port facilities.
+    #[must_use]
+    pub fn ports(&self) -> Ports {
+        Ports {
+            sandbox: self.clone(),
+        }
+    }
+
+    /// Close the sandbox, kill its live processes, and reject future work.
     ///
     /// # Errors
     ///
-    /// Reserved for process-cleanup failures once live processes are
-    /// introduced.
+    /// Returns an error if internal process state is unavailable.
     #[allow(clippy::unused_async)]
     pub async fn close(&self) -> Result<()> {
         self.inner.closed.store(true, Ordering::Release);
@@ -275,4 +357,110 @@ impl Sandbox {
         processes.push(Arc::downgrade(process));
         Ok(())
     }
+}
+
+/// Guest port facilities for one sandbox.
+#[derive(Clone, Debug)]
+pub struct Ports {
+    sandbox: Sandbox,
+}
+
+/// How often [`Ports::wait`] probes the guest port.
+const PORT_PROBE_INTERVAL: Duration = Duration::from_millis(50);
+
+impl Ports {
+    /// Wait until a guest TCP listener accepts connections on `port`.
+    ///
+    /// The probe uses the sandbox's own network policy, so it observes
+    /// exactly what the guest exposed and fails with
+    /// [`Error::CapabilityUnavailable`] when networking is disabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Timeout`] when the port does not accept a connection
+    /// within `timeout`, and [`Error::CapabilityUnavailable`] when the
+    /// sandbox has no networking.
+    pub async fn wait(&self, port: u16, timeout: Duration) -> Result<()> {
+        let peer = SocketAddr::from(([127, 0, 0, 1], port));
+        let local = SocketAddr::from(([0, 0, 0, 0], 0));
+        let networking = Arc::clone(&self.sandbox.inner.networking);
+        let tasks = Arc::clone(self.sandbox.inner.runtime.task_manager());
+        let mut remaining = timeout;
+        loop {
+            self.sandbox.ensure_open()?;
+            match networking.connect_tcp(local, peer).await {
+                Ok(_connection) => return Ok(()),
+                Err(NetworkError::Unsupported) => {
+                    return Err(Error::CapabilityUnavailable {
+                        capability: "port probing requires sandbox networking",
+                    });
+                }
+                Err(_not_yet_listening) => {}
+            }
+            if remaining.is_zero() {
+                return Err(Error::Timeout {
+                    operation: format!("guest port {port} to accept connections"),
+                });
+            }
+            let step = PORT_PROBE_INTERVAL.min(remaining);
+            tasks.sleep_now(step).await;
+            remaining = remaining.saturating_sub(step);
+        }
+    }
+}
+
+/// Build the per-sandbox runtime once: policy networking plus the WebAssembly
+/// C API host-import hooks. Every spawn reuses this runtime.
+fn build_sandbox_runtime(
+    client: &Wasmer,
+    networking: DynVirtualNetworking,
+) -> Arc<dyn Runtime + Send + Sync> {
+    let base: Arc<dyn Runtime + Send + Sync> = Arc::clone(&client.inner.runtime) as Arc<_>;
+    let runtime: Arc<dyn Runtime + Send + Sync> =
+        Arc::new(OverriddenRuntime::new(base).with_networking(networking));
+    let runtime_for_resolver = Arc::clone(&runtime);
+    let hooks =
+        wasmer_c_api_imports::WasmCapiRuntimeHooks::new().with_resolve_module_sync(move |bytes| {
+            resolve_capi_module(runtime_for_resolver.as_ref(), bytes)
+        });
+
+    Arc::new(
+        OverriddenRuntime::new(runtime)
+            .with_additional_imports({
+                let hooks = hooks.clone();
+                move |module, store| hooks.additional_imports(module, store)
+            })
+            .with_instance_setup(move |module, store, instance, imported_memory| {
+                hooks.configure_instance(module, store, instance, imported_memory)
+            }),
+    )
+}
+
+#[cfg(feature = "sys")]
+fn resolve_capi_module(
+    runtime: &(dyn Runtime + Send + Sync),
+    bytes: Vec<u8>,
+) -> anyhow::Result<wasmer::Module> {
+    runtime
+        .resolve_module_sync(ModuleInput::Bytes(Cow::Owned(bytes)), None, None)
+        .map_err(anyhow::Error::from)
+}
+
+#[cfg(all(not(feature = "sys"), feature = "js"))]
+fn resolve_capi_module(
+    runtime: &(dyn Runtime + Send + Sync),
+    bytes: Vec<u8>,
+) -> anyhow::Result<wasmer::Module> {
+    let store = runtime.new_store();
+    wasmer::Module::new(&store, bytes).map_err(anyhow::Error::from)
+}
+
+#[cfg(feature = "sys")]
+fn host_networking(_client: &Wasmer) -> DynVirtualNetworking {
+    Arc::new(LocalNetworking::default())
+}
+
+#[cfg(not(feature = "sys"))]
+fn host_networking(client: &Wasmer) -> DynVirtualNetworking {
+    Arc::clone(client.inner.runtime.networking())
 }

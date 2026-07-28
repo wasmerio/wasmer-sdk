@@ -12,25 +12,161 @@ export interface WasmerOptions {
 }
 
 export type PackageSource = string | Uint8Array | Package;
-export type CommandSelector = string | Package;
+export type CommandSelector = string | Package | CommandRef;
 export type FileContents = string | Uint8Array;
 
+export type NetworkPolicy = { mode: "disabled" } | { mode: "host" };
+
 export interface SandboxOptions {
-  packages?: PackageSource[];
-  files?: Record<string, FileContents>;
-  network?: boolean;
+  packages?: readonly PackageSource[];
+  files?: Readonly<Record<string, FileContents>>;
+  env?: Readonly<Record<string, string>>;
+  network?: NetworkPolicy;
+  /** The command used by `sandbox.shell()` and `sandbox.sh`. */
+  shell?: CommandSelector;
+}
+
+export interface InstallPackageOptions {
+  /** Select one command exported by this package as the sandbox's shell. */
+  asShell?: string;
 }
 
 export interface CommandOptions {
   cwd?: string;
-  env?: Record<string, string>;
-  input?: string | Uint8Array;
-  outputBytes?: number;
+  env?: Readonly<Record<string, string>>;
 }
 
 export interface RunOptions {
+  stdin?: string | Uint8Array;
+  timeoutMs?: number;
+  outputBytes?: number;
   check?: boolean;
 }
+
+export type OutputMode = "pipe" | "capture" | "discard";
+
+export interface SpawnOptions {
+  timeoutMs?: number;
+  outputBytes?: number;
+  stdin?: "pipe" | "closed";
+  stdout?: OutputMode;
+  stderr?: OutputMode;
+}
+
+export type ExitReason = "exited" | "terminated" | "timeout";
+
+export interface FileStat {
+  kind: "file" | "directory";
+  size: number;
+}
+
+export interface DirectoryEntry extends FileStat {
+  name: string;
+}
+
+export type WasmerErrorCode =
+  | "CLIENT_CLOSED"
+  | "SANDBOX_CLOSED"
+  | "INVALID_PACKAGE_SOURCE"
+  | "PACKAGE_NOT_FOUND"
+  | "PACKAGE_NOT_INSTALLED"
+  | "PACKAGE_HAS_NO_ENTRYPOINT"
+  | "COMMAND_NOT_FOUND"
+  | "COMMAND_AMBIGUOUS"
+  | "SHELL_NOT_CONFIGURED"
+  | "CAPABILITY_UNAVAILABLE"
+  | "INVALID_PATH"
+  | "FILESYSTEM_ERROR"
+  | "TIMEOUT"
+  | "PROCESS_EXITED"
+  | "PROCESS_TERMINATED"
+  | "INVALID_UTF8"
+  | "TARGET_ERROR";
+
+/** An SDK failure with a stable, machine-readable `code`. */
+export class WasmerError extends Error {
+  constructor(
+    message: string,
+    readonly code: WasmerErrorCode,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = "WasmerError";
+  }
+
+  static is(error: unknown, code?: WasmerErrorCode): error is WasmerError {
+    return (
+      error instanceof WasmerError && (code === undefined || error.code === code)
+    );
+  }
+}
+
+/** A checked command completed unsuccessfully; `output` holds the details. */
+export class ProcessExitError extends Error {
+  constructor(readonly output: Output) {
+    super(describeExit(output));
+    this.name = "ProcessExitError";
+  }
+
+  get code(): "PROCESS_EXITED" | "PROCESS_TERMINATED" | "TIMEOUT" {
+    switch (this.output.reason) {
+      case "terminated":
+        return "PROCESS_TERMINATED";
+      case "timeout":
+        return "TIMEOUT";
+      default:
+        return "PROCESS_EXITED";
+    }
+  }
+}
+
+const STDERR_EXCERPT_BYTES = 512;
+
+function describeExit(output: Output): string {
+  let base: string;
+  switch (output.reason) {
+    case "terminated":
+      base = "process was terminated before completing";
+      break;
+    case "timeout":
+      base = "process timed out";
+      break;
+    default:
+      base = `process exited unsuccessfully with status ${output.exitCode}`;
+  }
+  const stderr = output.stderr.bytes;
+  const start = Math.max(0, stderr.length - STDERR_EXCERPT_BYTES);
+  const excerpt = new TextDecoder().decode(stderr.subarray(start)).trim();
+  if (!excerpt) return base;
+  return `${base}\nstderr: ${start > 0 ? "…" : ""}${excerpt}`;
+}
+
+/** Rewrap errors thrown by the wasm core into `WasmerError`. */
+async function rethrow<T>(work: Promise<T> | T): Promise<T> {
+  try {
+    return await work;
+  } catch (error) {
+    throw toWasmerError(error);
+  }
+}
+
+function toWasmerError(error: unknown): unknown {
+  if (
+    error instanceof Error &&
+    !(error instanceof WasmerError) &&
+    error.name === "WasmerError"
+  ) {
+    const code = (error as Error & { code?: unknown }).code;
+    if (typeof code === "string") {
+      return new WasmerError(error.message, code as WasmerErrorCode, {
+        cause: error,
+      });
+    }
+  }
+  return error;
+}
+
+const packageCores = new WeakMap<Package, PackageCore>();
 
 let browserInitialization: Promise<void> | undefined;
 
@@ -55,6 +191,7 @@ export class Wasmer {
     return wasmer;
   }
 
+  /** Target-specific initialization; the Node entrypoint overrides this. */
   protected static async initializeCore(
     options: WasmerOptions,
   ): Promise<WasmerCore> {
@@ -81,119 +218,275 @@ export class Wasmer {
   /** Resolve a registry package or decode in-memory WEBC bytes. */
   async loadPackage(source: string | Uint8Array): Promise<Package> {
     const client = await this.getCore();
-    const core =
+    const core = await rethrow(
       typeof source === "string"
-        ? await client.loadPackage(source)
-        : await client.loadPackageBytes(source);
+        ? client.loadPackage(source)
+        : client.loadPackageBytes(source),
+    );
     return new Package(core);
   }
 
   async createSandbox(options: SandboxOptions = {}): Promise<Sandbox> {
     const client = await this.getCore();
+    const packages = await Promise.all(
+      (options.packages ?? []).map((source) =>
+        source instanceof Package ? source : this.loadPackage(source),
+      ),
+    );
     const builder = client.sandbox();
-    for (const source of options.packages ?? []) {
-      const pkg = source instanceof Package ? source : await this.loadPackage(source);
-      builder.package(pkg.core);
+    for (const pkg of packages) {
+      builder.package(packageCores.get(pkg)!);
     }
     for (const [path, contents] of Object.entries(options.files ?? {})) {
       builder.file(path, encode(contents));
     }
-    builder.network(options.network ?? false);
-    return new Sandbox(this, await builder.start());
+    for (const [key, value] of Object.entries(options.env ?? {})) {
+      builder.env(key, value);
+    }
+    builder.network((options.network ?? { mode: "disabled" }).mode);
+    const core = await rethrow(builder.start());
+    return new Sandbox(this, core, options.shell);
   }
 
-  async shutdown(): Promise<void> {
+  /** Close the client and release its workers and runtime resources. */
+  async close(): Promise<void> {
     if (!this.#core) return;
     const client = await this.#core;
-    await client.shutdown();
+    await rethrow(client.shutdown());
   }
 
-  async [Symbol.asyncDispose](): Promise<void> {
-    await this.shutdown();
-  }
-
-  private getCore(): Promise<WasmerCore> {
-    const implementation = this.constructor as typeof Wasmer;
-    return (this.#core ??= implementation.initializeCore(this.#options));
-  }
-}
-
-export class Package {
-  constructor(readonly core: PackageCore) {}
-
-  get id(): string {
-    return this.core.id;
-  }
-
-  get commands(): readonly string[] {
-    return this.core.commands;
-  }
-}
-
-export class Sandbox {
-  readonly fs: SandboxFileSystem;
-
-  constructor(
-    readonly wasmer: Wasmer,
-    readonly core: SandboxCore,
-  ) {
-    this.fs = new SandboxFileSystem(core);
-  }
-
-  command(
-    selector: CommandSelector,
-    args: readonly string[] = [],
-    options: CommandOptions = {},
-  ): Command {
-    const core =
-      selector instanceof Package
-        ? this.core.commandPackage(selector.core)
-        : this.core.command(selector);
-    core.args([...args]);
-    applyCommandOptions(core, options);
-    return new Command(core);
-  }
-
-  shell(script: string, options: CommandOptions = {}): Command {
-    return this.command("sh", ["-c", script], options);
-  }
-
-  sh(strings: TemplateStringsArray, ...values: unknown[]): Command {
-    let script = strings[0] ?? "";
-    for (let index = 0; index < values.length; index += 1) {
-      script += shellEscape(String(values[index])) + (strings[index + 1] ?? "");
-    }
-    return this.shell(script);
-  }
-
-  async installPackage(source: string | Uint8Array): Promise<Package> {
-    const core =
-      typeof source === "string"
-        ? await this.core.installPackage(source)
-        : await this.core.installPackageBytes(source);
-    return new Package(core);
-  }
-
-  async close(): Promise<void> {
-    await this.core.close();
+  /** @deprecated Use {@link Wasmer.close}. */
+  async shutdown(): Promise<void> {
+    await this.close();
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
     await this.close();
   }
+
+  private getCore(): Promise<WasmerCore> {
+    const implementation = this.constructor as typeof Wasmer;
+    return rethrow((this.#core ??= implementation.initializeCore(this.#options)));
+  }
 }
 
+export class Package {
+  constructor(core: PackageCore) {
+    packageCores.set(this, core);
+  }
+
+  get id(): string {
+    return packageCores.get(this)!.id;
+  }
+
+  get commands(): readonly string[] {
+    return packageCores.get(this)!.commands;
+  }
+
+  /** The command run when this package is used directly as a selector. */
+  get entrypoint(): string | undefined {
+    return packageCores.get(this)!.entrypoint ?? undefined;
+  }
+
+  /**
+   * Select a named command from this package, resolving name collisions
+   * between installed packages.
+   */
+  command(name: string): CommandRef {
+    if (!packageCores.get(this)!.hasCommand(name)) {
+      throw new WasmerError(
+        `package \`${this.id}\` does not export the command \`${name}\``,
+        "COMMAND_NOT_FOUND",
+      );
+    }
+    return new CommandRef(this, name);
+  }
+}
+
+/** A command explicitly qualified by its package. */
+export class CommandRef {
+  constructor(
+    readonly pkg: Package,
+    readonly name: string,
+  ) {}
+}
+
+export type ShellValue =
+  | string
+  | number
+  | URL
+  | readonly (string | number | URL)[];
+
+export class Sandbox {
+  readonly fs: SandboxFileSystem;
+  readonly ports: Ports;
+  readonly #core: SandboxCore;
+  #shell: CommandSelector | undefined;
+
+  constructor(
+    readonly wasmer: Wasmer,
+    core: SandboxCore,
+    shell?: CommandSelector,
+  ) {
+    this.#core = core;
+    this.fs = new SandboxFileSystem(core);
+    this.ports = new Ports(core);
+    this.#shell = shell;
+  }
+
+  command(
+    selector: CommandSelector,
+    args: readonly string[] | CommandOptions = [],
+    options: CommandOptions = {},
+  ): Command {
+    if (!Array.isArray(args)) {
+      options = args as CommandOptions;
+      args = [];
+    }
+    const argv = [...(args as readonly string[])];
+    const settings = { ...options };
+    const core = this.#core;
+    return new Command(() => {
+      let command: CommandCore;
+      if (selector instanceof CommandRef) {
+        command = core.commandRef(packageCores.get(selector.pkg)!, selector.name);
+      } else if (selector instanceof Package) {
+        command = core.commandPackage(packageCores.get(selector)!);
+      } else {
+        command = core.command(selector);
+      }
+      command.args(argv);
+      if (settings.cwd) command.currentDir(settings.cwd);
+      for (const [key, value] of Object.entries(settings.env ?? {})) {
+        command.env(key, value);
+      }
+      return command;
+    });
+  }
+
+  /**
+   * Build a command that runs `script` through the sandbox's configured
+   * shell. Configure one with `SandboxOptions.shell` or
+   * `installPackage(source, { asShell })`.
+   */
+  shell(script: string, options: CommandOptions = {}): Command {
+    return this.command(this.#requireShell(), ["-c", script], options);
+  }
+
+  /**
+   * Tagged-template shell: interpolated values are escaped as argument data,
+   * and an interpolated array expands to individually escaped arguments.
+   */
+  sh(strings: TemplateStringsArray, ...values: readonly ShellValue[]): Command {
+    let script = strings[0] ?? "";
+    for (let index = 0; index < values.length; index += 1) {
+      script += escapeShellValue(values[index]!) + (strings[index + 1] ?? "");
+    }
+    return this.shell(script);
+  }
+
+  async installPackage(
+    source: PackageSource,
+    options: InstallPackageOptions = {},
+  ): Promise<Package> {
+    let core: PackageCore;
+    if (source instanceof Package) {
+      core = await rethrow(
+        this.#core.installPackageRef(packageCores.get(source)!),
+      );
+    } else if (typeof source === "string") {
+      core = await rethrow(this.#core.installPackage(source));
+    } else {
+      core = await rethrow(this.#core.installPackageBytes(source));
+    }
+    const pkg = new Package(core);
+    if (options.asShell !== undefined) {
+      this.#shell = pkg.command(options.asShell);
+    }
+    return pkg;
+  }
+
+  async close(): Promise<void> {
+    await rethrow(this.#core.close());
+  }
+
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
+  }
+
+  #requireShell(): CommandSelector {
+    if (this.#shell === undefined) {
+      throw new WasmerError(
+        "no shell is configured for this sandbox; install a shell-providing " +
+          "package and select it with `SandboxOptions.shell` or " +
+          "`installPackage(source, { asShell })`",
+        "SHELL_NOT_CONFIGURED",
+      );
+    }
+    return this.#shell;
+  }
+}
+
+/** Guest port facilities for one sandbox. */
+export class Ports {
+  readonly #core: SandboxCore;
+
+  constructor(core: SandboxCore) {
+    this.#core = core;
+  }
+
+  /**
+   * Wait until a guest TCP listener accepts connections on `port`.
+   *
+   * The probe uses the sandbox's own network policy: it observes exactly
+   * what the guest exposed, and fails with `CAPABILITY_UNAVAILABLE` when
+   * networking is disabled.
+   */
+  async wait(
+    port: number,
+    options: { timeoutMs?: number } = {},
+  ): Promise<void> {
+    await rethrow(this.#core.waitForPort(port, options.timeoutMs ?? 30_000));
+  }
+}
+
+/**
+ * A reusable, immutable execution description. Each `run()` or `spawn()`
+ * starts an independent process.
+ */
 export class Command {
-  constructor(readonly core: CommandCore) {}
+  readonly #build: () => CommandCore;
+
+  constructor(build: () => CommandCore) {
+    this.#build = build;
+  }
 
   async run(options: RunOptions = {}): Promise<Output> {
-    const output = Output.fromCore(await this.core.run());
-    if (options.check && !output.success) throw new ProcessExitError(output);
+    const core = this.#build();
+    if (options.timeoutMs !== undefined) core.timeoutMs(options.timeoutMs);
+    if (options.outputBytes !== undefined) core.outputBytes(options.outputBytes);
+    if (options.stdin !== undefined) core.input(encode(options.stdin));
+    const output = Output.fromCore(await rethrow(core.run()));
+    if (options.check && !output.ok) throw new ProcessExitError(output);
     return output;
   }
 
-  async spawn(): Promise<Process> {
-    return new Process(await this.core.spawn());
+  async spawn(options: SpawnOptions = {}): Promise<Process> {
+    const core = this.#build();
+    if (options.timeoutMs !== undefined) core.timeoutMs(options.timeoutMs);
+    if (options.outputBytes !== undefined) core.outputBytes(options.outputBytes);
+    const stdin = options.stdin ?? "closed";
+    const stdout = options.stdout ?? "pipe";
+    const stderr = options.stderr ?? "pipe";
+    core.stdinMode(stdin);
+    core.stdoutMode(stdout);
+    core.stderrMode(stderr);
+    const process = await rethrow(core.spawn());
+    return new Process(process, {
+      stdin: stdin === "pipe",
+      stdout: stdout === "pipe",
+      stderr: stderr === "pipe",
+    });
   }
 }
 
@@ -210,90 +503,113 @@ export class CapturedOutput {
 
 export class Output {
   constructor(
-    readonly code: number,
+    readonly exitCode: number,
+    readonly reason: ExitReason,
     readonly stdout: CapturedOutput,
     readonly stderr: CapturedOutput,
   ) {}
 
   static fromCore(core: {
-    code: number;
+    exitCode: number;
+    reason: string;
     stdout: Uint8Array;
     stderr: Uint8Array;
     stdoutTruncated: boolean;
     stderrTruncated: boolean;
   }): Output {
     return new Output(
-      core.code,
+      core.exitCode,
+      core.reason as ExitReason,
       new CapturedOutput(core.stdout, core.stdoutTruncated),
       new CapturedOutput(core.stderr, core.stderrTruncated),
     );
   }
 
-  get success(): boolean {
-    return this.code === 0;
+  /** True only when the guest exited on its own with a zero status. */
+  get ok(): boolean {
+    return this.reason === "exited" && this.exitCode === 0;
   }
 
+  /** Check success and decode stdout. */
   text(): string {
     this.check();
     return this.stdout.text();
   }
 
   check(): this {
-    if (!this.success) throw new ProcessExitError(this);
+    if (!this.ok) throw new ProcessExitError(this);
     return this;
   }
 }
 
-export class ProcessExitError extends Error {
-  constructor(readonly output: Output) {
-    super(`process exited unsuccessfully with status ${output.code}`);
-    this.name = "ProcessExitError";
-  }
-}
-
 export class Process {
-  readonly stdin: ProcessStdin;
-  readonly stdout: ProcessOutputStream;
-  readonly stderr: ProcessOutputStream;
+  readonly stdin: WritableBytes | null;
+  readonly stdout: ReadableBytes | null;
+  readonly stderr: ReadableBytes | null;
+  readonly #core: ProcessCore;
 
-  constructor(readonly core: ProcessCore) {
-    this.stdin = new ProcessStdin(core);
-    this.stdout = new ProcessOutputStream((size) => core.readStdout(size));
-    this.stderr = new ProcessOutputStream((size) => core.readStderr(size));
+  constructor(
+    core: ProcessCore,
+    streams: { stdin: boolean; stdout: boolean; stderr: boolean },
+  ) {
+    this.#core = core;
+    this.stdin = streams.stdin ? new WritableBytes(core) : null;
+    this.stdout = streams.stdout
+      ? new ReadableBytes((size) => core.readStdout(size))
+      : null;
+    this.stderr = streams.stderr
+      ? new ReadableBytes((size) => core.readStderr(size))
+      : null;
   }
 
   get id(): number {
-    return this.core.id;
+    return this.#core.id;
   }
 
-  async wait(options: RunOptions = {}): Promise<Output> {
-    const output = Output.fromCore(await this.core.wait());
-    if (options.check && !output.success) throw new ProcessExitError(output);
+  async wait(options: { check?: boolean } = {}): Promise<Output> {
+    const output = Output.fromCore(await rethrow(this.#core.wait()));
+    if (options.check && !output.ok) throw new ProcessExitError(output);
     return output;
   }
 
-  async terminate(options: { graceMs?: number } = {}): Promise<void> {
-    await this.core.terminate(options.graceMs ?? 1_000);
+  /** Ask the guest to exit; escalate to a forced kill after the grace period. */
+  async terminate(options: { gracePeriodMs?: number } = {}): Promise<void> {
+    await rethrow(this.#core.terminate(options.gracePeriodMs ?? 1_000));
   }
 
+  /** Immediate forced termination. */
   async kill(): Promise<void> {
-    await this.core.kill();
+    this.#core.kill();
   }
 }
 
-export class ProcessStdin {
-  constructor(readonly core: ProcessCore) {}
+/** Writable guest stdin. Closing it sends EOF; it does not kill the process. */
+export class WritableBytes {
+  readonly #core: ProcessCore;
 
-  async write(value: string | Uint8Array): Promise<void> {
-    await this.core.writeStdin(encode(value));
+  constructor(core: ProcessCore) {
+    this.#core = core;
+  }
+
+  async write(data: string | Uint8Array): Promise<void> {
+    await rethrow(this.#core.writeStdin(encode(data)));
   }
 
   async close(): Promise<void> {
-    await this.core.closeStdin();
+    await rethrow(this.#core.closeStdin());
+  }
+
+  toWritableStream(): WritableStream<Uint8Array> {
+    return new WritableStream({
+      write: (chunk) => this.write(chunk),
+      close: () => this.close(),
+      abort: () => this.close(),
+    });
   }
 }
 
-export class ProcessOutputStream implements AsyncIterable<Uint8Array> {
+/** A readable byte stream with guaranteed async iteration. */
+export class ReadableBytes implements AsyncIterable<Uint8Array> {
   readonly #read: (size: number) => Promise<Uint8Array | null>;
 
   constructor(read: (size: number) => Promise<Uint8Array | null>) {
@@ -302,12 +618,13 @@ export class ProcessOutputStream implements AsyncIterable<Uint8Array> {
 
   async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
     for (;;) {
-      const chunk = await this.#read(64 * 1024);
+      const chunk = await rethrow(this.#read(64 * 1024));
       if (chunk === null) return;
       yield chunk;
     }
   }
 
+  /** Incrementally decoded lines; never assumes one chunk is one line. */
   async *lines(): AsyncGenerator<string> {
     const decoder = new TextDecoder();
     let pending = "";
@@ -337,32 +654,68 @@ export class ProcessOutputStream implements AsyncIterable<Uint8Array> {
 }
 
 export class SandboxFileSystem {
-  constructor(readonly core: SandboxCore) {}
+  readonly #core: SandboxCore;
+
+  constructor(core: SandboxCore) {
+    this.#core = core;
+  }
 
   async writeFile(path: string, contents: FileContents): Promise<void> {
-    await this.core.writeFile(path, encode(contents));
+    await rethrow(this.#core.writeFile(path, encode(contents)));
+  }
+
+  async writeText(path: string, text: string): Promise<void> {
+    await this.writeFile(path, text);
   }
 
   async readFile(path: string): Promise<Uint8Array> {
-    return this.core.readFile(path);
+    return rethrow(this.#core.readFile(path));
   }
 
-  async readTextFile(path: string): Promise<string> {
+  async readText(path: string): Promise<string> {
     return new TextDecoder().decode(await this.readFile(path));
   }
-}
 
-function applyCommandOptions(core: CommandCore, options: CommandOptions): void {
-  if (options.cwd) core.currentDir(options.cwd);
-  for (const [key, value] of Object.entries(options.env ?? {})) core.env(key, value);
-  if (options.input !== undefined) core.input(encode(options.input));
-  if (options.outputBytes !== undefined) core.outputBytes(options.outputBytes);
+  async mkdir(
+    path: string,
+    options: { recursive?: boolean } = {},
+  ): Promise<void> {
+    await rethrow(this.#core.mkdir(path, options.recursive ?? false));
+  }
+
+  async readDir(path: string): Promise<readonly DirectoryEntry[]> {
+    return rethrow(
+      this.#core.readDir(path) as Promise<readonly DirectoryEntry[]>,
+    );
+  }
+
+  async stat(path: string): Promise<FileStat> {
+    return rethrow(this.#core.stat(path) as Promise<FileStat>);
+  }
+
+  async remove(
+    path: string,
+    options: { recursive?: boolean } = {},
+  ): Promise<void> {
+    await rethrow(this.#core.remove(path, options.recursive ?? false));
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    await rethrow(this.#core.rename(from, to));
+  }
 }
 
 function encode(value: string | Uint8Array): Uint8Array {
   return typeof value === "string" ? new TextEncoder().encode(value) : value;
 }
 
-function shellEscape(value: string): string {
+function escapeShellValue(value: ShellValue): string {
+  if (Array.isArray(value)) {
+    return value.map((entry) => escapeShellWord(String(entry))).join(" ");
+  }
+  return escapeShellWord(String(value));
+}
+
+function escapeShellWord(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }

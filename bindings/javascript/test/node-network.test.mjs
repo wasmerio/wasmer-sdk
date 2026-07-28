@@ -51,15 +51,37 @@ test("Node network bridge exposes a synchronous WASIX TCP listener", async () =>
   });
 
   const listener = bridge.listenTcp(`127.0.0.1:${port}`);
+  assert.equal(bridge.listenerReadable(listener.id), false);
   const client = net.createConnection({ host: "127.0.0.1", port });
   await waitFor(() =>
     events.some(({ id, event }) => id === listener.id && event === "connection"),
   );
+  assert.equal(bridge.listenerReadable(listener.id), true);
+
+  const listenerEventCount = events.length;
+  bridge.listenerRefresh(listener.id);
+  await waitFor(() => events.length > listenerEventCount);
+  assert.deepEqual(events.at(-1), {
+    id: listener.id,
+    event: "connection",
+  });
 
   const accepted = bridge.listenerAccept(listener.id);
   assert.ok(accepted);
+  assert.equal(bridge.listenerReadable(listener.id), false);
   client.write("hello");
   await waitFor(() => bridge.socketReadable(accepted.id) > 0);
+
+  const socketReadableCount = events.filter(
+    ({ id, event }) => id === accepted.id && event === "readable",
+  ).length;
+  bridge.socketRefresh(accepted.id);
+  await waitFor(
+    () =>
+      events.filter(
+        ({ id, event }) => id === accepted.id && event === "readable",
+      ).length > socketReadableCount,
+  );
   assert.equal(
     new TextDecoder().decode(bridge.socketRead(accepted.id, 64)),
     "hello",

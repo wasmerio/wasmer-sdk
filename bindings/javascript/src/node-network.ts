@@ -4,6 +4,11 @@ import net, { type Server, type Socket } from "node:net";
 type Wake = (id: number, event: string) => void;
 type Address = { address: string; port: number; family: string };
 
+/** Pause the socket once this much unread data is buffered. */
+const RECEIVE_HIGH_WATER_BYTES = 1024 * 1024;
+/** Resume the socket once the guest has drained the buffer to this level. */
+const RECEIVE_RESUME_BYTES = 256 * 1024;
+
 interface SocketState {
   socket: Socket;
   chunks: Uint8Array[];
@@ -22,6 +27,8 @@ export type NodeNetworkMethod =
   | "connectTcp"
   | "listenTcp"
   | "listenerAccept"
+  | "listenerReadable"
+  | "listenerRefresh"
   | "listenerClose"
   | "socketRead"
   | "socketWrite"
@@ -30,7 +37,8 @@ export type NodeNetworkMethod =
   | "socketReadable"
   | "socketWritable"
   | "socketSetNoDelay"
-  | "socketSetKeepAlive";
+  | "socketSetKeepAlive"
+  | "socketRefresh";
 
 export class NodeNetworkBridge {
   readonly #sockets = new Map<number, SocketState>();
@@ -57,10 +65,18 @@ export class NodeNetworkBridge {
       allowHalfOpen: true,
     });
     const id = this.#registerSocket(socket);
-    await new Promise<void>((resolve, reject) => {
-      socket.once("connect", resolve);
-      socket.once("error", reject);
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once("connect", resolve);
+        socket.once("error", reject);
+      });
+    } catch (error) {
+      // A refused connection (e.g. a readiness probe before the guest
+      // listens) must not leave a dead entry in the socket table.
+      this.#sockets.delete(id);
+      socket.destroy();
+      throw error;
+    }
     return this.#descriptor(id);
   }
 
@@ -83,6 +99,18 @@ export class NodeNetworkBridge {
     const listener = this.#listeners.get(id);
     const socketId = listener?.accepted.shift();
     return socketId === undefined ? undefined : this.#descriptor(socketId);
+  }
+
+  listenerRefresh(id: number): void {
+    queueMicrotask(() => {
+      if ((this.#listeners.get(id)?.accepted.length ?? 0) > 0) {
+        this.#wake(id, "connection");
+      }
+    });
+  }
+
+  listenerReadable(id: number): boolean {
+    return (this.#listeners.get(id)?.accepted.length ?? 0) > 0;
   }
 
   listenerClose(id: number): void {
@@ -108,6 +136,9 @@ export class NodeNetworkBridge {
         state.chunks.shift();
         state.offset = 0;
       }
+    }
+    if (state.socket.isPaused() && state.buffered <= RECEIVE_RESUME_BYTES) {
+      state.socket.resume();
     }
     return output;
   }
@@ -148,6 +179,18 @@ export class NodeNetworkBridge {
     this.#sockets.get(id)?.socket.setKeepAlive(enabled);
   }
 
+  socketRefresh(id: number): void {
+    queueMicrotask(() => {
+      const state = this.#sockets.get(id);
+      if (!state) return;
+      if (state.buffered > 0) this.#wake(id, "readable");
+      if (state.ended) this.#wake(id, "close");
+      if (!state.socket.destroyed && !state.socket.writableNeedDrain) {
+        this.#wake(id, "writable");
+      }
+    });
+  }
+
   #registerSocket(socket: Socket): number {
     const id = this.#nextId++;
     const state: SocketState = {
@@ -162,6 +205,12 @@ export class NodeNetworkBridge {
       const copy = new Uint8Array(chunk);
       state.chunks.push(copy);
       state.buffered += copy.byteLength;
+      // Backpressure: a peer that sends faster than the guest reads must not
+      // grow host memory without bound. `socketRead` resumes the socket once
+      // the buffer drains.
+      if (state.buffered >= RECEIVE_HIGH_WATER_BYTES && !socket.isPaused()) {
+        socket.pause();
+      }
       this.#wake(id, "readable");
     });
     socket.on("drain", () => this.#wake(id, "writable"));
@@ -200,6 +249,10 @@ export function installNodeNetworkGlobals(bridge: NodeNetworkBridge): void {
   scope.__wasmerNodeListenTcp = (address: string) => bridge.listenTcp(address);
   scope.__wasmerNodeListenerAccept = (id: number) =>
     bridge.listenerAccept(id);
+  scope.__wasmerNodeListenerRefresh = (id: number) =>
+    bridge.listenerRefresh(id);
+  scope.__wasmerNodeListenerReadable = (id: number) =>
+    bridge.listenerReadable(id);
   scope.__wasmerNodeListenerClose = (id: number) => bridge.listenerClose(id);
   scope.__wasmerNodeSocketRead = (id: number, maximum: number) =>
     bridge.socketRead(id, maximum);
@@ -215,6 +268,7 @@ export function installNodeNetworkGlobals(bridge: NodeNetworkBridge): void {
     bridge.socketSetNoDelay(id, enabled);
   scope.__wasmerNodeSocketSetKeepAlive = (id: number, enabled: boolean) =>
     bridge.socketSetKeepAlive(id, enabled);
+  scope.__wasmerNodeSocketRefresh = (id: number) => bridge.socketRefresh(id);
 }
 
 export async function dispatchNodeNetworkCall(

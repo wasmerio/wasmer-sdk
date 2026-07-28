@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use wasmer_sdk::{Error, NetworkPolicy, PackageSource, Result, Stdio, Wasmer, WasmerConfig};
 
 #[tokio::main]
@@ -26,22 +25,6 @@ async fn main() -> Result<()> {
         .sandbox()
         .package(PackageSource::path(package_dir.path()))
         .network(NetworkPolicy::Host)
-        .start()
-        .await?;
-
-    let mut postgres = sandbox.command("postgres");
-    postgres
-        .args([
-            "--single",
-            "-F",
-            "-O",
-            "-j",
-            "-c",
-            "io_method=sync",
-            "-D",
-            "/base",
-            "postgres",
-        ])
         .env("OLIPHAUNT_WASIX_SOCKET_PORT", port.to_string())
         .env("PREFIX", "/")
         .env("PGDATA", "/base")
@@ -53,45 +36,48 @@ async fn main() -> Result<()> {
         .env("TZ", "UTC")
         .env("PGTZ", "UTC")
         .env("PG_COLOR", "never")
+        .start()
+        .await?;
+
+    // Capture mode retains bounded diagnostics without live readers, so the
+    // guest never blocks on an unread pipe and no drain tasks are needed.
+    let mut process = sandbox
+        .command("postgres")
+        .args([
+            "--single",
+            "-F",
+            "-O",
+            "-j",
+            "-c",
+            "io_method=sync",
+            "-D",
+            "/base",
+            "postgres",
+        ])
         .current_dir("/")
         .stdin(Stdio::Null)
-        .stream_bytes(256 * 1024);
+        .stdout(Stdio::Capture)
+        .stderr(Stdio::Capture)
+        .spawn()
+        .await?;
 
-    let mut process = postgres.spawn().await?;
-    let mut stdout = process.take_stdout().expect("PostgreSQL stdout is piped");
-    let stderr = process.take_stderr().expect("PostgreSQL stderr is piped");
-    let stdout_task = tokio::spawn(async move {
-        let mut bytes = Vec::new();
-        stdout.read_to_end(&mut bytes).await?;
-        Ok::<_, std::io::Error>(bytes)
-    });
-    let (stderr, startup_stderr) = wait_until_listening(stderr, port).await?;
-    let stderr_task = tokio::spawn(async move {
-        let mut reader = stderr;
-        let mut bytes = startup_stderr;
-        reader.read_to_end(&mut bytes).await?;
-        Ok::<_, std::io::Error>(bytes)
-    });
+    // Probe the guest listener through the sandbox's own network policy.
+    sandbox.ports().wait(port, Duration::from_secs(30)).await?;
 
     let (uri, psql_output) = run_psql(psql, port).await?;
 
-    let (process_output, stdout, stderr) = tokio::join!(process.wait(), stdout_task, stderr_task);
-    let process_output = process_output?;
-    let stdout = stdout.map_err(|error| Error::Task {
-        message: format!("PostgreSQL stdout task failed: {error}"),
-    })??;
-    let stderr = stderr.map_err(|error| Error::Task {
-        message: format!("PostgreSQL stderr task failed: {error}"),
-    })??;
-
-    process_output.check()?;
-    let result = validate_psql(psql_output, &stderr)?;
+    let output = process.wait().await?.check()?;
+    let result = validate_psql(psql_output)?;
 
     println!("connected directly to WASIX PostgreSQL: {uri}");
     print!("{result}");
-    if !stdout.is_empty() {
-        eprintln!("PostgreSQL stdout:\n{}", String::from_utf8_lossy(&stdout));
+    if !output.stdout.bytes().is_empty() {
+        eprintln!(
+            "PostgreSQL stdout:\n{}",
+            String::from_utf8_lossy(output.stdout.bytes())
+        );
     }
+    sandbox.close().await?;
     Ok(())
 }
 
@@ -118,15 +104,14 @@ async fn run_psql(psql: PathBuf, port: u16) -> Result<(String, std::process::Out
     .map_err(Error::from)
 }
 
-fn validate_psql(output: std::process::Output, postgres_stderr: &[u8]) -> Result<String> {
+fn validate_psql(output: std::process::Output) -> Result<String> {
     if !output.status.success() {
         return Err(Error::Execution {
             message: format!(
-                "psql failed with {}\nstdout:\n{}\nstderr:\n{}\nPostgreSQL stderr:\n{}",
+                "psql failed with {}\nstdout:\n{}\nstderr:\n{}",
                 output.status,
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr),
-                String::from_utf8_lossy(postgres_stderr),
             ),
         });
     }
@@ -138,44 +123,10 @@ fn validate_psql(output: std::process::Output, postgres_stderr: &[u8]) -> Result
 
     Err(Error::Execution {
         message: format!(
-            "unexpected psql result:\n{result}\npsql stderr:\n{}\nPostgreSQL stderr:\n{}",
+            "unexpected psql result:\n{result}\npsql stderr:\n{}",
             String::from_utf8_lossy(&output.stderr),
-            String::from_utf8_lossy(postgres_stderr),
         ),
     })
-}
-
-async fn wait_until_listening(
-    stderr: wasmer_sdk::ProcessStderr,
-    port: u16,
-) -> Result<(BufReader<wasmer_sdk::ProcessStderr>, Vec<u8>)> {
-    let mut reader = BufReader::new(stderr);
-    let mut captured = Vec::new();
-    let marker = format!("OLIPHAUNT_WASIX_SOCKET_READY {port}");
-    tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            let mut line = String::new();
-            let bytes = reader.read_line(&mut line).await?;
-            if bytes == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    format!(
-                        "PostgreSQL exited before opening its WASIX socket\nstderr:\n{}",
-                        String::from_utf8_lossy(&captured)
-                    ),
-                ));
-            }
-            captured.extend_from_slice(line.as_bytes());
-            if line.trim_end() == marker {
-                return Ok(());
-            }
-        }
-    })
-    .await
-    .map_err(|_| Error::Execution {
-        message: format!("timed out waiting for PostgreSQL WASIX socket on port {port}"),
-    })??;
-    Ok((reader, captured))
 }
 
 fn reserve_loopback_port() -> Result<u16> {

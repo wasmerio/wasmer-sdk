@@ -2,7 +2,7 @@ use std::{io, path::PathBuf, string::FromUtf8Error};
 
 use thiserror::Error;
 
-use crate::Output;
+use crate::{ExitReason, Output};
 
 /// The result type returned by the SDK.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -57,6 +57,9 @@ pub enum Error {
         message: String,
     },
 
+    #[error("timed out waiting for {operation}")]
+    Timeout { operation: String },
+
     #[error("command execution failed: {message}")]
     Execution { message: String },
 
@@ -82,19 +85,62 @@ pub enum Error {
     Initialization { message: String },
 }
 
-/// A checked command completed with an unsuccessful exit status.
+impl Error {
+    /// The stable, machine-readable error code shared by every language.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ClientClosed => "CLIENT_CLOSED",
+            Self::SandboxClosed => "SANDBOX_CLOSED",
+            Self::InvalidPackageSource { .. } => "INVALID_PACKAGE_SOURCE",
+            Self::PackageLoad { .. } => "PACKAGE_NOT_FOUND",
+            Self::PackageNotInstalled { .. } => "PACKAGE_NOT_INSTALLED",
+            Self::PackageHasNoEntrypoint { .. } => "PACKAGE_HAS_NO_ENTRYPOINT",
+            Self::CommandNotFound { .. } => "COMMAND_NOT_FOUND",
+            Self::CommandAmbiguous { .. } => "COMMAND_AMBIGUOUS",
+            Self::CapabilityUnavailable { .. } => "CAPABILITY_UNAVAILABLE",
+            Self::InvalidGuestPath { .. } => "INVALID_PATH",
+            Self::FileSystem { .. } | Self::ExternalFileSystem(_) => "FILESYSTEM_ERROR",
+            Self::Timeout { .. } => "TIMEOUT",
+            Self::ProcessExit(error) => error.code(),
+            Self::Utf8(_) => "INVALID_UTF8",
+            Self::Execution { .. }
+            | Self::Task { .. }
+            | Self::InternalState { .. }
+            | Self::Io(_)
+            | Self::Initialization { .. } => "TARGET_ERROR",
+        }
+    }
+}
+
+/// A checked command completed unsuccessfully.
+///
+/// The display message names the termination reason and includes a bounded
+/// excerpt of retained stderr so failures are diagnosable without manual
+/// stream plumbing. The complete [`Output`] remains available.
 #[derive(Debug, Error)]
-#[error("process exited unsuccessfully with status {status}")]
+#[error("{}", self.describe())]
 pub struct ProcessExitError {
-    status: i32,
     output: Box<Output>,
 }
+
+/// Longest stderr excerpt included in the display message.
+const STDERR_EXCERPT_BYTES: usize = 512;
 
 impl ProcessExitError {
     pub(crate) fn new(output: Output) -> Self {
         Self {
-            status: output.status.code(),
             output: Box::new(output),
+        }
+    }
+
+    /// The stable, machine-readable error code for this failure.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self.output.reason {
+            ExitReason::Exited => "PROCESS_EXITED",
+            ExitReason::Terminated => "PROCESS_TERMINATED",
+            ExitReason::TimedOut => "TIMEOUT",
         }
     }
 
@@ -108,5 +154,26 @@ impl ProcessExitError {
     #[must_use]
     pub fn into_output(self) -> Output {
         *self.output
+    }
+
+    fn describe(&self) -> String {
+        let base = match self.output.reason {
+            ExitReason::Exited => format!(
+                "process exited unsuccessfully with status {}",
+                self.output.status.code()
+            ),
+            ExitReason::Terminated => "process was terminated before completing".to_owned(),
+            ExitReason::TimedOut => "process timed out".to_owned(),
+        };
+        let stderr = self.output.stderr.bytes();
+        let start = stderr.len().saturating_sub(STDERR_EXCERPT_BYTES);
+        let excerpt = String::from_utf8_lossy(&stderr[start..]);
+        let excerpt = excerpt.trim();
+        if excerpt.is_empty() {
+            base
+        } else {
+            let ellipsis = if start > 0 { "…" } else { "" };
+            format!("{base}\nstderr: {ellipsis}{excerpt}")
+        }
     }
 }

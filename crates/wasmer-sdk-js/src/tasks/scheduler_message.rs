@@ -66,6 +66,7 @@ impl SchedulerMessage {
         let de = Deserializer::new(value);
 
         match de.ty()?.as_str() {
+            consts::TYPE_CLOSE => Ok(SchedulerMessage::Close),
             consts::TYPE_SPAWN_ASYNC => {
                 let task = unsafe { de.boxed(consts::PTR)? };
                 Ok(SchedulerMessage::SpawnAsync(task))

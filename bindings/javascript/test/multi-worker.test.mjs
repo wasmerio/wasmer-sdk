@@ -13,10 +13,10 @@ test("runs blocking WASIX processes concurrently on separate workers", async () 
   try {
     const first = await sandbox
       .command("python", ["--version"])
-      .spawn();
+      .spawn({ stdout: "capture", stderr: "capture" });
     const second = await sandbox
       .command("python", ["--version"])
-      .spawn();
+      .spawn({ stdout: "capture", stderr: "capture" });
 
     const [firstOutput, secondOutput] = await Promise.all([
       first.wait({ check: true }),
@@ -28,6 +28,6 @@ test("runs blocking WASIX processes concurrently on separate workers", async () 
     assert.ok(nodeWorkerStats().workersCreated >= 2);
   } finally {
     await sandbox.close();
-    await client.shutdown();
+    await client.close();
   }
 });

@@ -10,13 +10,23 @@ use std::{
 
 use virtual_fs::{AsyncRead, AsyncSeek, AsyncWrite, VirtualFile};
 
+/// Shared bounded retention for one process output stream.
 #[derive(Clone, Debug)]
 pub(crate) struct CaptureHandle {
     bytes: Arc<Mutex<Vec<u8>>>,
     truncated: Arc<AtomicBool>,
+    limit: usize,
 }
 
 impl CaptureHandle {
+    pub(crate) fn new(limit: usize) -> Self {
+        Self {
+            bytes: Arc::new(Mutex::new(Vec::with_capacity(limit.min(64 * 1024)))),
+            truncated: Arc::new(AtomicBool::new(false)),
+            limit,
+        }
+    }
+
     pub(crate) fn snapshot(&self) -> (Vec<u8>, bool) {
         (
             self.bytes.lock().expect("capture lock poisoned").clone(),
@@ -24,9 +34,9 @@ impl CaptureHandle {
         )
     }
 
-    pub(crate) fn retain(&self, bytes: &[u8], limit: usize) {
+    pub(crate) fn retain(&self, bytes: &[u8]) {
         let mut retained = self.bytes.lock().expect("capture lock poisoned");
-        let available = limit.saturating_sub(retained.len());
+        let available = self.limit.saturating_sub(retained.len());
         let amount = available.min(bytes.len());
         retained.extend_from_slice(&bytes[..amount]);
         if amount < bytes.len() {
@@ -35,37 +45,30 @@ impl CaptureHandle {
     }
 }
 
+/// A guest stdio file that retains bounded output without a live reader.
+///
+/// This backs [`crate::Stdio::Capture`]: writes are always ready, so the
+/// guest never blocks on an unread pipe, and diagnostics stay available for
+/// the completed [`crate::Output`].
 #[derive(Debug)]
-pub(crate) struct BoundedCapture {
+pub(crate) struct CaptureFile {
     handle: CaptureHandle,
-    limit: usize,
     cursor: u64,
 }
 
-impl BoundedCapture {
-    pub(crate) fn new(limit: usize) -> (Self, CaptureHandle) {
-        let handle = CaptureHandle {
-            bytes: Arc::new(Mutex::new(Vec::with_capacity(limit.min(64 * 1024)))),
-            truncated: Arc::new(AtomicBool::new(false)),
-        };
-        (
-            Self {
-                handle: handle.clone(),
-                limit,
-                cursor: 0,
-            },
-            handle,
-        )
+impl CaptureFile {
+    pub(crate) fn new(handle: CaptureHandle) -> Self {
+        Self { handle, cursor: 0 }
     }
 }
 
-impl AsyncWrite for BoundedCapture {
+impl AsyncWrite for CaptureFile {
     fn poll_write(
         self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        self.handle.retain(buf, self.limit);
+        self.handle.retain(buf);
         Poll::Ready(Ok(buf.len()))
     }
 
@@ -78,19 +81,19 @@ impl AsyncWrite for BoundedCapture {
     }
 
     fn poll_write_vectored(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
         bufs: &[IoSlice<'_>],
     ) -> Poll<io::Result<usize>> {
         let total = bufs.iter().map(|buf| buf.len()).sum();
         for buf in bufs {
-            let _ = self.as_mut().poll_write(cx, buf);
+            self.handle.retain(buf);
         }
         Poll::Ready(Ok(total))
     }
 }
 
-impl AsyncRead for BoundedCapture {
+impl AsyncRead for CaptureFile {
     fn poll_read(
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
@@ -108,7 +111,7 @@ impl AsyncRead for BoundedCapture {
     }
 }
 
-impl AsyncSeek for BoundedCapture {
+impl AsyncSeek for CaptureFile {
     fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
         let len = self
             .handle
@@ -137,7 +140,7 @@ impl AsyncSeek for BoundedCapture {
     }
 }
 
-impl VirtualFile for BoundedCapture {
+impl VirtualFile for CaptureFile {
     fn last_accessed(&self) -> u64 {
         0
     }
@@ -160,7 +163,7 @@ impl VirtualFile for BoundedCapture {
 
     fn set_len(&mut self, new_size: u64) -> virtual_fs::Result<()> {
         let new_size = usize::try_from(new_size).map_err(|_| virtual_fs::FsError::InvalidInput)?;
-        if new_size > self.limit {
+        if new_size > self.handle.limit {
             return Err(virtual_fs::FsError::InvalidInput);
         }
         self.handle

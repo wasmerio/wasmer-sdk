@@ -26,14 +26,16 @@ async fn main() -> Result<()> {
         .start()
         .await?;
 
+    // Stdout stays piped because the ready line is read live; stderr uses
+    // capture mode so no drain task is needed for diagnostics.
     let mut process = sandbox
         .command(command)
         .args(command_args)
         .stdin(Stdio::Null)
+        .stderr(Stdio::Capture)
         .spawn()
         .await?;
     let stdout = process.take_stdout().expect("piped stdout");
-    let mut stderr = process.take_stderr().expect("piped stderr");
     let mut stdout = BufReader::new(stdout);
     let mut ready = String::new();
     stdout.read_line(&mut ready).await?;
@@ -44,21 +46,16 @@ async fn main() -> Result<()> {
         stdout.read_to_end(&mut bytes).await?;
         Ok::<_, std::io::Error>(bytes)
     });
-    let error_task = tokio::spawn(async move {
-        let mut bytes = Vec::new();
-        stderr.read_to_end(&mut bytes).await?;
-        Ok::<_, std::io::Error>(bytes)
-    });
 
     let output = process.wait().await?;
     let remaining_stdout = output_task.await.expect("stdout reader task")?;
-    let stderr = error_task.await.expect("stderr reader task")?;
     if !remaining_stdout.is_empty() {
         print!("{}", String::from_utf8_lossy(&remaining_stdout));
     }
-    if !stderr.is_empty() {
-        eprint!("{}", String::from_utf8_lossy(&stderr));
+    if !output.stderr.bytes().is_empty() {
+        eprint!("{}", String::from_utf8_lossy(output.stderr.bytes()));
     }
     output.check()?;
+    sandbox.close().await?;
     Ok(())
 }

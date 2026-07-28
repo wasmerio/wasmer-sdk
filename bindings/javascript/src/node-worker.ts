@@ -36,10 +36,10 @@ async function handleMessage(data: any): Promise<void> {
       memory: data.memory,
     });
     const initializedWorker = new sdk.ThreadPoolWorker(data.id);
-    worker = initializedWorker;
-    for (const pending of pendingMessages.splice(0)) {
-      await initializedWorker.handle(pending);
+    while (pendingMessages.length > 0) {
+      await initializedWorker.handle(pendingMessages.shift());
     }
+    worker = initializedWorker;
     return;
   }
 
@@ -57,6 +57,10 @@ function installNetworkProxy(): void {
     callNetwork("listenTcp", [address]);
   scope.__wasmerNodeListenerAccept = (id: number) =>
     callNetwork("listenerAccept", [id]);
+  scope.__wasmerNodeListenerRefresh = (id: number) =>
+    callNetwork("listenerRefresh", [id]);
+  scope.__wasmerNodeListenerReadable = (id: number) =>
+    callNetwork("listenerReadable", [id]);
   scope.__wasmerNodeListenerClose = (id: number) =>
     callNetwork("listenerClose", [id]);
   scope.__wasmerNodeSocketRead = (id: number, maximum: number) =>
@@ -75,6 +79,8 @@ function installNetworkProxy(): void {
     callNetwork("socketSetNoDelay", [id, enabled]);
   scope.__wasmerNodeSocketSetKeepAlive = (id: number, enabled: boolean) =>
     callNetwork("socketSetKeepAlive", [id, enabled]);
+  scope.__wasmerNodeSocketRefresh = (id: number) =>
+    callNetwork("socketRefresh", [id]);
 }
 
 function callNetwork(

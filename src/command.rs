@@ -1,27 +1,20 @@
-#[cfg(feature = "sys")]
-use std::borrow::Cow;
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-#[cfg(feature = "sys")]
-use wasmer_wasix::runtime::ModuleInput;
-#[cfg(feature = "sys")]
-use wasmer_wasix::virtual_net::host::LocalNetworking;
+use tokio::io::{AsyncWriteExt, DuplexStream};
 use wasmer_wasix::{
-    Runtime, UnsupportedVirtualNetworking,
+    Runtime,
     bin_factory::spawn_exec,
     fs::WasiFsRoot,
     runners::wasi::{PackageOrHash, RuntimeOrEngine, WasiRunner},
-    runtime::OverriddenRuntime,
 };
 
 #[cfg(feature = "sys")]
 use crate::provider_fs::ProviderAdapter;
 use crate::{
-    CommandSelector, Error, NetworkPolicy, Package, Process, ProcessExitError, ProcessStderr,
-    ProcessStdin, ProcessStdout, Result, Sandbox,
-    capture::BoundedCapture,
+    CommandSelector, Error, Package, Process, ProcessExitError, ProcessStderr, ProcessStdin,
+    ProcessStdout, Result, Sandbox,
+    capture::{CaptureFile, CaptureHandle},
     fs::validate_guest_path,
     stream::{DuplexVirtualFile, RetainedOutput},
 };
@@ -29,8 +22,38 @@ use crate::{
 /// Live stdio configuration for [`Command::spawn`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Stdio {
+    /// A bounded live pipe. The application must read it; an unread pipe
+    /// intentionally backpressures the guest.
     Piped,
+    /// Bounded diagnostic retention with no live stream. The guest never
+    /// blocks, and the retained bytes appear in the completed [`Output`].
+    Capture,
+    /// Discard the stream entirely.
     Null,
+}
+
+/// Why a completed process stopped executing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ExitReason {
+    /// The guest exited on its own; the exit status is authoritative.
+    Exited,
+    /// The application terminated or killed the process through the SDK.
+    Terminated,
+    /// The command deadline elapsed and the SDK stopped the process.
+    TimedOut,
+}
+
+impl ExitReason {
+    /// The stable cross-language string for this reason.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Exited => "exited",
+            Self::Terminated => "terminated",
+            Self::TimedOut => "timeout",
+        }
+    }
 }
 
 /// A subprocess-style command builder bound to a sandbox.
@@ -43,6 +66,7 @@ pub struct Command {
     current_dir: PathBuf,
     input: Bytes,
     output_bytes: Option<usize>,
+    timeout: Option<Duration>,
     stdin: Stdio,
     stdout: Stdio,
     stderr: Stdio,
@@ -59,6 +83,7 @@ impl Command {
             current_dir: PathBuf::from("/workspace"),
             input: Bytes::new(),
             output_bytes: None,
+            timeout: None,
             stdin: Stdio::Null,
             stdout: Stdio::Piped,
             stderr: Stdio::Piped,
@@ -102,6 +127,16 @@ impl Command {
         self
     }
 
+    /// Stop the process once `duration` elapses.
+    ///
+    /// The deadline starts when the process spawns. An expired process is
+    /// killed and completes with [`ExitReason::TimedOut`]; its bounded
+    /// diagnostics remain available in the [`Output`].
+    pub fn timeout(&mut self, duration: Duration) -> &mut Self {
+        self.timeout = Some(duration);
+        self
+    }
+
     /// Configure live stdin for [`Self::spawn`].
     pub fn stdin(&mut self, mode: Stdio) -> &mut Self {
         self.stdin = mode;
@@ -131,7 +166,7 @@ impl Command {
     /// # Errors
     ///
     /// Returns an error if the sandbox is closed, command selection fails,
-    /// stdin cannot be prepared, or the guest cannot be started or executed.
+    /// stdin cannot be delivered, or the guest cannot be started or executed.
     pub async fn output(&mut self) -> Result<Output> {
         let mut command = self.clone();
         command.stdin = if command.input.is_empty() {
@@ -139,31 +174,25 @@ impl Command {
         } else {
             Stdio::Piped
         };
-        command.stdout = Stdio::Piped;
-        command.stderr = Stdio::Piped;
+        command.stdout = Stdio::Capture;
+        command.stderr = Stdio::Capture;
 
         let input = command.input.clone();
         let mut process = Box::pin(command.spawn()).await?;
         let stdin = process.take_stdin();
-        let stdout = process.take_stdout();
-        let stderr = process.take_stderr();
 
         let feed_stdin = async move {
             if let Some(mut stdin) = stdin {
-                stdin.write_all(&input).await?;
-                stdin.shutdown().await?;
+                tolerate_early_exit(stdin.write_all(&input).await)?;
+                tolerate_early_exit(stdin.shutdown().await)?;
             }
             Ok::<(), std::io::Error>(())
         };
-        let drain_stdout = drain_stream(stdout);
-        let drain_stderr = drain_stream(stderr);
-        let (input_result, stdout_result, stderr_result, output) = Box::pin(async move {
-            tokio::join!(feed_stdin, drain_stdout, drain_stderr, process.wait())
+        let (input_result, output) = Box::pin(async move {
+            tokio::join!(feed_stdin, process.wait())
         })
         .await;
         input_result?;
-        stdout_result?;
-        stderr_result?;
         output
     }
 
@@ -184,8 +213,8 @@ impl Command {
         let limit = self
             .output_bytes
             .unwrap_or(self.sandbox.inner.client.inner.output_bytes);
-        let (_, stdout_capture) = BoundedCapture::new(limit);
-        let (_, stderr_capture) = BoundedCapture::new(limit);
+        let stdout_capture = CaptureHandle::new(limit);
+        let stderr_capture = CaptureHandle::new(limit);
 
         let (guest_stdin, process_stdin) = match self.stdin {
             Stdio::Piped => {
@@ -196,44 +225,26 @@ impl Command {
                     Some(ProcessStdin::new(user)),
                 )
             }
-            Stdio::Null => (
+            Stdio::Capture | Stdio::Null => (
                 Box::<virtual_fs::NullFile>::default()
                     as Box<dyn virtual_fs::VirtualFile + Send + Sync>,
                 None,
             ),
         };
-        let (guest_stdout, process_stdout) = match self.stdout {
-            Stdio::Piped => {
-                let (guest, user) = tokio::io::duplex(self.stream_bytes);
-                (
-                    Box::new(RetainedOutput::new(guest, stdout_capture.clone(), limit))
-                        as Box<dyn virtual_fs::VirtualFile + Send + Sync>,
-                    Some(ProcessStdout::new(user)),
-                )
-            }
-            Stdio::Null => (
-                Box::<virtual_fs::NullFile>::default()
-                    as Box<dyn virtual_fs::VirtualFile + Send + Sync>,
-                None,
-            ),
-        };
-        let (guest_stderr, process_stderr) = match self.stderr {
-            Stdio::Piped => {
-                let (guest, user) = tokio::io::duplex(self.stream_bytes);
-                (
-                    Box::new(RetainedOutput::new(guest, stderr_capture.clone(), limit))
-                        as Box<dyn virtual_fs::VirtualFile + Send + Sync>,
-                    Some(ProcessStderr::new(user)),
-                )
-            }
-            Stdio::Null => (
-                Box::<virtual_fs::NullFile>::default()
-                    as Box<dyn virtual_fs::VirtualFile + Send + Sync>,
-                None,
-            ),
-        };
+        let (guest_stdout, stdout_stream) =
+            guest_output_file(self.stdout, &stdout_capture, self.stream_bytes);
+        let (guest_stderr, stderr_stream) =
+            guest_output_file(self.stderr, &stderr_capture, self.stream_bytes);
+        let process_stdout = stdout_stream.map(ProcessStdout::new);
+        let process_stderr = stderr_stream.map(ProcessStderr::new);
 
-        let runtime = sandbox_runtime(&self.sandbox);
+        let runtime: Arc<dyn Runtime + Send + Sync> = Arc::clone(&self.sandbox.inner.runtime);
+        let mut env = self.sandbox.inner.env.clone();
+        env.extend(
+            self.env
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
         let selected = package.clone();
         let mut runner = WasiRunner::new();
         #[cfg(feature = "sys")]
@@ -246,7 +257,7 @@ impl Command {
         let root_fs = apply_local_package_mounts(&mut runner, &selected)?;
         runner
             .with_args(self.args.clone())
-            .with_envs(self.env.clone())
+            .with_envs(env)
             .with_forward_host_env(false)
             .with_current_dir(current_dir)
             .with_mount(
@@ -315,8 +326,10 @@ impl Command {
             message: format!("unable to spawn the command: {error}"),
         })?;
 
+        let tasks = Arc::clone(runtime.task_manager());
         let process = Process::new(
             wasi_process,
+            Arc::clone(&tasks),
             task,
             process_stdin,
             process_stdout,
@@ -325,6 +338,22 @@ impl Command {
             stderr_capture,
         );
         self.sandbox.register_process(process.control())?;
+
+        if let Some(duration) = self.timeout {
+            let handle = process.handle();
+            let sleeper = Arc::clone(&tasks);
+            tasks
+                .task_shared(Box::new(move || {
+                    Box::pin(async move {
+                        sleeper.sleep_now(duration).await;
+                        handle.kill_timed_out();
+                    })
+                }))
+                .map_err(|error| Error::Task {
+                    message: format!("unable to schedule the command deadline: {error}"),
+                })?;
+        }
+
         Ok(process)
     }
 
@@ -394,75 +423,42 @@ impl Command {
     }
 }
 
-async fn drain_stream<S>(stream: Option<S>) -> std::io::Result<()>
-where
-    S: tokio::io::AsyncRead + Unpin,
-{
-    if let Some(mut stream) = stream {
-        let mut scratch = [0_u8; 8192];
-        while stream.read(&mut scratch).await? != 0 {}
+/// Build the guest-side file and optional user-side stream for one output.
+fn guest_output_file(
+    mode: Stdio,
+    capture: &CaptureHandle,
+    stream_bytes: usize,
+) -> (
+    Box<dyn virtual_fs::VirtualFile + Send + Sync>,
+    Option<DuplexStream>,
+) {
+    match mode {
+        Stdio::Piped => {
+            let (guest, user) = tokio::io::duplex(stream_bytes);
+            (
+                Box::new(RetainedOutput::new(guest, capture.clone())),
+                Some(user),
+            )
+        }
+        Stdio::Capture => (Box::new(CaptureFile::new(capture.clone())), None),
+        Stdio::Null => (Box::<virtual_fs::NullFile>::default(), None),
     }
-    Ok(())
 }
 
-fn sandbox_runtime(sandbox: &Sandbox) -> Arc<dyn Runtime + Send + Sync> {
-    let base: Arc<dyn Runtime + Send + Sync> =
-        Arc::clone(&sandbox.inner.client.inner.runtime) as Arc<_>;
-    let networking = match sandbox.inner.network {
-        NetworkPolicy::Disabled => Arc::new(UnsupportedVirtualNetworking::default()) as Arc<_>,
-        NetworkPolicy::Host => host_networking(&base),
-    };
-    let runtime: Arc<dyn Runtime + Send + Sync> =
-        Arc::new(OverriddenRuntime::new(base).with_networking(networking));
-    let runtime_for_resolver = Arc::clone(&runtime);
-    let hooks =
-        wasmer_c_api_imports::WasmCapiRuntimeHooks::new().with_resolve_module_sync(move |bytes| {
-            resolve_capi_module(runtime_for_resolver.as_ref(), bytes)
-        });
-
-    Arc::new(
-        OverriddenRuntime::new(runtime)
-            .with_additional_imports({
-                let hooks = hooks.clone();
-                move |module, store| hooks.additional_imports(module, store)
-            })
-            .with_instance_setup(move |module, store, instance, imported_memory| {
-                hooks.configure_instance(module, store, instance, imported_memory)
-            }),
-    )
-}
-
-#[cfg(feature = "sys")]
-fn resolve_capi_module(
-    runtime: &(dyn Runtime + Send + Sync),
-    bytes: Vec<u8>,
-) -> anyhow::Result<wasmer::Module> {
-    runtime
-        .resolve_module_sync(ModuleInput::Bytes(Cow::Owned(bytes)), None, None)
-        .map_err(anyhow::Error::from)
-}
-
-#[cfg(all(not(feature = "sys"), feature = "js"))]
-fn resolve_capi_module(
-    runtime: &(dyn Runtime + Send + Sync),
-    bytes: Vec<u8>,
-) -> anyhow::Result<wasmer::Module> {
-    let store = runtime.new_store();
-    wasmer::Module::new(&store, bytes).map_err(anyhow::Error::from)
-}
-
-#[cfg(feature = "sys")]
-fn host_networking(
-    _base: &Arc<dyn Runtime + Send + Sync>,
-) -> wasmer_wasix::virtual_net::DynVirtualNetworking {
-    Arc::new(LocalNetworking::default())
-}
-
-#[cfg(not(feature = "sys"))]
-fn host_networking(
-    base: &Arc<dyn Runtime + Send + Sync>,
-) -> wasmer_wasix::virtual_net::DynVirtualNetworking {
-    Arc::clone(base.networking())
+/// A guest that exits before consuming all of its stdin is not a failure:
+/// `head -1`, an early crash, or a timeout all legitimately abandon input.
+fn tolerate_early_exit(result: std::io::Result<()>) -> std::io::Result<()> {
+    match result {
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::WriteZero
+            ) =>
+        {
+            Ok(())
+        }
+        other => other,
+    }
 }
 
 #[cfg(feature = "sys")]
@@ -624,18 +620,27 @@ impl CapturedOutput {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Output {
     pub status: ExitStatus,
+    /// Why the process stopped: its own exit, SDK termination, or a timeout.
+    pub reason: ExitReason,
     pub stdout: CapturedOutput,
     pub stderr: CapturedOutput,
 }
 
 impl Output {
-    /// Convert an unsuccessful exit status into a typed error.
+    /// True only when the guest exited on its own with a zero status.
+    #[must_use]
+    pub fn ok(&self) -> bool {
+        self.reason == ExitReason::Exited && self.status.success()
+    }
+
+    /// Convert an unsuccessful completion into a typed error.
     ///
     /// # Errors
     ///
-    /// Returns [`ProcessExitError`] when the process did not exit successfully.
+    /// Returns [`ProcessExitError`] when the process did not exit successfully,
+    /// including termination and timeout outcomes.
     pub fn check(self) -> Result<Self> {
-        if self.status.success() {
+        if self.ok() {
             Ok(self)
         } else {
             Err(ProcessExitError::new(self).into())
@@ -646,10 +651,10 @@ impl Output {
     ///
     /// # Errors
     ///
-    /// Returns [`ProcessExitError`] for an unsuccessful status or a UTF-8 error
-    /// when stdout is not valid UTF-8.
+    /// Returns [`ProcessExitError`] for an unsuccessful completion or a UTF-8
+    /// error when stdout is not valid UTF-8.
     pub fn text(&self) -> Result<String> {
-        if !self.status.success() {
+        if !self.ok() {
             return Err(ProcessExitError::new(self.clone()).into());
         }
         self.stdout.text()
@@ -658,12 +663,13 @@ impl Output {
 
 #[cfg(test)]
 mod tests {
-    use super::{CapturedOutput, ExitStatus, Output};
+    use super::{CapturedOutput, ExitReason, ExitStatus, Output};
 
     #[test]
     fn text_is_synchronous_and_checked() {
         let output = Output {
             status: ExitStatus { code: 0 },
+            reason: ExitReason::Exited,
             stdout: CapturedOutput::from_parts(b"hello".to_vec(), false),
             stderr: CapturedOutput::from_parts(Vec::new(), false),
         };
@@ -674,6 +680,7 @@ mod tests {
     fn checked_output_preserves_nonzero_result() {
         let output = Output {
             status: ExitStatus { code: 7 },
+            reason: ExitReason::Exited,
             stdout: CapturedOutput::from_parts(b"partial".to_vec(), false),
             stderr: CapturedOutput::from_parts(b"failed".to_vec(), false),
         };
@@ -683,5 +690,30 @@ mod tests {
         };
         assert_eq!(error.output().status.code(), 7);
         assert_eq!(error.output().stdout.bytes(), b"partial");
+    }
+
+    #[test]
+    fn terminated_output_is_not_ok_even_with_zero_status() {
+        let output = Output {
+            status: ExitStatus { code: 0 },
+            reason: ExitReason::Terminated,
+            stdout: CapturedOutput::from_parts(Vec::new(), false),
+            stderr: CapturedOutput::from_parts(Vec::new(), false),
+        };
+        assert!(!output.ok());
+        assert!(output.check().is_err());
+    }
+
+    #[test]
+    fn exit_error_includes_stderr_excerpt() {
+        let output = Output {
+            status: ExitStatus { code: 1 },
+            reason: ExitReason::Exited,
+            stdout: CapturedOutput::from_parts(Vec::new(), false),
+            stderr: CapturedOutput::from_parts(b"boom: missing file".to_vec(), false),
+        };
+        let message = output.check().unwrap_err().to_string();
+        assert!(message.contains("status 1"), "{message}");
+        assert!(message.contains("boom: missing file"), "{message}");
     }
 }

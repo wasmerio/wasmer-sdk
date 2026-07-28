@@ -1414,6 +1414,9 @@ All SDK errors carry:
 Initial stable families:
 
 ```text
+CLIENT_CLOSED
+SANDBOX_CLOSED
+INVALID_PACKAGE_SOURCE
 PACKAGE_NOT_FOUND
 PACKAGE_INTEGRITY_FAILED
 PACKAGE_INCOMPATIBLE
@@ -1429,8 +1432,9 @@ LIMIT_EXCEEDED
 TIMEOUT
 INVALID_PATH
 FILESYSTEM_ERROR
+INVALID_UTF8
+PROCESS_EXITED
 PROCESS_TERMINATED
-SANDBOX_CLOSED
 TARGET_ERROR
 ```
 
@@ -1438,9 +1442,9 @@ Guest exit status is intentionally absent. A command that ran and exited 127
 still returns `Output`; a command that could not be resolved returns
 `COMMAND_NOT_FOUND`.
 
-`TIMEOUT`, `LIMIT_EXCEEDED`, and `PROCESS_TERMINATED` are exposed by
-`ProcessExitError` when an application calls `Output.check()` or opts into
-`run({ check: true })`. By default, `run()` and `wait()` return bounded
+`TIMEOUT`, `LIMIT_EXCEEDED`, `PROCESS_EXITED`, and `PROCESS_TERMINATED` are
+exposed by `ProcessExitError` when an application calls `Output.check()` or
+opts into `run({ check: true })`. By default, `run()` and `wait()` return bounded
 `Output`, including termination reason and diagnostics. `Output.ok` is true
 only for `reason === "exited"` with exit code zero.
 

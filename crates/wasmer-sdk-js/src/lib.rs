@@ -28,8 +28,8 @@ use tokio::{
 };
 use wasm_bindgen::prelude::*;
 use wasmer_sdk::{
-    Command, NetworkPolicy, Output, Package, PackageSource, Process, ProcessStderr, ProcessStdin,
-    ProcessStdout, Sandbox, SandboxBuilder, Stdio, Wasmer, WasmerConfig,
+    Command, NetworkPolicy, Output, Package, PackageSource, Process, ProcessHandle, ProcessStderr,
+    ProcessStdin, ProcessStdout, Sandbox, SandboxBuilder, Stdio, Wasmer, WasmerConfig,
 };
 use wasmer_wasix::PluggableRuntime;
 
@@ -86,7 +86,7 @@ impl JsWasmer {
             output_bytes: options.output_bytes.unwrap_or(16 * 1024 * 1024),
             ..WasmerConfig::default()
         };
-        let inner = Wasmer::from_js_runtime(&config, runtime).map_err(js_error)?;
+        let inner = Wasmer::from_js_runtime(&config, runtime).map_err(sdk_error)?;
         Ok(Self { inner, tasks })
     }
 
@@ -96,7 +96,7 @@ impl JsWasmer {
             .load_package(specifier)
             .await
             .map(|inner| JsPackage { inner })
-            .map_err(js_error)
+            .map_err(sdk_error)
     }
 
     #[wasm_bindgen(js_name = loadPackageBytes)]
@@ -105,7 +105,7 @@ impl JsWasmer {
             .load_package(PackageSource::webc(bytes.to_vec()))
             .await
             .map(|inner| JsPackage { inner })
-            .map_err(js_error)
+            .map_err(sdk_error)
     }
 
     #[wasm_bindgen(js_name = sandbox)]
@@ -116,7 +116,7 @@ impl JsWasmer {
     }
 
     pub async fn shutdown(&self) -> Result<(), JsValue> {
-        self.inner.shutdown().await.map_err(js_error)?;
+        self.inner.shutdown().await.map_err(sdk_error)?;
         self.tasks.close();
         wasm_bindgen_futures::JsFuture::from(worker_utils::GlobalScope::current().sleep(0)).await?;
         Ok(())
@@ -139,6 +139,16 @@ impl JsPackage {
     pub fn commands(&self) -> Vec<String> {
         self.inner.commands()
     }
+
+    #[wasm_bindgen(getter)]
+    pub fn entrypoint(&self) -> Option<String> {
+        self.inner.entrypoint()
+    }
+
+    #[wasm_bindgen(js_name = hasCommand)]
+    pub fn has_command(&self, name: String) -> bool {
+        self.inner.command(name).is_ok()
+    }
 }
 
 #[wasm_bindgen(js_name = SandboxBuilderCore)]
@@ -160,11 +170,23 @@ impl JsSandboxBuilder {
         Ok(())
     }
 
-    pub fn network(&mut self, enabled: bool) -> Result<(), JsValue> {
-        let policy = if enabled {
-            NetworkPolicy::Host
-        } else {
-            NetworkPolicy::Disabled
+    pub fn env(&mut self, key: String, value: String) -> Result<(), JsValue> {
+        let builder = self.take()?.env(key, value);
+        self.inner = Some(builder);
+        Ok(())
+    }
+
+    /// Configure guest networking from a stable mode string.
+    pub fn network(&mut self, mode: String) -> Result<(), JsValue> {
+        let policy = match mode.as_str() {
+            "disabled" => NetworkPolicy::Disabled,
+            "host" => NetworkPolicy::Host,
+            other => {
+                return Err(custom_error(
+                    "CAPABILITY_UNAVAILABLE",
+                    &format!("unsupported network mode `{other}`"),
+                ));
+            }
         };
         let builder = self.take()?.network(policy);
         self.inner = Some(builder);
@@ -176,7 +198,7 @@ impl JsSandboxBuilder {
             .start()
             .await
             .map(|inner| JsSandbox { inner })
-            .map_err(js_error)
+            .map_err(sdk_error)
     }
 }
 
@@ -184,8 +206,32 @@ impl JsSandboxBuilder {
     fn take(&mut self) -> Result<SandboxBuilder, JsValue> {
         self.inner
             .take()
-            .ok_or_else(|| js_sys::Error::new("sandbox builder was already consumed").into())
+            .ok_or_else(|| custom_error("TARGET_ERROR", "sandbox builder was already consumed"))
     }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsFileStat {
+    kind: &'static str,
+    size: f64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsDirEntry {
+    name: String,
+    kind: &'static str,
+    size: f64,
+}
+
+fn stat_parts(metadata: &wasmer_sdk::FileMetadata) -> (&'static str, f64) {
+    let kind = match metadata.file_type {
+        wasmer_sdk::FileType::Directory => "directory",
+        wasmer_sdk::FileType::File => "file",
+    };
+    #[allow(clippy::cast_precision_loss)]
+    (kind, metadata.len as f64)
 }
 
 #[wasm_bindgen(js_name = SandboxCore)]
@@ -208,13 +254,23 @@ impl JsSandbox {
         }
     }
 
+    /// A command explicitly qualified by its package, resolving name
+    /// collisions between installed packages.
+    #[wasm_bindgen(js_name = commandRef)]
+    pub fn command_ref(&self, package: &JsPackage, name: String) -> Result<JsCommand, JsValue> {
+        let reference = package.inner.command(name).map_err(sdk_error)?;
+        Ok(JsCommand {
+            inner: Some(self.inner.command(reference)),
+        })
+    }
+
     #[wasm_bindgen(js_name = installPackage)]
     pub async fn install_package(&self, specifier: String) -> Result<JsPackage, JsValue> {
         self.inner
             .install_package(specifier)
             .await
             .map(|inner| JsPackage { inner })
-            .map_err(js_error)
+            .map_err(sdk_error)
     }
 
     #[wasm_bindgen(js_name = installPackageBytes)]
@@ -223,7 +279,16 @@ impl JsSandbox {
             .install_package(PackageSource::webc(bytes.to_vec()))
             .await
             .map(|inner| JsPackage { inner })
-            .map_err(js_error)
+            .map_err(sdk_error)
+    }
+
+    #[wasm_bindgen(js_name = installPackageRef)]
+    pub async fn install_package_ref(&self, package: &JsPackage) -> Result<JsPackage, JsValue> {
+        self.inner
+            .install_package(package.inner.clone())
+            .await
+            .map(|inner| JsPackage { inner })
+            .map_err(sdk_error)
     }
 
     #[wasm_bindgen(js_name = writeFile)]
@@ -232,7 +297,7 @@ impl JsSandbox {
             .fs()
             .write(path, bytes.to_vec())
             .await
-            .map_err(js_error)
+            .map_err(sdk_error)
     }
 
     #[wasm_bindgen(js_name = readFile)]
@@ -242,11 +307,64 @@ impl JsSandbox {
             .read(path)
             .await
             .map(|bytes| Uint8Array::from(bytes.as_slice()))
-            .map_err(js_error)
+            .map_err(sdk_error)
+    }
+
+    pub fn mkdir(&self, path: String, recursive: bool) -> Result<(), JsValue> {
+        if recursive {
+            self.inner.fs().create_dir_all(path).map_err(sdk_error)
+        } else {
+            self.inner.fs().create_dir(path).map_err(sdk_error)
+        }
+    }
+
+    #[wasm_bindgen(js_name = readDir)]
+    pub fn read_dir(&self, path: String) -> Result<JsValue, JsValue> {
+        let entries: Vec<JsDirEntry> = self
+            .inner
+            .fs()
+            .read_dir(path)
+            .map_err(sdk_error)?
+            .into_iter()
+            .map(|entry| {
+                let (kind, size) = stat_parts(&entry.metadata);
+                JsDirEntry {
+                    name: entry.name,
+                    kind,
+                    size,
+                }
+            })
+            .collect();
+        serde_wasm_bindgen::to_value(&entries).map_err(js_error)
+    }
+
+    pub fn stat(&self, path: String) -> Result<JsValue, JsValue> {
+        let metadata = self.inner.fs().stat(path).map_err(sdk_error)?;
+        let (kind, size) = stat_parts(&metadata);
+        serde_wasm_bindgen::to_value(&JsFileStat { kind, size }).map_err(js_error)
+    }
+
+    pub fn remove(&self, path: String, recursive: bool) -> Result<(), JsValue> {
+        self.inner.fs().remove(path, recursive).map_err(sdk_error)
+    }
+
+    pub async fn rename(&self, from: String, to: String) -> Result<(), JsValue> {
+        self.inner.fs().rename(from, to).await.map_err(sdk_error)
+    }
+
+    /// Wait until a guest TCP listener accepts connections on `port`.
+    #[wasm_bindgen(js_name = waitForPort)]
+    pub async fn wait_for_port(&self, port: u16, timeout_ms: f64) -> Result<(), JsValue> {
+        let timeout = Duration::from_millis(timeout_ms.max(0.0) as u64);
+        self.inner
+            .ports()
+            .wait(port, timeout)
+            .await
+            .map_err(sdk_error)
     }
 
     pub async fn close(&self) -> Result<(), JsValue> {
-        self.inner.close().await.map_err(js_error)
+        self.inner.close().await.map_err(sdk_error)
     }
 }
 
@@ -284,45 +402,90 @@ impl JsCommand {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name = timeoutMs)]
+    pub fn timeout_ms(&mut self, milliseconds: f64) -> Result<(), JsValue> {
+        self.inner_mut()?
+            .timeout(Duration::from_millis(milliseconds.max(0.0) as u64));
+        Ok(())
+    }
+
+    /// Live stdin mode for `spawn()`: `"pipe"` or `"closed"`.
+    #[wasm_bindgen(js_name = stdinMode)]
+    pub fn stdin_mode(&mut self, mode: String) -> Result<(), JsValue> {
+        let stdio = match mode.as_str() {
+            "pipe" => Stdio::Piped,
+            "closed" => Stdio::Null,
+            other => return Err(invalid_stdio_mode(other)),
+        };
+        self.inner_mut()?.stdin(stdio);
+        Ok(())
+    }
+
+    /// Live stdout mode for `spawn()`: `"pipe"`, `"capture"`, or `"discard"`.
+    #[wasm_bindgen(js_name = stdoutMode)]
+    pub fn stdout_mode(&mut self, mode: String) -> Result<(), JsValue> {
+        let stdio = parse_output_mode(&mode)?;
+        self.inner_mut()?.stdout(stdio);
+        Ok(())
+    }
+
+    /// Live stderr mode for `spawn()`: `"pipe"`, `"capture"`, or `"discard"`.
+    #[wasm_bindgen(js_name = stderrMode)]
+    pub fn stderr_mode(&mut self, mode: String) -> Result<(), JsValue> {
+        let stdio = parse_output_mode(&mode)?;
+        self.inner_mut()?.stderr(stdio);
+        Ok(())
+    }
+
     pub async fn run(mut self) -> Result<JsOutput, JsValue> {
         self.take()?
             .output()
             .await
             .map(|inner| JsOutput { inner })
-            .map_err(js_error)
+            .map_err(sdk_error)
     }
 
     pub async fn spawn(mut self) -> Result<JsProcess, JsValue> {
-        let command = self.inner_mut()?;
-        command
-            .stdin(Stdio::Piped)
-            .stdout(Stdio::Piped)
-            .stderr(Stdio::Piped);
-        let mut process = self.take()?.spawn().await.map_err(js_error)?;
+        let mut process = self.take()?.spawn().await.map_err(sdk_error)?;
+        let handle = process.handle();
         let stdin = process.take_stdin();
         let stdout = process.take_stdout();
         let stderr = process.take_stderr();
         Ok(JsProcess {
             id: process.id(),
-            process: Arc::new(Mutex::new(process)),
-            stdin: Arc::new(Mutex::new(stdin)),
-            stdout: Arc::new(Mutex::new(stdout)),
-            stderr: Arc::new(Mutex::new(stderr)),
+            handle,
+            process: Mutex::new(process),
+            stdin: Mutex::new(stdin),
+            stdout: Mutex::new(stdout),
+            stderr: Mutex::new(stderr),
         })
     }
+}
+
+fn parse_output_mode(mode: &str) -> Result<Stdio, JsValue> {
+    match mode {
+        "pipe" => Ok(Stdio::Piped),
+        "capture" => Ok(Stdio::Capture),
+        "discard" => Ok(Stdio::Null),
+        other => Err(invalid_stdio_mode(other)),
+    }
+}
+
+fn invalid_stdio_mode(mode: &str) -> JsValue {
+    custom_error("TARGET_ERROR", &format!("unsupported stdio mode `{mode}`"))
 }
 
 impl JsCommand {
     fn inner_mut(&mut self) -> Result<&mut Command, JsValue> {
         self.inner
             .as_mut()
-            .ok_or_else(|| js_sys::Error::new("command was already consumed").into())
+            .ok_or_else(|| custom_error("TARGET_ERROR", "command was already consumed"))
     }
 
     fn take(&mut self) -> Result<Command, JsValue> {
         self.inner
             .take()
-            .ok_or_else(|| js_sys::Error::new("command was already consumed").into())
+            .ok_or_else(|| custom_error("TARGET_ERROR", "command was already consumed"))
     }
 }
 
@@ -333,14 +496,20 @@ pub struct JsOutput {
 
 #[wasm_bindgen(js_class = OutputCore)]
 impl JsOutput {
-    #[wasm_bindgen(getter)]
-    pub fn code(&self) -> i32 {
+    #[wasm_bindgen(getter, js_name = exitCode)]
+    pub fn exit_code(&self) -> i32 {
         self.inner.status.code()
     }
 
     #[wasm_bindgen(getter)]
-    pub fn success(&self) -> bool {
-        self.inner.status.success()
+    pub fn ok(&self) -> bool {
+        self.inner.ok()
+    }
+
+    /// Why the process stopped: `"exited"`, `"terminated"`, or `"timeout"`.
+    #[wasm_bindgen(getter)]
+    pub fn reason(&self) -> String {
+        self.inner.reason.as_str().to_owned()
     }
 
     #[wasm_bindgen(getter)]
@@ -367,10 +536,13 @@ impl JsOutput {
 #[wasm_bindgen(js_name = ProcessCore)]
 pub struct JsProcess {
     id: u32,
-    process: Arc<Mutex<Process>>,
-    stdin: Arc<Mutex<Option<ProcessStdin>>>,
-    stdout: Arc<Mutex<Option<ProcessStdout>>>,
-    stderr: Arc<Mutex<Option<ProcessStderr>>>,
+    /// Signals never contend with a concurrent `wait()`: they go through the
+    /// lock-free handle, not the mutex that `wait()` holds.
+    handle: ProcessHandle,
+    process: Mutex<Process>,
+    stdin: Mutex<Option<ProcessStdin>>,
+    stdout: Mutex<Option<ProcessStdout>>,
+    stderr: Mutex<Option<ProcessStderr>>,
 }
 
 #[wasm_bindgen(js_class = ProcessCore)]
@@ -385,7 +557,7 @@ impl JsProcess {
         let mut stdin = self.stdin.lock().await;
         stdin
             .as_mut()
-            .ok_or_else(|| js_sys::Error::new("stdin is closed"))?
+            .ok_or_else(|| custom_error("TARGET_ERROR", "stdin is closed"))?
             .write_all(&bytes.to_vec())
             .await
             .map_err(js_error)
@@ -417,27 +589,22 @@ impl JsProcess {
             .wait()
             .await
             .map(|inner| JsOutput { inner })
-            .map_err(js_error)
+            .map_err(sdk_error)
     }
 
     pub async fn terminate(&self, grace_ms: u32) -> Result<(), JsValue> {
-        self.process
-            .lock()
-            .await
+        self.handle
             .terminate(Duration::from_millis(u64::from(grace_ms)))
-            .await
-            .map_err(js_error)
+            .await;
+        Ok(())
     }
 
-    pub async fn kill(&self) -> Result<(), JsValue> {
-        self.process.lock().await.kill().map_err(js_error)
+    pub fn kill(&self) {
+        self.handle.kill();
     }
 }
 
-async fn read_stream<S>(
-    stream: &Arc<Mutex<Option<S>>>,
-    max_bytes: usize,
-) -> Result<JsValue, JsValue>
+async fn read_stream<S>(stream: &Mutex<Option<S>>, max_bytes: usize) -> Result<JsValue, JsValue>
 where
     S: tokio::io::AsyncRead + Unpin,
 {
@@ -455,6 +622,20 @@ where
     Ok(Uint8Array::from(bytes.as_slice()).into())
 }
 
+/// Convert an SDK error into a JavaScript error carrying its stable `code`.
+fn sdk_error(error: wasmer_sdk::Error) -> JsValue {
+    custom_error(error.code(), &error.to_string())
+}
+
+/// A JavaScript error with the SDK's stable name and machine-readable code.
+fn custom_error(code: &str, message: &str) -> JsValue {
+    let error = js_sys::Error::new(message);
+    error.set_name("WasmerError");
+    let _ = js_sys::Reflect::set(&error, &JsValue::from_str("code"), &JsValue::from_str(code));
+    error.into()
+}
+
+/// Fallback for non-SDK failures (stream I/O, serialization).
 fn js_error(error: impl std::fmt::Display) -> JsValue {
-    js_sys::Error::new(&error.to_string()).into()
+    custom_error("TARGET_ERROR", &error.to_string())
 }

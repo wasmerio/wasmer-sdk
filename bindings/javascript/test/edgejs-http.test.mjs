@@ -9,31 +9,41 @@ const serverSource = await readFile(
   new URL("../../../examples/edgejs-http/server.js", import.meta.url),
 );
 
-test("serves HTTP from EdgeJS QuickJS through the Node network bridge", async () => {
+test("serves HTTP from EdgeJS QuickJS through the Node network bridge", async (context) => {
   const port = await reservePort();
   const client = new Wasmer();
-  const edgejs = await client.loadPackage("wasmer/edgejs-quickjs");
+  const edgejs = await client.loadPackage("wasmer/edgejs-quickjs@0.1.0");
   const sandbox = await client.createSandbox({
     packages: [edgejs],
     files: { "server.js": serverSource },
-    network: true,
+    env: { PORT: String(port) },
+    network: { mode: "host" },
   });
   const process = await sandbox
-    .command(edgejs, ["/workspace/server.js"], {
-      env: { PORT: String(port) },
-      outputBytes: 256 * 1024,
-    })
-    .spawn();
+    .command(edgejs, ["/workspace/server.js"])
+    .spawn({ stdout: "capture", stderr: "capture", outputBytes: 256 * 1024 });
 
   try {
-    const response = await fetchUntilReady(`http://127.0.0.1:${port}/hello`);
+    await sandbox.ports.wait(port, { timeoutMs: 20_000 });
+    const requestStarted = performance.now();
+    const response = await fetch(`http://127.0.0.1:${port}/hello`, {
+      headers: { connection: "close" },
+    });
     assert.equal(response.status, 200);
     assert.match(await response.text(), /<h1>Hello from Edge\.js!<\/h1>/);
+    const requestElapsed = performance.now() - requestStarted;
+    assert.ok(
+      requestElapsed < 5_000,
+      `HTTP request took ${requestElapsed.toFixed(0)}ms after the port was ready`,
+    );
+    context.diagnostic(
+      `HTTP response after port readiness: ${requestElapsed.toFixed(0)}ms`,
+    );
   } finally {
     await process.kill();
     await process.wait();
     await sandbox.close();
-    await client.shutdown();
+    await client.close();
   }
 });
 
@@ -49,20 +59,4 @@ async function reservePort() {
     server.close((error) => (error ? reject(error) : resolve())),
   );
   return address.port;
-}
-
-async function fetchUntilReady(url) {
-  const deadline = Date.now() + 30_000;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return response;
-      lastError = new Error(`unexpected HTTP status ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw lastError ?? new Error(`timed out waiting for ${url}`);
 }

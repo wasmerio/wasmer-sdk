@@ -3,7 +3,7 @@ use std::{
     mem::MaybeUninit,
     net::{IpAddr, Shutdown, SocketAddr},
     sync::{Arc, Mutex},
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
     time::Duration,
 };
 
@@ -39,6 +39,12 @@ extern "C" {
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerAccept)]
     fn node_listener_accept(id: u32) -> Result<JsValue, JsValue>;
 
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerRefresh)]
+    fn node_listener_refresh(id: u32) -> Result<(), JsValue>;
+
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerReadable)]
+    fn node_listener_readable(id: u32) -> Result<bool, JsValue>;
+
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerClose)]
     fn node_listener_close(id: u32) -> Result<(), JsValue>;
 
@@ -54,20 +60,34 @@ extern "C" {
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketClose)]
     fn node_socket_close(id: u32) -> Result<(), JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, js_name = __wasmerNodeSocketReadable)]
-    fn node_socket_readable(id: u32) -> i32;
+    // `catch` is required on every hook: on worker threads these calls proxy
+    // through the RPC channel, and a JavaScript throw through a non-`catch`
+    // import would abort the wasm instance.
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketReadable)]
+    fn node_socket_readable(id: u32) -> Result<i32, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, js_name = __wasmerNodeSocketWritable)]
-    fn node_socket_writable(id: u32) -> i32;
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketWritable)]
+    fn node_socket_writable(id: u32) -> Result<i32, JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketSetNoDelay)]
     fn node_socket_set_nodelay(id: u32, enabled: bool) -> Result<(), JsValue>;
 
     #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketSetKeepAlive)]
     fn node_socket_set_keepalive(id: u32, enabled: bool) -> Result<(), JsValue>;
+
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketRefresh)]
+    fn node_socket_refresh(id: u32) -> Result<(), JsValue>;
+
 }
 
-type HandlerMap = Arc<Mutex<HashMap<u32, Box<dyn InterestHandler + Send + Sync>>>>;
+#[derive(Default)]
+struct InterestState {
+    handler: Option<Box<dyn InterestHandler + Send + Sync>>,
+    read_wakers: Vec<Waker>,
+    write_wakers: Vec<Waker>,
+}
+
+type HandlerMap = Arc<Mutex<HashMap<u32, InterestState>>>;
 
 /// A WASIX virtual network whose descriptors are backed by a JavaScript
 /// `NodeNetworkBridge`. The bridge itself owns `node:net` sockets.
@@ -89,23 +109,137 @@ impl NodeNetworking {
         let handlers: HandlerMap = Arc::new(Mutex::new(HashMap::new()));
         let callback_handlers = Arc::clone(&handlers);
         let callback = Closure::wrap(Box::new(move |id: u32, event: String| {
-            let interest = match event.as_str() {
-                "readable" | "connection" => InterestType::Readable,
-                "writable" | "drain" => InterestType::Writable,
-                "close" => InterestType::Closed,
-                _ => InterestType::Error,
-            };
-            if let Some(handler) = callback_handlers
-                .lock()
-                .expect("network handler lock poisoned")
-                .get_mut(&id)
-            {
-                handler.push_interest(interest);
-            }
+            notify_handler(&callback_handlers, id, &event);
         }) as Box<dyn FnMut(u32, String)>);
         bridge.set_wake_callback(callback.as_ref().unchecked_ref());
         callback.forget();
         Self { handlers }
+    }
+}
+
+fn notify_handler(handlers: &HandlerMap, id: u32, event: &str) {
+    let interest = match event {
+        "readable" | "connection" => InterestType::Readable,
+        "writable" | "drain" => InterestType::Writable,
+        "close" => InterestType::Closed,
+        _ => InterestType::Error,
+    };
+    let wakers = {
+        let mut handlers = handlers.lock().expect("network handler lock poisoned");
+        let Some(state) = handlers.get_mut(&id) else {
+            return;
+        };
+        if let Some(handler) = state.handler.as_mut() {
+            handler.push_interest(interest);
+        }
+        match interest {
+            InterestType::Readable => std::mem::take(&mut state.read_wakers),
+            InterestType::Writable => std::mem::take(&mut state.write_wakers),
+            InterestType::Closed | InterestType::Error => {
+                let mut wakers = std::mem::take(&mut state.read_wakers);
+                wakers.append(&mut state.write_wakers);
+                wakers
+            }
+        }
+    };
+    for waker in wakers {
+        waker.wake();
+    }
+}
+
+fn register_handler(
+    handlers: &HandlerMap,
+    id: u32,
+    handler: Box<dyn InterestHandler + Send + Sync>,
+) -> virtual_net::Result<()> {
+    handlers
+        .lock()
+        .map_err(|_| NetworkError::Lock)?
+        .entry(id)
+        .or_default()
+        .handler = Some(handler);
+    Ok(())
+}
+
+fn remove_handler(handlers: &HandlerMap, id: u32) {
+    let mut handlers = handlers.lock().expect("network handler lock poisoned");
+    let should_remove = if let Some(state) = handlers.get_mut(&id) {
+        state.handler = None;
+        state.read_wakers.is_empty() && state.write_wakers.is_empty()
+    } else {
+        false
+    };
+    if should_remove {
+        handlers.remove(&id);
+    }
+}
+
+fn register_waker(handlers: &HandlerMap, id: u32, interest: InterestType, waker: &Waker) {
+    let mut handlers = handlers.lock().expect("network handler lock poisoned");
+    let state = handlers.entry(id).or_default();
+    let wakers = match interest {
+        InterestType::Readable | InterestType::Closed | InterestType::Error => {
+            &mut state.read_wakers
+        }
+        InterestType::Writable => &mut state.write_wakers,
+    };
+    if !wakers.iter().any(|registered| registered.will_wake(waker)) {
+        wakers.push(waker.clone());
+    }
+}
+
+fn unregister_waker(handlers: &HandlerMap, id: u32, interest: InterestType, waker: &Waker) {
+    let mut handlers = handlers.lock().expect("network handler lock poisoned");
+    let should_remove = if let Some(state) = handlers.get_mut(&id) {
+        let wakers = match interest {
+            InterestType::Readable | InterestType::Closed | InterestType::Error => {
+                &mut state.read_wakers
+            }
+            InterestType::Writable => &mut state.write_wakers,
+        };
+        wakers.retain(|registered| !registered.will_wake(waker));
+        state.handler.is_none() && state.read_wakers.is_empty() && state.write_wakers.is_empty()
+    } else {
+        false
+    };
+    if should_remove {
+        handlers.remove(&id);
+    }
+}
+
+fn poll_ready(
+    handlers: &HandlerMap,
+    id: u32,
+    interest: InterestType,
+    cx: &mut Context<'_>,
+    mut query: impl FnMut() -> Result<Option<usize>, JsValue>,
+) -> Poll<virtual_net::Result<usize>> {
+    match query() {
+        Ok(Some(ready)) => {
+            unregister_waker(handlers, id, interest, cx.waker());
+            return Poll::Ready(Ok(ready));
+        }
+        Ok(None) => {}
+        Err(error) => {
+            unregister_waker(handlers, id, interest, cx.waker());
+            return Poll::Ready(Err(js_error(error)));
+        }
+    }
+
+    // The bridge publishes readiness as an event, but readiness may change
+    // between the first query and registering this task. Register, then query
+    // the level again so neither ordering can lose the wakeup.
+    register_waker(handlers, id, interest, cx.waker());
+    match query() {
+        Ok(Some(ready)) => {
+            unregister_waker(handlers, id, interest, cx.waker());
+            Poll::Ready(Ok(ready))
+        }
+        Ok(None) => Poll::Pending,
+        Err(error) => {
+            unregister_waker(handlers, id, interest, cx.waker());
+            Poll::Ready(Err(js_error(error)))
+        }
     }
 }
 
@@ -246,14 +380,13 @@ impl std::fmt::Debug for NodeTcpListener {
 
 impl VirtualIoSource for NodeTcpListener {
     fn remove_handler(&mut self) {
-        self.handlers
-            .lock()
-            .expect("handler lock poisoned")
-            .remove(&self.id);
+        remove_handler(&self.handlers, self.id);
     }
 
-    fn poll_read_ready(&mut self, _cx: &mut Context<'_>) -> Poll<virtual_net::Result<usize>> {
-        Poll::Ready(Ok(1))
+    fn poll_read_ready(&mut self, cx: &mut Context<'_>) -> Poll<virtual_net::Result<usize>> {
+        poll_ready(&self.handlers, self.id, InterestType::Readable, cx, || {
+            node_listener_readable(self.id).map(|ready| ready.then_some(1))
+        })
     }
 
     fn poll_write_ready(&mut self, _cx: &mut Context<'_>) -> Poll<virtual_net::Result<usize>> {
@@ -278,10 +411,8 @@ impl VirtualTcpListener for NodeTcpListener {
         &mut self,
         handler: Box<dyn InterestHandler + Send + Sync>,
     ) -> virtual_net::Result<()> {
-        self.handlers
-            .lock()
-            .map_err(|_| NetworkError::Lock)?
-            .insert(self.id, handler);
+        register_handler(&self.handlers, self.id, handler)?;
+        node_listener_refresh(self.id).map_err(js_error)?;
         Ok(())
     }
 
@@ -347,24 +478,19 @@ impl NodeTcpSocket {
 
 impl VirtualIoSource for NodeTcpSocket {
     fn remove_handler(&mut self) {
-        self.handlers
-            .lock()
-            .expect("handler lock poisoned")
-            .remove(&self.id);
+        remove_handler(&self.handlers, self.id);
     }
 
-    fn poll_read_ready(&mut self, _cx: &mut Context<'_>) -> Poll<virtual_net::Result<usize>> {
-        match node_socket_readable(self.id) {
-            value if value >= 0 => Poll::Ready(Ok(value as usize)),
-            _ => Poll::Pending,
-        }
+    fn poll_read_ready(&mut self, cx: &mut Context<'_>) -> Poll<virtual_net::Result<usize>> {
+        poll_ready(&self.handlers, self.id, InterestType::Readable, cx, || {
+            node_socket_readable(self.id).map(|ready| (ready >= 0).then_some(ready.max(0) as usize))
+        })
     }
 
-    fn poll_write_ready(&mut self, _cx: &mut Context<'_>) -> Poll<virtual_net::Result<usize>> {
-        match node_socket_writable(self.id) {
-            value if value >= 0 => Poll::Ready(Ok(value as usize)),
-            _ => Poll::Pending,
-        }
+    fn poll_write_ready(&mut self, cx: &mut Context<'_>) -> Poll<virtual_net::Result<usize>> {
+        poll_ready(&self.handlers, self.id, InterestType::Writable, cx, || {
+            node_socket_writable(self.id).map(|ready| (ready >= 0).then_some(ready.max(0) as usize))
+        })
     }
 }
 
@@ -393,10 +519,11 @@ impl VirtualSocket for NodeTcpSocket {
         &mut self,
         handler: Box<dyn InterestHandler + Send + Sync>,
     ) -> virtual_net::Result<()> {
-        self.handlers
-            .lock()
-            .map_err(|_| NetworkError::Lock)?
-            .insert(self.id, handler);
+        register_handler(&self.handlers, self.id, handler)?;
+        // Readiness can change between the operation returning WouldBlock and
+        // this handler being installed. Ask the Node bridge to publish its
+        // current level-triggered state after registration completes.
+        node_socket_refresh(self.id).map_err(js_error)?;
         Ok(())
     }
 }
@@ -464,13 +591,15 @@ impl VirtualTcpSocket for NodeTcpSocket {
         Ok(())
     }
     fn recv_buf_size(&self) -> virtual_net::Result<usize> {
-        Ok(node_socket_readable(self.id).max(0) as usize)
+        let readable = node_socket_readable(self.id).map_err(js_error)?;
+        Ok(readable.max(0) as usize)
     }
     fn set_send_buf_size(&mut self, _size: usize) -> virtual_net::Result<()> {
         Ok(())
     }
     fn send_buf_size(&self) -> virtual_net::Result<usize> {
-        Ok(node_socket_writable(self.id).max(0) as usize)
+        let writable = node_socket_writable(self.id).map_err(js_error)?;
+        Ok(writable.max(0) as usize)
     }
     fn set_nodelay(&mut self, enabled: bool) -> virtual_net::Result<()> {
         node_socket_set_nodelay(self.id, enabled).map_err(js_error)?;
@@ -532,6 +661,39 @@ fn address_property(value: &JsValue, name: &str) -> virtual_net::Result<SocketAd
         .map_err(|_| NetworkError::InvalidData)
 }
 
-fn js_error(_error: JsValue) -> NetworkError {
-    NetworkError::IOError
+/// Map a JavaScript bridge failure to the closest [`NetworkError`].
+///
+/// The original message is logged before mapping so a connection refused, a
+/// DNS failure, and a missing bridge stay distinguishable in host diagnostics.
+fn js_error(error: JsValue) -> NetworkError {
+    let message = error
+        .dyn_ref::<js_sys::Error>()
+        .map(|error| String::from(error.message()))
+        .or_else(|| error.as_string())
+        .unwrap_or_else(|| format!("{error:?}"));
+    // Debug level: readiness probes (`ports.wait`) legitimately hit
+    // connection-refused until the guest listens, and must not spam logs.
+    tracing::debug!(%message, "Node network bridge call failed");
+    // node:net surfaces its errno code inside the message (ECONNREFUSED, …).
+    if message.contains("ECONNREFUSED") {
+        NetworkError::ConnectionRefused
+    } else if message.contains("ECONNRESET") {
+        NetworkError::ConnectionReset
+    } else if message.contains("ECONNABORTED") {
+        NetworkError::ConnectionAborted
+    } else if message.contains("ETIMEDOUT") {
+        NetworkError::TimedOut
+    } else if message.contains("EADDRINUSE") {
+        NetworkError::AddressInUse
+    } else if message.contains("EADDRNOTAVAIL") || message.contains("ENOTFOUND") {
+        NetworkError::AddressNotAvailable
+    } else if message.contains("EPIPE") {
+        NetworkError::BrokenPipe
+    } else if message.contains("ENOTCONN") {
+        NetworkError::NotConnected
+    } else if message.contains("EACCES") || message.contains("EPERM") {
+        NetworkError::PermissionDenied
+    } else {
+        NetworkError::IOError
+    }
 }

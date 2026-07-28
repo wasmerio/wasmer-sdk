@@ -423,7 +423,10 @@ fn internal_path(path: &RelativePath) -> PathBuf {
     Path::new("/").join(path.as_path())
 }
 
-fn remove_directory_tree(filesystem: &virtual_fs::mem_fs::FileSystem, path: &Path) -> FsResult<()> {
+pub(crate) fn remove_directory_tree(
+    filesystem: &virtual_fs::mem_fs::FileSystem,
+    path: &Path,
+) -> FsResult<()> {
     let entries: Vec<_> = filesystem
         .read_dir(path)
         .map_err(map_virtual_error)?
@@ -498,7 +501,12 @@ impl VirtualFileOpener for ProviderAdapter {
             truncate: config.truncate,
             append: config.append,
         };
-        let initial_len = if config.append {
+        // Stat before opening so the file's length is correct from the start:
+        // `size()` and `SeekFrom::End` must work for ordinary reads, not only
+        // append mode. A missing or truncated file starts at zero.
+        let initial_len = if config.truncate || config.create_new {
+            0
+        } else {
             let provider = Arc::clone(&self.provider);
             let stat_path = path.clone();
             run_provider(
@@ -506,8 +514,6 @@ impl VirtualFileOpener for ProviderAdapter {
                 async move { provider.stat(&stat_path).await },
             )
             .map_or(0, |metadata| metadata.len)
-        } else {
-            0
         };
         let provider = Arc::clone(&self.provider);
         let file = run_provider(
@@ -518,7 +524,7 @@ impl VirtualFileOpener for ProviderAdapter {
         Ok(Box::new(ProviderFile {
             file,
             runtime: self.runtime.clone(),
-            cursor: initial_len,
+            cursor: if config.append { initial_len } else { 0 },
             len: initial_len,
             writable: self.writable(),
             closed: false,
@@ -816,6 +822,13 @@ fn provider_io_error(error: FsError) -> io::Error {
     io::Error::from(map_provider_error(error))
 }
 
+/// Bridge one asynchronous provider operation into Wasmer's synchronous VFS.
+///
+/// Guest filesystem calls arrive on dedicated WASIX threads, where blocking
+/// on the channel is safe. When the caller is instead a tokio worker thread,
+/// `block_in_place` keeps the rest of the runtime making progress; on a
+/// current-thread runtime that safety valve does not exist, so providers
+/// should not be driven from the runtime's own thread there.
 fn run_provider<T, F>(runtime: &tokio::runtime::Handle, future: F) -> T
 where
     T: Send + 'static,
@@ -826,7 +839,24 @@ where
         let output = future.await;
         let _ = sender.send(output);
     });
-    receiver
-        .recv()
-        .expect("the provider runtime stopped before completing an operation")
+    let recv = move || {
+        receiver
+            .recv()
+            .expect("the provider runtime stopped before completing an operation")
+    };
+    #[cfg(feature = "sys")]
+    {
+        match tokio::runtime::Handle::try_current() {
+            Ok(current)
+                if current.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread =>
+            {
+                tokio::task::block_in_place(recv)
+            }
+            _ => recv(),
+        }
+    }
+    #[cfg(not(feature = "sys"))]
+    {
+        recv()
+    }
 }

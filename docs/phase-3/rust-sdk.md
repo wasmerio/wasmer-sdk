@@ -56,13 +56,36 @@ host imports required by `wasmer/edgejs-quickjs`.
 
 The current resolved compiler dependencies require Rust 1.94 or newer.
 
+Recent vertical slices on top of that baseline:
+
+- `Output.reason` distinguishes guest exits from SDK termination and
+  timeouts; synthesized statuses no longer masquerade as guest exit codes.
+- `Command::timeout()` enforces a spawn-time deadline through the portable
+  task-manager timer and completes the process with `ExitReason::TimedOut`.
+- `Stdio::Capture` retains bounded diagnostics with no live reader, so
+  captured runs and service spawns need no drain tasks.
+- Sandbox-wide environment values via `SandboxBuilder::env()`/`envs()`,
+  merged beneath per-command overrides.
+- `Sandbox::ports().wait(port, timeout)` probes a guest TCP listener through
+  the sandbox's own virtual networking, failing closed when networking is
+  disabled.
+- `SandboxFileSystem` gained `create_dir`, `read_dir`, `stat`, `remove`, and
+  `rename`.
+- `Error::code()` exposes the stable cross-language error code;
+  `ProcessExitError` names the termination reason and includes a bounded
+  stderr excerpt.
+- `Process::handle()` returns a cloneable signaling handle whose `kill` and
+  `terminate` never contend with a concurrent `wait()`.
+- `SandboxBuilder::mount()` accepts any provider or `Arc<dyn FileSystem>`
+  without manual coercion.
+
 ## Deliberately not yet implemented
 
 These remain part of the Phase 2 contract, but need their own executable
 vertical slices rather than placeholder methods:
 
-- command-level wall-clock timeouts and PTYs;
-- memory, wall-time, process-count, and restricted-network policy enforcement;
+- PTYs;
+- memory, process-count, and restricted-network policy enforcement;
 - native host-directory mounts;
 - package download deduplication and cache locking across OS processes;
 - cache inspection, pruning, and integrity maintenance;

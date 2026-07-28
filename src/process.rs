@@ -3,17 +3,23 @@ use std::{
     pin::Pin,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicI32, Ordering},
+        atomic::{AtomicU8, Ordering},
     },
     task::{Context, Poll},
     time::Duration,
 };
 
+use futures::future::Either;
 use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
-use wasmer_wasix::os::task::{TaskJoinHandle, process::WasiProcess};
+use wasmer_wasix::{
+    os::task::{TaskJoinHandle, process::WasiProcess},
+    runtime::task_manager::VirtualTaskManager,
+};
 use wasmer_wasix_types::wasi::Signal;
 
-use crate::{CapturedOutput, Error, ExitStatus, Output, Result, capture::CaptureHandle};
+use crate::{
+    CapturedOutput, Error, ExitReason, ExitStatus, Output, Result, capture::CaptureHandle,
+};
 
 /// Writable live stdin for a spawned guest process.
 #[derive(Debug)]
@@ -124,6 +130,7 @@ process_output_stream!(
 pub struct Process {
     id: u32,
     control: Arc<ProcessControl>,
+    tasks: Arc<dyn VirtualTaskManager>,
     task: TaskJoinHandle,
     stdin: Option<ProcessStdin>,
     stdout: Option<ProcessStdout>,
@@ -137,6 +144,7 @@ impl Process {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         process: WasiProcess,
+        tasks: Arc<dyn VirtualTaskManager>,
         task: TaskJoinHandle,
         stdin: Option<ProcessStdin>,
         stdout: Option<ProcessStdout>,
@@ -148,11 +156,12 @@ impl Process {
         let control = Arc::new(ProcessControl {
             process,
             stdin: stdin_control,
-            requested_exit: AtomicI32::new(0),
+            exit: AtomicU8::new(EXIT_NONE),
         });
         Self {
             id: control.process.pid().raw(),
             control,
+            tasks,
             task,
             stdin,
             stdout,
@@ -171,6 +180,18 @@ impl Process {
     #[must_use]
     pub fn id(&self) -> u32 {
         self.id
+    }
+
+    /// A cloneable handle that can signal this process without owning it.
+    ///
+    /// The handle never contends with [`Self::wait`]: killing or terminating
+    /// through it works while another task is waiting on the same process.
+    #[must_use]
+    pub fn handle(&self) -> ProcessHandle {
+        ProcessHandle {
+            control: Arc::clone(&self.control),
+            tasks: Arc::clone(&self.tasks),
+        }
     }
 
     /// Take ownership of piped stdin. This succeeds at most once.
@@ -250,12 +271,18 @@ impl Process {
         if self.try_wait()?.is_some() {
             return Ok(());
         }
-        self.control.terminate();
-        if let Ok(result) = tokio::time::timeout(grace, self.wait()).await {
-            result?;
-        } else {
-            self.kill()?;
-            self.wait().await?;
+        self.control.signal_terminate();
+        let control = Arc::clone(&self.control);
+        let grace_elapsed = self.tasks.sleep_now(grace);
+        let wait = Box::pin(self.wait());
+        match futures::future::select(wait, grace_elapsed).await {
+            Either::Left((result, _)) => {
+                result?;
+            }
+            Either::Right(((), wait)) => {
+                control.kill();
+                wait.await?;
+            }
         }
         Ok(())
     }
@@ -274,24 +301,79 @@ impl Process {
     fn snapshot(&self, code: i32) -> Output {
         let (stdout, stdout_truncated) = self.stdout_capture.snapshot();
         let (stderr, stderr_truncated) = self.stderr_capture.snapshot();
+        let (reason, status) = self.control.exit_state(code);
         Output {
-            status: ExitStatus::from_code(self.control.normalized_exit(code)),
+            status,
+            reason,
             stdout: CapturedOutput::from_parts(stdout, stdout_truncated),
             stderr: CapturedOutput::from_parts(stderr, stderr_truncated),
         }
     }
 }
 
+/// A cloneable signaling handle for one guest process.
+///
+/// Unlike [`Process`], the handle does not own streams or completed output;
+/// it exists so that termination never has to wait behind a concurrent
+/// [`Process::wait`].
+#[derive(Clone, Debug)]
+pub struct ProcessHandle {
+    control: Arc<ProcessControl>,
+    tasks: Arc<dyn VirtualTaskManager>,
+}
+
+impl ProcessHandle {
+    /// WASIX process identifier.
+    #[must_use]
+    pub fn id(&self) -> u32 {
+        self.control.process.pid().raw()
+    }
+
+    /// Immediately signal the guest with `SIGKILL`.
+    pub fn kill(&self) {
+        self.control.kill();
+    }
+
+    /// Request graceful termination and escalate to `SIGKILL` after `grace`.
+    ///
+    /// This waits at most `grace` for the guest to exit on its own; it does
+    /// not join the process or return its output.
+    pub async fn terminate(&self, grace: Duration) {
+        if self.control.process.try_join().is_some() {
+            return;
+        }
+        self.control.signal_terminate();
+        self.tasks.sleep_now(grace).await;
+        if self.control.process.try_join().is_none() {
+            self.control.kill();
+        }
+    }
+
+    pub(crate) fn kill_timed_out(&self) {
+        if self.control.try_join_exited() {
+            return;
+        }
+        self.control.kill_timed_out();
+    }
+}
+
+const EXIT_NONE: u8 = 0;
+const EXIT_TERMINATED_GRACEFUL: u8 = 1;
+const EXIT_TERMINATED_FORCED: u8 = 2;
+const EXIT_TIMED_OUT: u8 = 3;
+
 #[derive(Debug)]
 pub(crate) struct ProcessControl {
     process: WasiProcess,
     stdin: Option<ProcessStdin>,
-    requested_exit: AtomicI32,
+    /// The first SDK-requested exit, if any. Once set it is never replaced,
+    /// so a terminate that escalates to a kill still reports `Terminated`.
+    exit: AtomicU8,
 }
 
 impl ProcessControl {
-    pub(crate) fn terminate(&self) {
-        self.requested_exit.store(143, Ordering::Release);
+    pub(crate) fn signal_terminate(&self) {
+        self.record_exit(EXIT_TERMINATED_GRACEFUL);
         self.process.signal_process(Signal::Sigterm);
         if let Some(stdin) = &self.stdin {
             stdin.close_now();
@@ -299,17 +381,37 @@ impl ProcessControl {
     }
 
     pub(crate) fn kill(&self) {
-        self.requested_exit.store(137, Ordering::Release);
+        self.record_exit(EXIT_TERMINATED_FORCED);
         self.process.signal_process(Signal::Sigkill);
         if let Some(stdin) = &self.stdin {
             stdin.close_now();
         }
     }
 
-    fn normalized_exit(&self, backend_code: i32) -> i32 {
-        match self.requested_exit.load(Ordering::Acquire) {
-            0 => backend_code,
-            requested => requested,
+    pub(crate) fn kill_timed_out(&self) {
+        self.record_exit(EXIT_TIMED_OUT);
+        self.process.signal_process(Signal::Sigkill);
+        if let Some(stdin) = &self.stdin {
+            stdin.close_now();
+        }
+    }
+
+    pub(crate) fn try_join_exited(&self) -> bool {
+        self.process.try_join().is_some()
+    }
+
+    fn record_exit(&self, requested: u8) {
+        let _ = self
+            .exit
+            .compare_exchange(EXIT_NONE, requested, Ordering::AcqRel, Ordering::Acquire);
+    }
+
+    fn exit_state(&self, backend_code: i32) -> (ExitReason, ExitStatus) {
+        match self.exit.load(Ordering::Acquire) {
+            EXIT_TERMINATED_GRACEFUL => (ExitReason::Terminated, ExitStatus::from_code(143)),
+            EXIT_TERMINATED_FORCED => (ExitReason::Terminated, ExitStatus::from_code(137)),
+            EXIT_TIMED_OUT => (ExitReason::TimedOut, ExitStatus::from_code(137)),
+            _ => (ExitReason::Exited, ExitStatus::from_code(backend_code)),
         }
     }
 }

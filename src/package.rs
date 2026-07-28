@@ -114,6 +114,17 @@ impl Package {
             .collect()
     }
 
+    /// The command executed when this package itself is used as a command
+    /// selector, if the package declares one unambiguously.
+    #[must_use]
+    pub fn entrypoint(&self) -> Option<String> {
+        self.inner
+            .binary
+            .infer_entrypoint()
+            .ok()
+            .map(ToOwned::to_owned)
+    }
+
     /// Select a named command from this package.
     ///
     /// # Errors

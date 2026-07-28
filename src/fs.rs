@@ -2,7 +2,10 @@ use std::path::{Component, Path, PathBuf};
 
 use virtual_fs::{AsyncReadExt, AsyncWriteExt, FileSystem as VirtualFileSystem};
 
-use crate::{Error, Result};
+use crate::{
+    DirectoryEntry, Error, FileMetadata, FileType, Result,
+    provider_fs::remove_directory_tree,
+};
 
 /// Filesystem access to a sandbox's persistent `/workspace`.
 #[derive(Clone, Debug)]
@@ -117,6 +120,142 @@ impl SandboxFileSystem {
             path: guest,
             message: error.to_string(),
         })
+    }
+
+    /// Create one directory. The parent must already exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid guest path, a missing parent, or a
+    /// failed filesystem operation.
+    pub fn create_dir(&self, path: impl AsRef<Path>) -> Result<()> {
+        let (guest, internal) = workspace_path(path.as_ref())?;
+        self.inner
+            .create_dir(&internal)
+            .map_err(|error| Error::FileSystem {
+                operation: "create_dir",
+                path: guest,
+                message: error.to_string(),
+            })
+    }
+
+    /// List the immediate children of a directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid guest path or a failed filesystem
+    /// operation.
+    pub fn read_dir(&self, path: impl AsRef<Path>) -> Result<Vec<DirectoryEntry>> {
+        let (guest, internal) = workspace_path(path.as_ref())?;
+        self.inner
+            .read_dir(&internal)
+            .map_err(|error| Error::FileSystem {
+                operation: "read_dir",
+                path: guest.clone(),
+                message: error.to_string(),
+            })?
+            .map(|entry| {
+                let entry = entry.map_err(|error| Error::FileSystem {
+                    operation: "read_dir",
+                    path: guest.clone(),
+                    message: error.to_string(),
+                })?;
+                let metadata = entry.metadata().map_err(|error| Error::FileSystem {
+                    operation: "read_dir",
+                    path: guest.clone(),
+                    message: error.to_string(),
+                })?;
+                Ok(DirectoryEntry {
+                    name: entry.file_name().to_string_lossy().into_owned(),
+                    metadata: virtual_metadata(&metadata),
+                })
+            })
+            .collect()
+    }
+
+    /// Return metadata for one path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid guest path, a missing entry, or a
+    /// failed filesystem operation.
+    pub fn stat(&self, path: impl AsRef<Path>) -> Result<FileMetadata> {
+        let (guest, internal) = workspace_path(path.as_ref())?;
+        let metadata = self
+            .inner
+            .metadata(&internal)
+            .map_err(|error| Error::FileSystem {
+                operation: "stat",
+                path: guest,
+                message: error.to_string(),
+            })?;
+        Ok(virtual_metadata(&metadata))
+    }
+
+    /// Remove a file, or a directory when `recursive` is requested or it is
+    /// empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid guest path, a missing entry, or a
+    /// failed filesystem operation.
+    pub fn remove(&self, path: impl AsRef<Path>, recursive: bool) -> Result<()> {
+        let (guest, internal) = workspace_path(path.as_ref())?;
+        let map_error = |operation: &'static str| {
+            let guest = guest.clone();
+            move |error: virtual_fs::FsError| Error::FileSystem {
+                operation,
+                path: guest.clone(),
+                message: error.to_string(),
+            }
+        };
+        let metadata = self.inner.metadata(&internal).map_err(map_error("stat"))?;
+        if metadata.is_file() {
+            return self
+                .inner
+                .remove_file(&internal)
+                .map_err(map_error("remove"));
+        }
+        if recursive {
+            remove_directory_tree(&self.inner, &internal)
+                .map_err(|error| Error::FileSystem {
+                    operation: "remove",
+                    path: guest.clone(),
+                    message: error.to_string(),
+                })?;
+        }
+        self.inner.remove_dir(&internal).map_err(map_error("remove"))
+    }
+
+    /// Rename a file or directory within the workspace.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid guest path or a failed filesystem
+    /// operation.
+    pub async fn rename(&self, from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
+        let (guest_from, internal_from) = workspace_path(from.as_ref())?;
+        let (_, internal_to) = workspace_path(to.as_ref())?;
+        self.inner
+            .rename(&internal_from, &internal_to)
+            .await
+            .map_err(|error| Error::FileSystem {
+                operation: "rename",
+                path: guest_from,
+                message: error.to_string(),
+            })
+    }
+}
+
+fn virtual_metadata(metadata: &virtual_fs::Metadata) -> FileMetadata {
+    FileMetadata {
+        file_type: if metadata.is_dir() {
+            FileType::Directory
+        } else {
+            FileType::File
+        },
+        len: metadata.len(),
+        readonly: false,
     }
 }
 

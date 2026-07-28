@@ -12,4 +12,4 @@ const output = await sandbox
 console.log(output.text());
 
 await sandbox.close();
-await client.shutdown();
+await client.close();

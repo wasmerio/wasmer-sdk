@@ -117,12 +117,9 @@ impl Scheduler {
 unsafe impl Send for Scheduler {}
 unsafe impl Sync for Scheduler {}
 
-impl Drop for Scheduler {
-    fn drop(&mut self) {
-        tracing::debug!("Dropping Scheduler");
-        // self.close();
-    }
-}
+// Note: `Scheduler` deliberately has no `Drop` impl. Clones live inside
+// `SchedulerState`, so close-on-drop would tear the pool down while it is
+// still running; `ThreadPool` owns the lifecycle and closes on its own drop.
 
 /// The state for the actor in charge of the threadpool.
 #[derive(Debug)]
@@ -150,9 +147,9 @@ impl SchedulerState {
     fn execute(&mut self, message: SchedulerMessage) -> Result<(), Error> {
         match message {
             SchedulerMessage::Close => {
-                tracing::debug!("Scheduler received Close message");
-                self.idle.clear();
-                self.busy.clear();
+                // Unreachable in practice: the receive loop breaks on Close
+                // before calling execute(), and dropping the state terminates
+                // every worker via WorkerHandle::drop.
                 Ok(())
             }
             SchedulerMessage::SpawnAsync(task) => {
