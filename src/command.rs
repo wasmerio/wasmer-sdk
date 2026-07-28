@@ -341,12 +341,10 @@ impl Command {
 
         if let Some(duration) = self.timeout {
             let handle = process.handle();
-            let sleeper = Arc::clone(&tasks);
             tasks
                 .task_shared(Box::new(move || {
                     Box::pin(async move {
-                        sleeper.sleep_now(duration).await;
-                        handle.kill_timed_out();
+                        handle.kill_on_timeout(duration).await;
                     })
                 }))
                 .map_err(|error| Error::Task {

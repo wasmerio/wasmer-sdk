@@ -54,6 +54,9 @@ features = [
     "WorkerType",
 ]
 
+[dev-dependencies]
+wasm-bindgen-test = "=0.3.76"
+
 [lints.rust]
 unsafe_code = "allow"
 

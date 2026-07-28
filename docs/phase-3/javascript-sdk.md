@@ -120,6 +120,11 @@ the sandbox's own network policy:
 await sandbox.ports.wait(port, { timeoutMs: 30_000 });
 ```
 
+The timeout is one wall-clock deadline covering connection attempts and
+retry delays. A successful probe opens and immediately closes a real TCP
+connection, so one-shot and connection-count-sensitive services should expose
+an application-level readiness signal instead.
+
 Local packages are passed as bytes because a browser has no ambient host path:
 
 ```ts

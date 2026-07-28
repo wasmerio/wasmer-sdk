@@ -345,17 +345,21 @@ impl ProcessHandle {
             return;
         }
         self.control.signal_terminate();
-        self.tasks.sleep_now(grace).await;
-        if self.control.process.try_join().is_none() {
+        let exited = Box::pin(self.control.process.join());
+        let grace_elapsed = self.tasks.sleep_now(grace);
+        if let Either::Right(((), exited)) = futures::future::select(exited, grace_elapsed).await {
+            drop(exited);
             self.control.kill();
         }
     }
 
-    pub(crate) fn kill_timed_out(&self) {
-        if self.control.try_join_exited() {
-            return;
+    pub(crate) async fn kill_on_timeout(&self, duration: Duration) {
+        let exited = Box::pin(self.control.process.join());
+        let deadline = self.tasks.sleep_now(duration);
+        if let Either::Right(((), exited)) = futures::future::select(exited, deadline).await {
+            drop(exited);
+            self.control.kill_timed_out();
         }
-        self.control.kill_timed_out();
     }
 }
 

@@ -7,6 +7,7 @@ import {
   nodeNetworkBridge,
   type NodeNetworkMethod,
 } from "./node-network.js";
+import { NETWORK_RPC_CONTROL_BYTES } from "./node-network-rpc.js";
 
 interface WorkerEvent<T> {
   data: T;
@@ -99,7 +100,10 @@ function isNetworkRequest(value: unknown): value is NetworkRequest {
 
 async function respondToNetworkRequest(request: NetworkRequest): Promise<void> {
   const control = new Int32Array(request.response, 0, 4);
-  const payload = new Uint8Array(request.response, 16);
+  const payload = new Uint8Array(
+    request.response,
+    NETWORK_RPC_CONTROL_BYTES,
+  );
   try {
     const result = await dispatchNodeNetworkCall(
       nodeNetworkBridge(request.bridgeId),

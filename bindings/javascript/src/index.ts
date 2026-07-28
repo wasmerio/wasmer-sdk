@@ -445,6 +445,10 @@ export class Ports {
    * The probe uses the sandbox's own network policy: it observes exactly
    * what the guest exposed, and fails with `CAPABILITY_UNAVAILABLE` when
    * networking is disabled.
+   *
+   * A successful probe opens and immediately closes one real TCP connection.
+   * Use an application-level readiness signal for one-shot or
+   * connection-count-sensitive servers.
    */
   async wait(
     port: number,

@@ -1,4 +1,7 @@
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -103,6 +106,62 @@ async fn terminate_stops_a_process_blocked_on_live_stdin() -> Result<()> {
     .expect("termination timed out")?;
     assert!(process.try_wait()?.is_some());
     assert!(!process.wait().await?.status.success());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn process_handle_termination_returns_when_the_guest_exits() -> Result<()> {
+    let fixture = TempDir::new().expect("create fixture directory");
+    write_package(fixture.path());
+    let state = TempDir::new().expect("create SDK state directory");
+    let client = client(&state)?;
+    let sandbox = client
+        .sandbox()
+        .package(PackageSource::path(fixture.path()))
+        .start()
+        .await?;
+    let mut process = sandbox
+        .command("echo")
+        .stdin(Stdio::Piped)
+        .stdout(Stdio::Null)
+        .stderr(Stdio::Null)
+        .spawn()
+        .await?;
+
+    let started = Instant::now();
+    process.handle().terminate(Duration::from_secs(2)).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "termination waited through the grace period"
+    );
+    assert_eq!(process.wait().await?.reason, ExitReason::Terminated);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn command_timeout_is_classified_as_timed_out() -> Result<()> {
+    let fixture = TempDir::new().expect("create fixture directory");
+    write_package(fixture.path());
+    let state = TempDir::new().expect("create SDK state directory");
+    let client = client(&state)?;
+    let sandbox = client
+        .sandbox()
+        .package(PackageSource::path(fixture.path()))
+        .start()
+        .await?;
+    let output = sandbox
+        .command("echo")
+        .stdin(Stdio::Piped)
+        .stdout(Stdio::Null)
+        .stderr(Stdio::Null)
+        .timeout(Duration::from_millis(25))
+        .spawn()
+        .await?
+        .wait()
+        .await?;
+
+    assert_eq!(output.reason, ExitReason::TimedOut);
+    assert_eq!(output.status.code(), 137);
     Ok(())
 }
 

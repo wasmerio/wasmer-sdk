@@ -8,9 +8,11 @@ use std::{
         Arc, Mutex, RwLock, Weak,
         atomic::{AtomicBool, Ordering},
     },
+    task::Poll,
     time::Duration,
 };
 
+use futures::future::Either;
 #[cfg(feature = "sys")]
 use wasmer_wasix::runtime::ModuleInput;
 #[cfg(feature = "sys")]
@@ -18,7 +20,7 @@ use wasmer_wasix::virtual_net::host::LocalNetworking;
 use wasmer_wasix::{
     Runtime, UnsupportedVirtualNetworking,
     runtime::OverriddenRuntime,
-    virtual_net::{DynVirtualNetworking, NetworkError},
+    virtual_net::{DynVirtualNetworking, NetworkError, SocketStatus},
 };
 
 use crate::{
@@ -375,38 +377,67 @@ impl Ports {
     /// exactly what the guest exposed and fails with
     /// [`Error::CapabilityUnavailable`] when networking is disabled.
     ///
+    /// A successful probe opens and immediately closes one real TCP
+    /// connection. Servers that accept only once or count connections should
+    /// use an application-level readiness signal instead.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::Timeout`] when the port does not accept a connection
     /// within `timeout`, and [`Error::CapabilityUnavailable`] when the
     /// sandbox has no networking.
     pub async fn wait(&self, port: u16, timeout: Duration) -> Result<()> {
+        let operation = format!("guest port {port} to accept connections");
+        if timeout.is_zero() {
+            return Err(Error::Timeout { operation });
+        }
+
         let peer = SocketAddr::from(([127, 0, 0, 1], port));
         let local = SocketAddr::from(([0, 0, 0, 0], 0));
         let networking = Arc::clone(&self.sandbox.inner.networking);
         let tasks = Arc::clone(self.sandbox.inner.runtime.task_manager());
-        let mut remaining = timeout;
-        loop {
-            self.sandbox.ensure_open()?;
-            match networking.connect_tcp(local, peer).await {
-                Ok(_connection) => return Ok(()),
-                Err(NetworkError::Unsupported) => {
-                    return Err(Error::CapabilityUnavailable {
-                        capability: "port probing requires sandbox networking",
-                    });
+        let deadline = tasks.sleep_now(timeout);
+        let probe = Box::pin(async {
+            loop {
+                self.sandbox.ensure_open()?;
+                match probe_tcp(Arc::clone(&networking), local, peer).await {
+                    Ok(()) => return Ok(()),
+                    Err(NetworkError::Unsupported) => {
+                        return Err(Error::CapabilityUnavailable {
+                            capability: "port probing requires sandbox networking",
+                        });
+                    }
+                    Err(_not_yet_listening) => {}
                 }
-                Err(_not_yet_listening) => {}
+                tasks.sleep_now(PORT_PROBE_INTERVAL).await;
             }
-            if remaining.is_zero() {
-                return Err(Error::Timeout {
-                    operation: format!("guest port {port} to accept connections"),
-                });
-            }
-            let step = PORT_PROBE_INTERVAL.min(remaining);
-            tasks.sleep_now(step).await;
-            remaining = remaining.saturating_sub(step);
+        });
+
+        match futures::future::select(probe, deadline).await {
+            Either::Left((result, _deadline)) => result,
+            Either::Right(((), _probe)) => Err(Error::Timeout { operation }),
         }
     }
+}
+
+async fn probe_tcp(
+    networking: DynVirtualNetworking,
+    local: SocketAddr,
+    peer: SocketAddr,
+) -> std::result::Result<(), NetworkError> {
+    let mut socket = networking.connect_tcp(local, peer).await?;
+    futures::future::poll_fn(move |context| {
+        socket.set_handler(context.waker().into())?;
+        match socket.status()? {
+            SocketStatus::Opened => Poll::Ready(Ok(())),
+            SocketStatus::Opening => Poll::Pending,
+            SocketStatus::Failed => Poll::Ready(Err(socket
+                .last_error()?
+                .unwrap_or(NetworkError::ConnectionRefused))),
+            SocketStatus::Closed => Poll::Ready(Err(NetworkError::NotConnected)),
+        }
+    })
+    .await
 }
 
 /// Build the per-sandbox runtime once: policy networking plus the WebAssembly

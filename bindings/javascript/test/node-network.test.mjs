@@ -7,6 +7,17 @@ import {
   NodeNetworkBridge,
   nodeNetworkBridge,
 } from "../dist/node-network.js";
+import { networkResponseBufferBytes } from "../dist/node-network-rpc.js";
+
+test("Node worker RPC buffers scale only with socket reads", () => {
+  assert.equal(networkResponseBufferBytes("socketReadable", [1]), 528);
+  assert.equal(networkResponseBufferBytes("socketClose", [1]), 528);
+  assert.equal(networkResponseBufferBytes("socketRead", [1, 64]), 528);
+  assert.equal(
+    networkResponseBufferBytes("socketRead", [1, 1024 * 1024]),
+    16 + 1024 * 1024,
+  );
+});
 
 test("Node network bridge uses node:net for TCP", async (context) => {
   const server = net.createServer((socket) => socket.end("hello"));

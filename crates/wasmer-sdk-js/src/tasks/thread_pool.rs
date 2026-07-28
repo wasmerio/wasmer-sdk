@@ -156,3 +156,87 @@ impl VirtualTaskManager for ThreadPool {
         self.send(SchedulerMessage::SpawnWithModule { task, module })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use futures::{FutureExt, channel::oneshot};
+    use js_sys::Uint8Array;
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    use super::*;
+
+    const TEST_WASM: &[u8] = &[
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03,
+        0x02, 0x01, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x13, 0x02, 0x06, 0x6d, 0x65, 0x6d,
+        0x6f, 0x72, 0x79, 0x02, 0x00, 0x06, 0x5f, 0x73, 0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a,
+        0x04, 0x01, 0x02, 0x00, 0x0b,
+    ];
+
+    #[wasm_bindgen_test]
+    async fn transfer_module_to_worker() {
+        let data = Uint8Array::from(TEST_WASM);
+        let module: js_sys::WebAssembly::Module =
+            JsFuture::from(js_sys::WebAssembly::compile(&data))
+                .await
+                .unwrap()
+                .dyn_into()
+                .unwrap();
+        let module = wasmer::Module::from((module, bytes::Bytes::from_static(TEST_WASM)));
+        let pool = ThreadPool::new();
+
+        let (sender, receiver) = oneshot::channel();
+        pool.spawn_with_module(
+            module,
+            Box::new(move |module| {
+                sender.send(module.exports().count()).unwrap();
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(receiver.await.unwrap(), 2);
+        pool.close();
+    }
+
+    #[wasm_bindgen_test]
+    async fn spawned_tasks_can_communicate_with_the_main_thread() {
+        let pool = ThreadPool::new();
+        let (sender, receiver) = oneshot::channel();
+
+        pool.task_shared(Box::new(move || {
+            Box::pin(async move {
+                sender.send(42_u32).unwrap();
+            })
+        }))
+        .unwrap();
+
+        assert_eq!(receiver.await.unwrap(), 42);
+        pool.close();
+    }
+
+    /// Regression test for wasmer-js#355: a worker must be marked busy before
+    /// another interdependent blocking task can be assigned to it.
+    #[wasm_bindgen_test]
+    async fn spawn_interdependent_blocking_tasks_out_of_order() {
+        let (sender_1, receiver_1) = oneshot::channel();
+        let (sender_2, mut receiver_2) = oneshot::channel();
+        let pool = ThreadPool::new();
+
+        let first_task = Box::new(move || sender_1.send(()).unwrap());
+        let second_task = Box::new(move || {
+            futures::executor::block_on(receiver_1).unwrap();
+            sender_2.send(()).unwrap();
+        });
+
+        pool.task_dedicated(second_task).unwrap();
+        pool.task_dedicated(first_task).unwrap();
+
+        let timeout = JsFuture::from(crate::worker_utils::GlobalScope::current().sleep(1000));
+        futures::select! {
+            _ = timeout.fuse() => panic!("interdependent blocking tasks deadlocked"),
+            _ = receiver_2 => {}
+        }
+        pool.close();
+    }
+}

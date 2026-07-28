@@ -1,5 +1,9 @@
 import { parentPort } from "node:worker_threads";
 import type { NodeNetworkMethod } from "./node-network.js";
+import {
+  NETWORK_RPC_CONTROL_BYTES,
+  networkResponseBufferBytes,
+} from "./node-network-rpc.js";
 
 if (!parentPort) throw new Error("Wasmer SDK worker has no parent port");
 const port: NonNullable<typeof parentPort> = parentPort;
@@ -70,7 +74,7 @@ function installNetworkProxy(): void {
     bridgeId: number,
     id: number,
     maximum: number,
-  ) => callNetwork(bridgeId, "socketRead", [id, maximum], maximum + 16);
+  ) => callNetwork(bridgeId, "socketRead", [id, maximum]);
   scope.__wasmerNodeSocketWrite = (
     bridgeId: number,
     id: number,
@@ -102,10 +106,10 @@ function callNetwork(
   bridgeId: number,
   method: NodeNetworkMethod,
   args: unknown[],
-  minimumPayload = 0,
 ): unknown {
-  const payloadBytes = Math.max(1024 * 1024, minimumPayload);
-  const response = new SharedArrayBuffer(16 + payloadBytes);
+  const response = new SharedArrayBuffer(
+    networkResponseBufferBytes(method, args),
+  );
   const control = new Int32Array(response, 0, 4);
   port.postMessage({
     type: "wasmer-network-rpc",
@@ -122,7 +126,11 @@ function callNetwork(
 
   const kind = control[1];
   const length = control[2];
-  const payload = new Uint8Array(response, 16, length);
+  const payload = new Uint8Array(
+    response,
+    NETWORK_RPC_CONTROL_BYTES,
+    length,
+  );
   switch (kind) {
     case 1:
       return JSON.parse(new TextDecoder().decode(payload));
