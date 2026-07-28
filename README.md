@@ -109,3 +109,14 @@ cargo run --example postgres_wasix_psql -- \
 There is no native server or PostgreSQL protocol proxy in that path. See
 [the PostgreSQL WASIX proof](docs/phase-3/postgres-wasix.md) for the source
 patch, exact artifact layout, and locally verified command.
+
+The Edge.js HTTP example loads `wasmer/edgejs-quickjs`, seeds a Node-compatible
+`server.js`, starts it with host networking, and verifies the resulting site
+with a real HTTP request:
+
+```console
+cargo run --example edgejs_http
+```
+
+Its JavaScript source is in
+[`examples/edgejs-http/server.js`](examples/edgejs-http/server.js).

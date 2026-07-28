@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use bytes::Bytes;
 use virtual_fs::{AsyncSeekExt, AsyncWriteExt};
@@ -9,7 +9,7 @@ use wasmer_wasix::{
     bin_factory::spawn_exec,
     fs::WasiFsRoot,
     runners::wasi::{PackageOrHash, RuntimeOrEngine, WasiRunner},
-    runtime::OverriddenRuntime,
+    runtime::{ModuleInput, OverriddenRuntime},
 };
 
 use crate::{
@@ -451,7 +451,26 @@ fn sandbox_runtime(sandbox: &Sandbox) -> Arc<dyn Runtime + Send + Sync> {
         NetworkPolicy::Disabled => Arc::new(UnsupportedVirtualNetworking::default()) as Arc<_>,
         NetworkPolicy::Host => host_networking(),
     };
-    Arc::new(OverriddenRuntime::new(base).with_networking(networking))
+    let runtime: Arc<dyn Runtime + Send + Sync> =
+        Arc::new(OverriddenRuntime::new(base).with_networking(networking));
+    let runtime_for_resolver = Arc::clone(&runtime);
+    let hooks =
+        wasmer_c_api_imports::WasmCapiRuntimeHooks::new().with_resolve_module_sync(move |bytes| {
+            runtime_for_resolver
+                .resolve_module_sync(ModuleInput::Bytes(Cow::Owned(bytes)), None, None)
+                .map_err(anyhow::Error::from)
+        });
+
+    Arc::new(
+        OverriddenRuntime::new(runtime)
+            .with_additional_imports({
+                let hooks = hooks.clone();
+                move |module, store| hooks.additional_imports(module, store)
+            })
+            .with_instance_setup(move |module, store, instance, imported_memory| {
+                hooks.configure_instance(module, store, instance, imported_memory)
+            }),
+    )
 }
 
 #[cfg(feature = "sys")]
