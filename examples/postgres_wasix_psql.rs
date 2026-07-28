@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use tokio::io::{AsyncBufReadExt, BufReader};
 use wasmer_sdk::{Error, NetworkPolicy, PackageSource, Result, Stdio, Wasmer, WasmerConfig};
 
 #[tokio::main]
@@ -39,8 +40,6 @@ async fn main() -> Result<()> {
         .start()
         .await?;
 
-    // Capture mode retains bounded diagnostics without live readers, so the
-    // guest never blocks on an unread pipe and no drain tasks are needed.
     let mut process = sandbox
         .command("postgres")
         .args([
@@ -57,12 +56,14 @@ async fn main() -> Result<()> {
         .current_dir("/")
         .stdin(Stdio::Null)
         .stdout(Stdio::Capture)
-        .stderr(Stdio::Capture)
+        .stderr(Stdio::Piped)
         .spawn()
         .await?;
 
-    // Probe the guest listener through the sandbox's own network policy.
-    sandbox.ports().wait(port, Duration::from_secs(30)).await?;
+    let stderr = process.take_stderr().ok_or_else(|| Error::InternalState {
+        message: "missing piped PostgreSQL stderr".to_owned(),
+    })?;
+    wait_for_socket_ready(BufReader::new(stderr).lines(), port).await?;
 
     let (uri, psql_output) = run_psql(psql, port).await?;
 
@@ -78,6 +79,32 @@ async fn main() -> Result<()> {
         );
     }
     sandbox.close().await?;
+    Ok(())
+}
+
+async fn wait_for_socket_ready<R>(
+    mut lines: tokio::io::Lines<BufReader<R>>,
+    port: u16,
+) -> Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let marker = format!("OLIPHAUNT_WASIX_SOCKET_READY {port}");
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while let Some(line) = lines.next_line().await? {
+            if line.contains(&marker) {
+                return Ok::<(), std::io::Error>(());
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "PostgreSQL exited before its socket-ready marker",
+        ))
+    })
+    .await
+    .map_err(|_| Error::Timeout {
+        operation: "PostgreSQL socket readiness marker".to_owned(),
+    })??;
     Ok(())
 }
 

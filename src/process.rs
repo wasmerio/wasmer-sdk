@@ -15,6 +15,8 @@ use wasmer_wasix::{
     os::task::{TaskJoinHandle, process::WasiProcess},
     runtime::task_manager::VirtualTaskManager,
 };
+#[cfg(target_arch = "wasm32")]
+use wasmer_wasix_types::wasi::ExitCode;
 use wasmer_wasix_types::wasi::Signal;
 
 use crate::{
@@ -382,7 +384,7 @@ impl ProcessControl {
 
     pub(crate) fn kill(&self) {
         self.record_exit(EXIT_TERMINATED_FORCED);
-        self.process.signal_process(Signal::Sigkill);
+        self.force_exit();
         if let Some(stdin) = &self.stdin {
             stdin.close_now();
         }
@@ -390,10 +392,21 @@ impl ProcessControl {
 
     pub(crate) fn kill_timed_out(&self) {
         self.record_exit(EXIT_TIMED_OUT);
-        self.process.signal_process(Signal::Sigkill);
+        self.force_exit();
         if let Some(stdin) = &self.stdin {
             stdin.close_now();
         }
+    }
+
+    fn force_exit(&self) {
+        self.process.signal_process(Signal::Sigkill);
+        // A wasm worker can be suspended inside an atomic wait while servicing
+        // a WASIX syscall. SIGKILL disables and wakes those atomics, but there
+        // is no native thread unwinder to publish the task's final status.
+        // Complete the join state explicitly; client shutdown will then
+        // terminate the worker if it has not unwound on its own.
+        #[cfg(target_arch = "wasm32")]
+        self.process.terminate(ExitCode::from(137));
     }
 
     pub(crate) fn try_join_exited(&self) -> bool {

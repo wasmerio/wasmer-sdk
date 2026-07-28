@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use tokio::io::{AsyncBufReadExt, BufReader};
 use wasmer_sdk::{Error, NetworkPolicy, Result, Stdio, Wasmer, WasmerConfig};
 
 const SERVER_JS: &[u8] = include_bytes!("edgejs-http/server.js");
@@ -23,17 +24,23 @@ async fn main() -> Result<()> {
         .start()
         .await?;
 
-    // Capture mode keeps bounded diagnostics available from `wait()` without
-    // live readers or drain tasks.
     let mut process = sandbox
         .command(edgejs)
         .arg("/workspace/server.js")
-        .stdout(Stdio::Capture)
+        .stdout(Stdio::Piped)
         .stderr(Stdio::Capture)
         .spawn()
         .await?;
 
-    sandbox.ports().wait(port, Duration::from_secs(30)).await?;
+    let stdout = process.take_stdout().ok_or_else(|| Error::InternalState {
+        message: "missing piped Edge.js stdout".to_owned(),
+    })?;
+    wait_for_line(
+        BufReader::new(stdout).lines(),
+        "Edge.js listening on",
+        "Edge.js listening marker",
+    )
+    .await?;
 
     let response = match fetch_hello(port).await {
         Ok(response) => response,
@@ -87,8 +94,20 @@ fn fetch_once(port: u16) -> std::io::Result<String> {
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     stream.write_all(b"GET /hello HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
 
-    let mut response = String::new();
-    stream.read_to_string(&mut response)?;
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let read = stream.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+        if complete_http_response(&bytes)? {
+            break;
+        }
+    }
+    let response = String::from_utf8(bytes)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     if !response.starts_with("HTTP/1.1 200") && !response.starts_with("HTTP/1.0 200") {
         return Err(std::io::Error::other(format!(
             "Edge.js returned a non-200 response: {response}"
@@ -100,6 +119,51 @@ fn fetch_once(port: u16) -> std::io::Result<String> {
         ));
     }
     Ok(response)
+}
+
+fn complete_http_response(bytes: &[u8]) -> std::io::Result<bool> {
+    let Some(header_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return Ok(false);
+    };
+    let headers = std::str::from_utf8(&bytes[..header_end])
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>())
+        })
+        .transpose()
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?
+        .ok_or_else(|| std::io::Error::other("Edge.js response omitted content-length"))?;
+    Ok(bytes.len() >= header_end + 4 + content_length)
+}
+
+async fn wait_for_line<R>(
+    mut lines: tokio::io::Lines<BufReader<R>>,
+    marker: &str,
+    operation: &str,
+) -> Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while let Some(line) = lines.next_line().await? {
+            if line.contains(marker) {
+                return Ok::<(), std::io::Error>(());
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            format!("process exited before {operation}"),
+        ))
+    })
+    .await
+    .map_err(|_| Error::Timeout {
+        operation: operation.to_owned(),
+    })??;
+    Ok(())
 }
 
 fn response_body(response: &str) -> Result<&str> {

@@ -103,6 +103,41 @@ test("Node network bridge exposes a synchronous WASIX TCP listener", async () =>
   }
 });
 
+test("Node network bridge close releases listeners and accepted sockets", async () => {
+  const port = await reservePort();
+  const bridge = new NodeNetworkBridge();
+  let wake;
+  bridge.setWakeCallback((_id, event) => {
+    if (event === "writable" || event === "connection") wake?.();
+  });
+
+  bridge.listenTcp(`127.0.0.1:${port}`);
+  await waitForWake();
+  const client = net.createConnection({ host: "127.0.0.1", port });
+  await waitForWake();
+
+  bridge.close();
+  await new Promise((resolve) => client.once("close", resolve));
+
+  const replacement = net.createServer();
+  await new Promise((resolve, reject) => {
+    replacement.once("error", reject);
+    replacement.listen(port, "127.0.0.1", resolve);
+  });
+  await new Promise((resolve, reject) =>
+    replacement.close((error) => (error ? reject(error) : resolve())),
+  );
+
+  function waitForWake() {
+    return new Promise((resolve) => {
+      wake = () => {
+        wake = undefined;
+        resolve();
+      };
+    });
+  }
+});
+
 async function reservePort() {
   const server = net.createServer();
   await new Promise((resolve, reject) => {

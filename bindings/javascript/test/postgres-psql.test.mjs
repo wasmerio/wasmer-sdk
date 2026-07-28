@@ -36,8 +36,6 @@ test(
         PG_COLOR: "never",
       },
     });
-    // Capture mode retains bounded diagnostics without live readers, so the
-    // guest never blocks and no stream-draining tasks are needed.
     const process = await sandbox
       .command(
         postgres,
@@ -54,10 +52,15 @@ test(
         ],
         { cwd: "/" },
       )
-      .spawn({ stdout: "capture", stderr: "capture", outputBytes: 256 * 1024 });
+      .spawn({ stdout: "capture", stderr: "pipe", outputBytes: 256 * 1024 });
 
     try {
-      await sandbox.ports.wait(port, { timeoutMs: 20_000 });
+      assert(process.stderr);
+      await waitForLine(
+        process.stderr.lines(),
+        `OLIPHAUNT_WASIX_SOCKET_READY ${port}`,
+        20_000,
+      );
       const uri =
         `postgresql://postgres@127.0.0.1:${port}/postgres?sslmode=disable`;
       const result = await execFileAsync(
@@ -89,6 +92,28 @@ test(
     }
   },
 );
+
+async function waitForLine(lines, marker, timeoutMs) {
+  let timeout;
+  try {
+    await Promise.race([
+      (async () => {
+        for await (const line of lines) {
+          if (line.includes(marker)) return;
+        }
+        throw new Error(`process exited before emitting ${marker}`);
+      })(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`timed out waiting for ${marker}`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 async function reservePort() {
   const server = net.createServer();

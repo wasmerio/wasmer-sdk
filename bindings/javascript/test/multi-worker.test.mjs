@@ -29,5 +29,16 @@ test("runs blocking WASIX processes concurrently on separate workers", async () 
   } finally {
     await sandbox.close();
     await client.close();
+    await waitFor(() => nodeWorkerStats().activeWorkers === 0);
   }
 });
+
+async function waitFor(predicate, timeoutMs = 5_000) {
+  const deadline = performance.now() + timeoutMs;
+  while (!predicate()) {
+    if (performance.now() >= deadline) {
+      assert.fail("timed out waiting for Wasmer workers to stop");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}

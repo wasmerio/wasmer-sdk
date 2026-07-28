@@ -21,10 +21,15 @@ test("serves HTTP from EdgeJS QuickJS through the Node network bridge", async (c
   });
   const process = await sandbox
     .command(edgejs, ["/workspace/server.js"])
-    .spawn({ stdout: "capture", stderr: "capture", outputBytes: 256 * 1024 });
+    .spawn({ stdout: "pipe", stderr: "capture", outputBytes: 256 * 1024 });
 
   try {
-    await sandbox.ports.wait(port, { timeoutMs: 20_000 });
+    assert(process.stdout);
+    await waitForLine(
+      process.stdout.lines(),
+      "Edge.js listening on",
+      20_000,
+    );
     const requestStarted = performance.now();
     const response = await fetch(`http://127.0.0.1:${port}/hello`, {
       headers: { connection: "close" },
@@ -41,11 +46,57 @@ test("serves HTTP from EdgeJS QuickJS through the Node network bridge", async (c
     );
   } finally {
     await process.kill();
-    await process.wait();
+    const output = await process.wait();
+    assert.equal(output.reason, "terminated");
+    assert.equal(output.exitCode, 137);
+    await waitForPortToClose(port);
     await sandbox.close();
     await client.close();
   }
 });
+
+async function waitForLine(lines, marker, timeoutMs) {
+  let timeout;
+  try {
+    await Promise.race([
+      (async () => {
+        for await (const line of lines) {
+          if (line.includes(marker)) return;
+        }
+        throw new Error(`process exited before emitting ${marker}`);
+      })(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`timed out waiting for ${marker}`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function waitForPortToClose(port, timeoutMs = 5_000) {
+  const deadline = performance.now() + timeoutMs;
+  while (await canConnect(port)) {
+    if (performance.now() >= deadline) {
+      assert.fail(`port ${port} remained open after the process was killed`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+function canConnect(port) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: "127.0.0.1", port });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
+  });
+}
 
 async function reservePort() {
   const server = net.createServer();

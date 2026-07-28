@@ -17,6 +17,7 @@ import {
 export * from "./index.js";
 
 let nodeInitialization: Promise<void> | undefined;
+const nodeNetworks = new WeakMap<core.WasmerCore, NodeNetworkBridge>();
 
 /**
  * Node entrypoint. WASIX TCP listeners, outbound TCP connections, and DNS are
@@ -43,10 +44,21 @@ export class Wasmer extends BrowserWasmer {
     installNodeNetworkGlobals(network);
     configureNodeWorkerBridge(network);
     installNodeWorkers();
-    return core.WasmerCore.create(
+    const client = core.WasmerCore.create(
       { outputBytes: options.outputBytes },
       network,
     );
+    nodeNetworks.set(client, network);
+    return client;
+  }
+
+  protected override async closeCore(client: core.WasmerCore): Promise<void> {
+    try {
+      await super.closeCore(client);
+    } finally {
+      nodeNetworks.get(client)?.close();
+      nodeNetworks.delete(client);
+    }
   }
 }
 

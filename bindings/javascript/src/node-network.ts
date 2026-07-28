@@ -50,6 +50,18 @@ export class NodeNetworkBridge {
     this.#wake = callback;
   }
 
+  close(): void {
+    for (const listener of this.#listeners.values()) {
+      listener.server.close();
+    }
+    this.#listeners.clear();
+    for (const state of this.#sockets.values()) {
+      state.socket.destroy();
+    }
+    this.#sockets.clear();
+    this.#wake = () => {};
+  }
+
   async resolve(host: string): Promise<string[]> {
     return (await dns.lookup(host, { all: true })).map(({ address }) => address);
   }
@@ -114,7 +126,11 @@ export class NodeNetworkBridge {
   }
 
   listenerClose(id: number): void {
-    this.#listeners.get(id)?.server.close();
+    const listener = this.#listeners.get(id);
+    listener?.server.close();
+    for (const socketId of listener?.accepted ?? []) {
+      this.socketClose(socketId);
+    }
     this.#listeners.delete(id);
   }
 

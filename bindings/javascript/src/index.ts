@@ -252,7 +252,7 @@ export class Wasmer {
   async close(): Promise<void> {
     if (!this.#core) return;
     const client = await this.#core;
-    await rethrow(client.shutdown());
+    await this.closeCore(client);
   }
 
   /** @deprecated Use {@link Wasmer.close}. */
@@ -262,6 +262,10 @@ export class Wasmer {
 
   async [Symbol.asyncDispose](): Promise<void> {
     await this.close();
+  }
+
+  protected async closeCore(client: WasmerCore): Promise<void> {
+    await rethrow(client.shutdown());
   }
 
   private getCore(): Promise<WasmerCore> {
