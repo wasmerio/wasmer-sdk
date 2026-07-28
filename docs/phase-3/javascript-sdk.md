@@ -170,18 +170,20 @@ standard `psql`; it contains no PostgreSQL protocol proxy.
 The EdgeJS test serves a real HTTP response from
 `wasmer/edgejs-quickjs`. The PostgreSQL test starts the WASIX PostgreSQL
 process through the SDK, waits for its TCP listener, and runs the host's normal
-`psql` binary against it. Both are green regression tests for the worker and
-network architecture.
+`psql` binary against it. Both are end-to-end regression tests for the worker
+and network architecture.
 
-Two narrow upstream JS-target gaps are patched under `vendor/`:
+Four narrow upstream JS-target gaps are carried in the linked Wasmer checkout;
+the SDK's Cargo patch table resolves the Wasmer ecosystem crates from that
+monorepo rather than keeping source copies under `vendor/`:
 
 - `virtual-fs` uses `web-time` for mount metadata on wasm32;
 - Wasmer's JS module retains translated `ModuleInfo` instead of panicking when
   WASIX asks for it;
-- WASIX signal callback registration tolerates a re-entrant JS-target callback
-  instead of panicking on a nested instance-handle borrow;
+- WASIX thread-local instance handles and signal callback registration tolerate
+  re-entrant JS-target access instead of panicking on nested borrows;
 - `wasmer-c-api-imports` is marked sendable on wasm32 under the worker
   scheduler's transfer invariant.
 
-Those patches should be upstreamed and removed from this repository once
-released.
+Those patches should be upstreamed. Once released, the local Cargo patch table
+can be removed.

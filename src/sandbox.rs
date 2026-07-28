@@ -424,16 +424,7 @@ fn build_sandbox_runtime(
             resolve_capi_module(runtime_for_resolver.as_ref(), bytes)
         });
 
-    Arc::new(
-        OverriddenRuntime::new(runtime)
-            .with_additional_imports({
-                let hooks = hooks.clone();
-                move |module, store| hooks.additional_imports(module, store)
-            })
-            .with_instance_setup(move |module, store, instance, imported_memory| {
-                hooks.configure_instance(module, store, instance, imported_memory)
-            }),
-    )
+    Arc::new(OverriddenRuntime::new(runtime).with_instantiation_hook(hooks))
 }
 
 #[cfg(feature = "sys")]
