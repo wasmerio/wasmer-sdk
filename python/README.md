@@ -35,6 +35,9 @@ PYTHONPATH=python/src \
 
 The generated `_native.py` module and platform library are private
 implementation details. Applications should only import from `wasmer_sdk`.
+Published wheels support macOS and Linux on both arm64 and x86_64. They use
+a Python-independent UniFFI boundary, so one native wheel works across
+supported Python 3 versions on the same platform.
 
 ## Examples
 
