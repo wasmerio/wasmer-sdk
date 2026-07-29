@@ -34,6 +34,7 @@ run(
     "build",
     "-Z",
     "build-std=std,panic_abort",
+    "--locked",
     "-p",
     "wasmer-sdk-js",
     "--target",

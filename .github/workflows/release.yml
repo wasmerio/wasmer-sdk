@@ -61,12 +61,12 @@ jobs:
         include:
           - name: linux-x86_64
             os: ubuntu-22.04
+          - name: linux-arm64
+            os: ubuntu-22.04-arm
           - name: macos-arm64
             os: macos-15
           - name: macos-x86_64
             os: macos-15-intel
-          - name: windows-x86_64
-            os: windows-2025
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -92,6 +92,8 @@ jobs:
 
       - name: Build native module and wheel
         shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: 1.94.0
         run: |
           python -m pip install --upgrade build
           python python/scripts/build.py --release

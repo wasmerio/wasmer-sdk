@@ -6,7 +6,7 @@ The public package is `wasmer-sdk`, and its version lives in `python/pyproject.t
 
 To start a release, open **Actions → Release Python → Run workflow** and leave the version at `0.1.0` for the first run. The manual run creates or updates the Release Please PR. Review and merge that PR; its `autorelease: pending` label causes the same workflow to create `v0.1.0` and the GitHub release, then build and test the Python wheels before publishing them to PyPI. Later manual runs can provide the next version in the workflow input.
 
-The wheel matrix currently produces Linux x86-64, macOS arm64, macOS x86-64, and Windows x86-64 artifacts. Each wheel is tagged for Python 3 rather than a particular CPython ABI because the package loads its UniFFI native library through `ctypes`; the wheel is platform-specific but Python-version-independent.
+The wheel matrix produces Linux arm64, Linux x86-64, macOS arm64, and macOS x86-64 artifacts. Each wheel is tagged for Python 3 rather than a particular CPython ABI because the package loads its UniFFI native library through `ctypes`; the wheel is platform-specific but Python-version-independent.
 
 PyPI publication uses trusted publishing. Register repository `wasmerio/wasmer-sdk`, workflow filename `release.yml`, environment `pypi`, and package `wasmer-sdk` in PyPI. The publish job requests `id-token: write` only in that environment and does not use a long-lived PyPI token.
 

@@ -24,6 +24,7 @@ def main() -> None:
     build = [
         "cargo",
         "build",
+        "--locked",
         "-p",
         "wasmer-sdk-uniffi",
         "--features",
