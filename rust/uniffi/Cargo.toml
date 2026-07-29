@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.94"
 description = "UniFFI facade for wasmer-sdk"
 license = "MIT"
-publish = false
+repository = "https://github.com/wasmerio/wasmer-sdk"
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
@@ -21,7 +21,7 @@ bindgen-cli = ["uniffi/cli"]
 [dependencies]
 tokio = { version = "1.49", features = ["io-util", "rt-multi-thread", "sync"] }
 uniffi = "0.32.0"
-wasmer-sdk = { path = ".." }
+wasmer-sdk = { path = "..", version = "=0.1.0" }
 
 [lints.rust]
 unsafe_code = "forbid"

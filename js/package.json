@@ -1,8 +1,17 @@
 {
   "name": "@wasmer/sdk",
   "version": "0.1.0",
+  "description": "A portable, package-first sandbox SDK powered by Wasmer",
   "type": "module",
-  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wasmerio/wasmer-sdk.git",
+    "directory": "js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "browser": "./dist/index.js",
@@ -19,7 +28,10 @@
     }
   },
   "types": "./dist/index.d.ts",
-  "files": ["dist", "pkg"],
+  "files": [
+    "dist",
+    "pkg"
+  ],
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
     "build:ts": "tsc -p tsconfig.json",

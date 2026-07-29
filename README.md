@@ -113,6 +113,13 @@ Run the network-free local-package proof with:
 cargo test -p wasmer-sdk --all-targets
 ```
 
+Continuous integration validates the Rust SDK and UniFFI before testing the
+JavaScript and Python packages in parallel. Versioned tags publish the
+JavaScript and Python packages after rebuilding the native foundations;
+crates.io publication is temporarily disabled until the required Wasmer
+runtime hooks are released. Registry setup and release ordering are documented in
+[`docs/releasing.md`](docs/releasing.md).
+
 The native SDK and wasm-bindgen facade share one source workspace but are
 always built in separate target-specific invocations. Do not use
 `cargo test --workspace`: that would select both Wasmer's mutually exclusive
