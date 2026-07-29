@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    "python": {
+      "release-type": "python",
+      "package-name": "wasmer-sdk",
+      "component": "wasmer-sdk",
+      "include-component-in-tag": false,
+      "initial-version": "0.1.0"
+    }
+  }
+}

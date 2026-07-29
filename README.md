@@ -120,10 +120,11 @@ cargo test -p wasmer-sdk --all-targets
 ```
 
 Continuous integration validates the Rust SDK and UniFFI before testing the
-JavaScript and Python packages in parallel. Versioned tags publish the
-JavaScript and Python packages after rebuilding the native foundations;
-crates.io publication is temporarily disabled until the required Wasmer
-runtime hooks are released. Registry setup and release ordering are documented in
+JavaScript and Python packages in parallel. Releases currently publish only the
+Python `wasmer-sdk` package. A manually started Release Please workflow prepares
+the release PR; merging it creates the version tag, rebuilds and tests every
+Python wheel, and publishes to PyPI with trusted publishing. Rust and JavaScript
+publication remain disabled. Registry setup and release ordering are documented in
 [`docs/releasing.md`](docs/releasing.md).
 
 The native SDK and wasm-bindgen facade share one source workspace but are

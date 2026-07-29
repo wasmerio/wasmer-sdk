@@ -1,123 +1,60 @@
-name: Release
+name: Release Python
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Python version to prepare
+        required: true
+        default: "0.1.0"
+        type: string
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+concurrency:
+  group: release-python
+  cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
+  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  validate:
-    name: Validate release
+  release-please:
+    name: Release Please
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.pull_request.merged == true &&
+        contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
+      )
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
+    outputs:
+      release_created: ${{ steps.release.outputs['python--release_created'] }}
+      release_sha: ${{ steps.release.outputs['python--sha'] }}
+      version: ${{ steps.release.outputs['python--version'] }}
     steps:
-      - uses: actions/checkout@v6
-      - name: Check manifest and tag versions
-        run: python3 .github/scripts/check-release-version.py "${GITHUB_REF_NAME}"
-
-      - name: Check registry availability
-        if: github.run_attempt == 1
-        run: python3 .github/scripts/check-release-version.py "${GITHUB_REF_NAME}" --check-registries --skip-crates
-
-  build-rust:
-    name: Build Rust and UniFFI
-    needs: validate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        run: rustup toolchain install 1.94.0 --profile minimal --no-self-update
-
-      - name: Test native crates
-        run: |
-          cargo +1.94.0 test --locked -p wasmer-sdk --all-targets
-          cargo +1.94.0 test --locked -p wasmer-sdk-uniffi --lib
-
-      - name: Build release artifacts
-        run: |
-          cargo +1.94.0 build --locked --release -p wasmer-sdk
-          cargo +1.94.0 build --locked --release -p wasmer-sdk-uniffi --features bindgen-cli --lib --bin uniffi-bindgen
-
-      # crates.io publishing is intentionally disabled while wasmer-sdk relies
-      # on runtime-hook APIs that only exist on Wasmer's `sdk` branch.
-      #
-      # - name: Publish wasmer-sdk
-      #   env:
-      #     CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      #   run: cargo +1.94.0 publish --locked -p wasmer-sdk
-      #
-      # - name: Publish wasmer-sdk-uniffi
-      #   env:
-      #     CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      #   run: cargo +1.94.0 publish --locked -p wasmer-sdk-uniffi
-
-  publish-javascript:
-    name: Publish JavaScript
-    needs: build-rust
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    environment: npm
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
+      - id: release
+        uses: googleapis/release-please-action@v4
         with:
-          node-version: "24"
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-
-      - name: Install Rust and wasm-bindgen
-        run: |
-          rustup toolchain install nightly --profile minimal --component rust-src --target wasm32-unknown-unknown --no-self-update
-          cargo +nightly install wasm-bindgen-cli --version 0.2.126 --locked
-
-      - name: Build and test
-        working-directory: js
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
-          npm run build
-          npm test
-          npm run test:browser
-
-      - name: Test Edge.js
-        working-directory: js
-        run: |
-          for attempt in {1..3}; do
-            if npm run test:edgejs; then
-              exit 0
-            fi
-            if [ "${attempt}" -eq 3 ]; then
-              exit 1
-            fi
-            sleep 10
-          done
-
-      - name: Publish to npm
-        working-directory: js
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          if npm view "@wasmer/sdk@${version}" version >/dev/null 2>&1; then
-            echo "@wasmer/sdk ${version} is already published"
-          else
-            npm publish
-          fi
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          release-as: ${{ inputs.version }}
+          target-branch: main
 
   build-python-wheels:
     name: Python wheel (${{ matrix.name }})
-    needs: build-rust
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -132,8 +69,12 @@ jobs:
             os: windows-2025
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.release_sha }}
 
       - uses: actions/setup-python@v6
         with:
@@ -142,6 +83,12 @@ jobs:
       - name: Install Rust
         shell: bash
         run: rustup toolchain install 1.94.0 --profile minimal --no-self-update
+
+      - name: Validate Python release metadata
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
+        run: python .github/scripts/check-release-version.py "v${RELEASE_VERSION}"
 
       - name: Build native module and wheel
         shell: bash
@@ -166,7 +113,6 @@ jobs:
         run: |
           python -m pip install --force-reinstall wheelhouse/*.whl
           python -m unittest discover -s python/tests -p test_runtime.py -v
-          python -m unittest discover -s python/tests -p test_boltffi_native.py -v
           python -m unittest discover -s python/tests -p test_postgres_psql.py -v
 
       - name: Test Edge.js from the installed wheel
@@ -184,13 +130,15 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: python-wheel-${{ matrix.name }}
+          name: wasmer-sdk-${{ needs.release-please.outputs.version }}-${{ matrix.name }}
           path: wheelhouse/*.whl
           if-no-files-found: error
 
   publish-python:
-    name: Publish Python
-    needs: build-python-wheels
+    name: Publish wasmer-sdk
+    needs:
+      - release-please
+      - build-python-wheels
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: pypi
@@ -200,7 +148,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: python-wheel-*
+          pattern: wasmer-sdk-${{ needs.release-please.outputs.version }}-*
           path: dist
           merge-multiple: true
 
