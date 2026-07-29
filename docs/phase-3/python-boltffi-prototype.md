@@ -10,9 +10,9 @@ This prototype evaluates BoltFFI as the native language boundary for
 facade:
 
 - `rust/boltffi`: Rust-to-BoltFFI facade and package configuration
-- `python/scripts/build_boltffi.py`, `python/examples/boltffi_python_package.py`,
-  and `python/tests/test_boltffi_native.py`: build, example, and regression
-  proof alongside the primary Python SDK
+- `python/scripts/build_boltffi.py` and
+  `python/tests/test_boltffi_native.py`: build and regression proof alongside
+  the primary Python SDK
 
 The facade exposes Rust-owned BoltFFI classes directly: `Wasmer`, `Package`,
 `Sandbox`, `Command`, `Process`, `SandboxFileSystem`, and `Ports`. There is no
@@ -34,42 +34,6 @@ The prototype covers:
 - sandbox filesystem operations
 - port readiness
 - automatic Rust-object release from Python
-
-## Generated boundary API
-
-```python
-import asyncio
-import wasmer_sdk_boltffi_native as sdk
-
-
-async def main() -> None:
-    client = sdk.Wasmer(None, 16 * 1024 * 1024)
-    sandbox = await client.create_sandbox(
-        ["python/python@3.12"],
-        {"main.py": b"print('hello from BoltFFI')"},
-        {},
-        sdk.NetworkMode.DISABLED,
-    )
-
-    output = await sandbox.command(
-        "python",
-        ["/workspace/main.py"],
-        None,
-        {},
-    ).run(sdk.RunOptions(None, 30_000, None))
-
-    print(bytes(output.stdout).decode())
-    await sandbox.close()
-
-
-asyncio.run(main())
-```
-
-This example intentionally shows the generated ABI layer. A production package
-should put the same handwritten ergonomic layer used by the UniFFI Python SDK
-on top, retaining polymorphic package sources, `Output.text()`, `check=True`,
-stream iteration, and Python duration values without forcing those
-conveniences into the FFI contract.
 
 ## Findings
 
@@ -122,9 +86,6 @@ python/.venv/bin/python -m pip install \
 
 python/.venv/bin/python -m unittest \
   python/tests/test_boltffi_native.py -v
-
-python/.venv/bin/python \
-  python/examples/boltffi_python_package.py
 ```
 
 ## Recommendation

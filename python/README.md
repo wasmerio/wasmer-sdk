@@ -35,3 +35,28 @@ PYTHONPATH=python/src \
 
 The generated `_native.py` module and platform library are private
 implementation details. Applications should only import from `wasmer_sdk`.
+
+## Examples
+
+Run a Python package:
+
+```console
+PYTHONPATH=python/src python3 python/examples/python_package.py
+```
+
+Serve HTTP with `wasmer/edgejs-quickjs`:
+
+```console
+PYTHONPATH=python/src python3 python/examples/edgejs_http.py
+```
+
+Run a local WASIX PostgreSQL package under Wasmer, then query it with the
+standard native `psql` client:
+
+```console
+PYTHONPATH=python/src python3 python/examples/postgres_psql.py \
+  /path/to/postgres.webc
+```
+
+The PostgreSQL example accepts `--psql /path/to/psql` when the client is not on
+`PATH`.

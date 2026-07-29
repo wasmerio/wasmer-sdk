@@ -157,6 +157,18 @@ The Edge.js HTTP regression runs by default. PostgreSQL is opt-in because its
 rebuilt package and initialized database are local build artifacts:
 
 ```console
+PYTHONPATH=python/src \
+  python3 python/examples/edgejs_http.py
+
+PYTHONPATH=python/src \
+  python3 python/examples/postgres_psql.py \
+    /absolute/path/postgres.webc
+```
+
+The PostgreSQL example starts the WASIX process with host networking and uses
+the standard native `psql` client to connect over its exposed TCP socket.
+
+```console
 WASMER_POSTGRES_PACKAGE=/absolute/path/postgres.webc \
 PSQL=/absolute/path/psql \
 PYTHONPATH=python/src \

@@ -22,10 +22,10 @@ python3.14 -m pip install \
   python/wheelhouse/wasmer_sdk_boltffi_native-*.whl
 ```
 
-## Smoke test
+## Regression test
 
 ```bash
-python3.14 python/examples/boltffi_python_package.py
+python3.14 -m unittest python/tests/test_boltffi_native.py -v
 ```
 
 The generated wheel is CPython-ABI-specific. Unlike the current UniFFI/ctypes
