@@ -10,8 +10,8 @@ use wasmer::{Memory, MemoryType, Module, Store, js::AsJs};
 use wasmer_wasix::{
     StoreSnapshot, WasiEnv, WasiFunctionEnv, WasiThreadError,
     runtime::task_manager::{
-        SpawnMemoryTypeOrStore, SpawnType, TaskWasm, TaskWasmPreRun, TaskWasmRecycle, TaskWasmRun,
-        TaskWasmRunProperties, WasmResumeTrigger,
+        LocalTaskSpawner, SpawnMemoryTypeOrStore, SpawnType, TaskWasm, TaskWasmPreRun,
+        TaskWasmRecycle, TaskWasmRun, TaskWasmRunProperties, WasmResumeTrigger,
     },
 };
 use wasmer_wasix_types::wasi::ExitCode;
@@ -198,6 +198,10 @@ impl ReadySpawnWasm {
         let properties = TaskWasmRunProperties {
             ctx,
             store,
+            local_tasks: LocalTaskSpawner::new(|future| {
+                wasm_bindgen_futures::spawn_local(future);
+                Ok(())
+            }),
             trigger_result: result,
             recycle,
         };
