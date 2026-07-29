@@ -7,9 +7,9 @@ Last updated: 2026-07-28
 
 The JavaScript SDK has two layers:
 
-- `crates/wasmer-sdk-js` is a deliberately coarse `wasm-bindgen` facade over
+- `js/bindgen` is a deliberately coarse `wasm-bindgen` facade over
   the public `wasmer-sdk` Rust API.
-- `bindings/javascript` is the handwritten TypeScript API. It owns JavaScript
+- `js/src` is the handwritten TypeScript API. It owns JavaScript
   conventions such as positional argv, synchronous text decoding,
   async-iterable process streams, checked runs, tagged-template shell escaping,
   and browser/Node entrypoints.
@@ -38,7 +38,7 @@ available. In practice that means serving appropriate COOP and COEP headers.
 
 ## Node networking
 
-`bindings/javascript/src/node-network.ts` implements the Node transport with:
+`js/src/node-network.ts` implements the Node transport with:
 
 - `node:dns/promises` for name resolution;
 - `node:net` for outbound TCP connections;
@@ -152,7 +152,7 @@ const output = await sandbox.command(localPackage).run({ check: true });
 
 ## Build and validation
 
-The native SDK and `crates/wasmer-sdk-js` are members of one source workspace,
+The native SDK and `js/bindgen` are members of one source workspace,
 but they are intentionally built in separate invocations. Wasmer's native
 `sys` and WebAssembly `js` features are mutually exclusive; do not select both
 members with `cargo test --workspace`.
@@ -162,7 +162,7 @@ rustup toolchain install nightly
 rustup target add wasm32-unknown-unknown
 rustup component add rust-src --toolchain nightly
 cargo install wasm-bindgen-cli --version 0.2.126
-cd bindings/javascript
+cd js
 npm install
 npm run build
 npm test

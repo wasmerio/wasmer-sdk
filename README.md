@@ -16,6 +16,25 @@ Phase 1 defines the system boundaries and feasibility constraints. Phase 2
 defines the proposed public API and developer experience. Phase 3 is now
 validating that contract with executable vertical slices.
 
+## Repository layout
+
+The repository is organized by public language surface. Rust owns the shared
+core and native FFI facades; JavaScript owns its handwritten TypeScript API and
+wasm-bindgen facade; Python owns its package, examples, tests, and build tools:
+
+```text
+/
+├── rust/             # wasmer-sdk, UniFFI, BoltFFI, Rust examples and tests
+├── js/               # TypeScript SDK, wasm-bindgen facade, examples and tests
+├── python/           # Python SDK, examples, tests and binding build scripts
+├── docs/             # architecture, SDK design and implementation notes
+├── Cargo.toml        # virtual Rust workspace
+└── README.md
+```
+
+`swift/` will be added when the Swift package exists; the UniFFI boundary it
+will consume already lives in `rust/uniffi/`.
+
 ## Rust SDK
 
 The workspace now contains the `wasmer-sdk` crate. Its first native slice can
@@ -124,7 +143,7 @@ cargo run --example edgejs_http
 ```
 
 Its JavaScript source is in
-[`examples/edgejs-http/server.js`](examples/edgejs-http/server.js).
+[`rust/examples/edgejs-http/server.js`](rust/examples/edgejs-http/server.js).
 
 ## Python SDK
 
@@ -149,15 +168,19 @@ print(output.text())
 Build the development package and run its integration tests with:
 
 ```console
-python3 bindings/python/scripts/build.py
-PYTHONPATH=bindings/python \
-  python3 -m unittest discover -s bindings/python/tests -v
+python3 python/scripts/build.py
+PYTHONPATH=python/src \
+  python3 -m unittest discover -s python/tests -v
 ```
 
 Use `pathlib.Path` for a local package path and `bytes` for an in-memory WEBC;
 plain strings are registry package specifiers. See
 [the Python implementation notes](docs/phase-3/python-sdk.md) for the complete
 surface and packaging status.
+
+A parallel BoltFFI implementation is available for comparison. See
+[the BoltFFI prototype notes](docs/phase-3/python-boltffi-prototype.md) and
+[its build instructions](python/BOLTFFI.md).
 
 ## JavaScript SDK
 

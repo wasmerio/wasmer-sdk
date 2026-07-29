@@ -367,6 +367,90 @@ dependencies = [
 ]
 
 [[package]]
+name = "boltffi"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30617c4d83e26c856cd4f223b1c352a1861496cb0ae724b5998d3df5970a9eef"
+dependencies = [
+ "boltffi_core",
+ "boltffi_macros",
+]
+
+[[package]]
+name = "boltffi_ast"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "339405f7d56fe4eb7a28016d355375d62612be86d55bfbfa63dfe04f6caea252"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "boltffi_binding"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2d5c55ec31354c8e3f6e7901070112372ac37f1707d692f6d3f0cbfb67bfdc0"
+dependencies = [
+ "boltffi_ast",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "boltffi_core"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f7fb7282b053622c8d70f76d03d56fb7e4c697d752c18c3acce55e642db0bdf"
+dependencies = [
+ "boltffi_macros",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "boltffi_ffi_rules"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e1022d67a96fa37869b08728faf51544a1e168880b0fbb011cbfed390b2c70"
+dependencies = [
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
+ "walkdir",
+]
+
+[[package]]
+name = "boltffi_macros"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04c971a4f89c2d08d685b063b5cb0566566683ca7ea67e199d73b2c0691afb22"
+dependencies = [
+ "boltffi_ast",
+ "boltffi_binding",
+ "boltffi_ffi_rules",
+ "boltffi_scan",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "boltffi_scan"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e4b187e1c15cb8534a90f870f6fb7e5756fa90845af67385851eb847225ca24"
+dependencies = [
+ "boltffi_ast",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
+ "walkdir",
+]
+
+[[package]]
 name = "bstr"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5113,6 +5197,15 @@ dependencies = [
  "wasmer-wasix-types",
  "wat",
  "webc",
+]
+
+[[package]]
+name = "wasmer-sdk-boltffi"
+version = "0.1.0"
+dependencies = [
+ "boltffi",
+ "tokio",
+ "wasmer-sdk",
 ]
 
 [[package]]

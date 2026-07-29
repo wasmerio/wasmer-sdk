@@ -962,46 +962,45 @@ Rust implementation errors and JavaScript stack strings do not become the
 public compatibility contract. Unknown internal failures map to `internal`
 without losing diagnostic detail in trusted logs.
 
-## Proposed repository boundaries
+## Repository boundaries
 
-This is a proposed Phase 3 workspace, not implementation committed in Phase 1:
+Phase 3 organizes the implementation by public language surface:
 
 ```text
 /
-├── crates/
-│   ├── wasmer-sdk/              # public Rust API; calls Wasmer directly
-│   │   └── src/
-│   │       ├── package/         # sources, locks, verification, cache
-│   │       ├── sandbox/         # sandbox, process, filesystem, lifecycle
-│   │       ├── runner/          # package runner selection
-│   │       └── target/          # small cfg-gated target details
-│   ├── wasmer-sdk-uniffi/       # UniFFI façade over wasmer-sdk
-│   ├── wasmer-sdk-js/           # wasm-bindgen façade over wasmer-sdk
-│   └── wasmer-sdk-testkit/      # target-neutral conformance suite
-├── bindings/
-│   ├── python/                  # generated internals + Python veneer/packaging
-│   ├── swift/                   # generated internals + Swift Package/XCFramework
-│   └── javascript/              # TypeScript browser and Node.js package
-├── examples/
-│   ├── browser/
-│   ├── node/
-│   ├── python/
-│   └── swift/
-├── conformance/
-│   ├── packages/
-│   ├── fixtures/
-│   └── expected-traces/
+├── Cargo.toml                   # virtual Rust workspace
+├── rust/
+│   ├── Cargo.toml               # public wasmer-sdk crate
+│   ├── src/
+│   ├── examples/
+│   ├── tests/
+│   ├── uniffi/                  # UniFFI façade over wasmer-sdk
+│   └── boltffi/                 # BoltFFI prototype façade
+├── js/
+│   ├── package.json
+│   ├── src/                     # handwritten TypeScript API
+│   ├── bindgen/                 # wasm-bindgen façade over wasmer-sdk
+│   ├── examples/
+│   ├── tests/
+│   └── scripts/
+├── python/
+│   ├── pyproject.toml
+│   ├── src/wasmer_sdk/          # handwritten public Python package
+│   ├── examples/
+│   ├── tests/
+│   └── scripts/
 └── docs/
     ├── phase-1/
     ├── phase-2/
     └── phase-3/
 ```
 
-`wasmer-sdk` is the product API and calls Wasmer directly. Its `native`, `js`,
-and `ios` Cargo features select the relevant upstream Wasmer features.
-`wasmer-sdk-uniffi` and `wasmer-sdk-js` depend on that crate with the appropriate
-feature set and contain only boundary conversion, initialization, and export
-code. They do not contain their own sandbox or runtime implementations.
+`wasmer-sdk` is the product API and calls Wasmer directly. Its `sys` and `js`
+Cargo features select the relevant upstream Wasmer backend.
+The facades in `rust/uniffi`, `rust/boltffi`, and `js/bindgen` depend on that
+crate and contain only boundary conversion, initialization, and export code.
+They do not contain their own sandbox or runtime implementations. A top-level
+`swift/` package will be added when that language surface is implemented.
 
 ## Illustrative API shape
 

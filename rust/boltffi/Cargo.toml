@@ -1,0 +1,20 @@
+[package]
+name = "wasmer-sdk-boltffi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+description = "BoltFFI prototype facade for wasmer-sdk"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+boltffi = "0.28.0"
+tokio = { version = "1.49", features = ["io-util", "rt-multi-thread", "sync"] }
+wasmer-sdk = { path = ".." }
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

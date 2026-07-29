@@ -1,0 +1,43 @@
+[package]
+name = "wasmer-sdk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+description = "A portable, package-first sandbox SDK powered by Wasmer"
+license = "MIT"
+repository = "https://github.com/wasmerio/wasmer-sdk"
+
+[features]
+default = ["sys"]
+sys = ["virtual-fs/host-fs", "wasmer/cranelift", "wasmer-wasix/sys-default"]
+js = ["wasmer-wasix/js", "virtual-fs/js"]
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+bytes = "1.11"
+futures = "0.3"
+thiserror = "2.0"
+tokio = { version = "1.49", features = ["io-util", "macros", "rt", "sync", "time"] }
+virtual-fs = { version = "=0.702.1", default-features = false }
+wasmer = { version = "=7.2.1", default-features = false }
+wasmer-c-api-imports = { version = "=7.2.1", default-features = false, features = ["wasix"] }
+wasmer-config = "=0.702.1"
+wasmer-package = "=0.702.1"
+wasmer-wasix = { version = "=0.702.1", default-features = false }
+wasmer-wasix-types = "=0.702.1"
+webc = "=12.0.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.49", features = ["fs", "rt-multi-thread"] }
+
+[dev-dependencies]
+tempfile = "3.23"
+wat = "1.244"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

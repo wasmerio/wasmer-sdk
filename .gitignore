@@ -1,5 +1,5 @@
 /target
 /.wasmer
-/bindings/javascript/node_modules
-/bindings/javascript/dist
-/bindings/javascript/pkg
+/js/node_modules
+/js/dist
+/js/pkg

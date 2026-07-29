@@ -30,7 +30,7 @@ guest:
 - shut down after that client disconnects.
 
 The source delta is preserved as
-[`postgres-18.4-direct-wasix-socket.patch`](../../examples/postgres-wasix/postgres-18.4-direct-wasix-socket.patch).
+[`postgres-18.4-direct-wasix-socket.patch`](../../rust/examples/postgres-wasix/postgres-18.4-direct-wasix-socket.patch).
 It applies to the PostgreSQL 18.4 source tree prepared by Oliphaunt's WASIX
 build, not to an unmodified upstream PostgreSQL tarball.
 
@@ -59,7 +59,7 @@ Build output under `target/` is intentionally not checked into the SDK.
 
 ## SDK composition
 
-[`postgres_wasix_psql.rs`](../../examples/postgres_wasix_psql.rs) generates a
+[`postgres_wasix_psql.rs`](../../rust/examples/postgres_wasix_psql.rs) generates a
 temporary local Wasmer package with two filesystem mappings:
 
 ```toml

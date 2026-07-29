@@ -1,0 +1,11 @@
+/src/wasmer_sdk/_native.py
+/src/wasmer_sdk/libwasmer_sdk_uniffi.dylib
+/src/wasmer_sdk/libwasmer_sdk_uniffi.so
+/src/wasmer_sdk/wasmer_sdk_uniffi.dll
+/generated/
+/wheelhouse/
+/.venv/
+/build/
+/dist/
+*.egg-info/
+/**/__pycache__/

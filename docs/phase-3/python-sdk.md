@@ -7,10 +7,10 @@ Last updated: 2026-07-28
 
 The Python SDK has two layers:
 
-- `crates/wasmer-sdk-uniffi` is a coarse native façade over the public
+- `rust/uniffi` is a coarse native façade over the public
   `wasmer-sdk` Rust API. It exports FFI-safe objects, records, enums, errors,
   and bounded byte operations.
-- `bindings/python/wasmer_sdk` is the handwritten public veneer. It owns
+- `python/src/wasmer_sdk` is the handwritten public veneer. It owns
   Python source unions, context managers, checked output, text decoding,
   async stream iteration, line decoding, and Pythonic timeouts in seconds.
 
@@ -131,14 +131,14 @@ Build the native library, generate its internal Python module in library mode,
 and copy both beside the public package:
 
 ```console
-python3 bindings/python/scripts/build.py
+python3 python/scripts/build.py
 ```
 
 Use `--release` for the optimized artifact intended for packaging. Run:
 
 ```console
-PYTHONPATH=bindings/python \
-  python3 -m unittest discover -s bindings/python/tests -v
+PYTHONPATH=python/src \
+  python3 -m unittest discover -s python/tests -v
 ```
 
 The runtime suite loads `python/python@3.12` and verifies:
@@ -158,9 +158,9 @@ rebuilt package and initialized database are local build artifacts:
 ```console
 WASMER_POSTGRES_PACKAGE=/absolute/path/postgres.webc \
 PSQL=/absolute/path/psql \
-PYTHONPATH=bindings/python \
+PYTHONPATH=python/src \
   python3 -m unittest \
-    bindings.python.tests.test_postgres_psql -v
+    python/tests/test_postgres_psql.py -v
 ```
 
 `WASMER_POSTGRES_WEBC`, used by the JavaScript test, is accepted as an alias.

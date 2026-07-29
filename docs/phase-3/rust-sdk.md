@@ -141,7 +141,7 @@ PostgreSQL 18.4 command through `wasmer-sdk` with a writable `PGDATA`; the WASIX
 guest binds a loopback TCP socket, and a native standard `psql` connects
 directly to it. No protocol proxy is involved.
 
-`examples/edgejs_http.rs` loads `wasmer/edgejs-quickjs`, seeds a small
+`rust/examples/edgejs_http.rs` loads `wasmer/edgejs-quickjs`, seeds a small
 Node-compatible HTTP server into `/workspace`, enables guest host networking,
 starts the package entrypoint as a live process, and verifies the response from
 the native host before terminating the server.

@@ -1,0 +1,14 @@
+[package]
+name = "wasmer-sdk-boltffi-native"
+crate = "wasmer-sdk-boltffi"
+version = "0.1.0"
+description = "BoltFFI prototype native boundary for wasmer-sdk"
+license = "MIT"
+
+[targets.python]
+enabled = true
+module_name = "wasmer_sdk_boltffi_native"
+output = "../../python/generated"
+
+[targets.python.wheel]
+output = "../../python/wheelhouse"
