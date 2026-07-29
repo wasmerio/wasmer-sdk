@@ -5199,10 +5199,13 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "js-sys",
  "tempfile",
  "thiserror",
  "tokio",
  "virtual-fs",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasmer",
  "wasmer-c-api-imports",
  "wasmer-config",
@@ -5210,6 +5213,7 @@ dependencies = [
  "wasmer-wasix",
  "wasmer-wasix-types",
  "wat",
+ "web-sys",
  "webc",
 ]
 

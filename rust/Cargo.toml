@@ -10,7 +10,14 @@ repository = "https://github.com/wasmerio/wasmer-sdk"
 [features]
 default = ["sys"]
 sys = ["virtual-fs/host-fs", "wasmer/cranelift", "wasmer-wasix/sys-default"]
-js = ["wasmer-wasix/js", "virtual-fs/js"]
+js = [
+  "dep:js-sys",
+  "dep:wasm-bindgen",
+  "dep:wasm-bindgen-futures",
+  "dep:web-sys",
+  "wasmer-wasix/js",
+  "virtual-fs/js",
+]
 
 [dependencies]
 anyhow = "1.0"
@@ -30,6 +37,12 @@ webc = "=12.0.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1.49", features = ["fs", "rt-multi-thread"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+web-sys = { version = "0.3", features = ["Window"], optional = true }
 
 [dev-dependencies]
 tempfile = "3.23"

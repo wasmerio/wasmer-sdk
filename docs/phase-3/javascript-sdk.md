@@ -181,13 +181,17 @@ Validation currently covers:
 - TypeScript strict type-checking;
 - creation and shutdown of the Node WASM runtime;
 - registry package loading and a finite WASIX command;
+- Python execution, sandbox files, and live process streams in a real
+  cross-origin-isolated Chromium page;
 - concurrent blocking WASIX processes on distinct workers;
 - real TCP and DNS calls through the Node bridge.
 
-Two executable Node integration tests now mirror the native Rust server proofs:
+The executable JavaScript integration tests cover browser execution, workers,
+and the native Rust server proofs:
 
 ```sh
 npm run test:edgejs
+npm run test:browser
 
 WASMER_POSTGRES_WEBC=/absolute/path/postgres.webc \
   PSQL=/absolute/path/psql \

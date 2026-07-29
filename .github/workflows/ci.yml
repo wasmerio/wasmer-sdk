@@ -66,11 +66,16 @@ jobs:
         working-directory: js
         run: npm ci
 
+      - name: Install browser
+        working-directory: js
+        run: npx playwright install --with-deps chromium
+
       - name: Build and test
         working-directory: js
         run: |
           npm run build
           npm test
+          npm run test:browser
 
       - name: Test Edge.js
         working-directory: js

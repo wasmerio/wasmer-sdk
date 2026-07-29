@@ -1,4 +1,5 @@
 import init, {
+  setSDKUrl,
   WasmerCore,
   type CommandCore,
   type PackageCore,
@@ -220,6 +221,7 @@ export class Wasmer {
         throw error;
       });
     await browserInitialization;
+    setSDKUrl(new URL("../pkg/wasmer_sdk_js.js", import.meta.url).href);
     return WasmerCore.create({ outputBytes: options.outputBytes });
   }
 

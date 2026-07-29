@@ -87,8 +87,10 @@ jobs:
         working-directory: js
         run: |
           npm ci
+          npx playwright install --with-deps chromium
           npm run build
           npm test
+          npm run test:browser
 
       - name: Test Edge.js
         working-directory: js

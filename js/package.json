@@ -40,11 +40,13 @@
     "test": "npm run build:ts && node --test tests/validation.test.mjs && node --test --test-timeout=30000 tests/node-network.test.mjs && node --test --test-timeout=30000 tests/runtime.test.mjs && node --test --test-timeout=30000 tests/multi-worker.test.mjs",
     "test:runtime": "npm run build:ts && node --test --test-timeout=30000 tests/runtime.test.mjs",
     "test:workers": "npm run build:ts && node --test --test-timeout=30000 tests/multi-worker.test.mjs",
+    "test:browser": "npm run build:ts && node --test --test-timeout=180000 tests/browser-python.test.mjs",
     "test:edgejs": "npm run build:ts && node --test --test-timeout=30000 tests/edgejs-http.test.mjs",
     "test:postgres": "npm run build:ts && node --test --test-timeout=90000 tests/postgres-psql.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.1.0",
+    "playwright": "^1.62.0",
     "typescript": "^5.9.2"
   },
   "engines": {
