@@ -1,8 +1,9 @@
 import { Wasmer } from "@wasmer/sdk/node";
 
 const client = new Wasmer();
-const sandbox = await client.createSandbox({
-  packages: ["python/python@3.13.5"],
+const python = await client.packages.load("python/python@3.13.5");
+const sandbox = await client.sandboxes.create({
+  packages: [python],
 });
 
 const output = await sandbox

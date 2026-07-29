@@ -14,7 +14,7 @@ mod provider_fs;
 mod sandbox;
 mod stream;
 
-pub use client::{CacheConfig, Wasmer, WasmerConfig};
+pub use client::{CacheConfig, Packages, Sandboxes, Wasmer, WasmerConfig};
 pub use command::{CapturedOutput, Command, ExitReason, ExitStatus, Output, Stdio};
 pub use error::{Error, ProcessExitError, Result};
 pub use fs::SandboxFileSystem;

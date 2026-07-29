@@ -111,9 +111,9 @@ async fn local_package_root_is_copy_on_write_and_child_mounts_are_visible() -> R
         output_bytes: 1024,
     })?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
-        .start()
         .await?;
 
     let mut process = sandbox

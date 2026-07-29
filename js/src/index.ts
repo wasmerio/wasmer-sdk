@@ -27,6 +27,15 @@ export interface SandboxOptions {
   shell?: CommandSelector;
 }
 
+export interface Packages {
+  /** Resolve a registry package or decode in-memory WEBC bytes. */
+  load(source: string | Uint8Array): Promise<Package>;
+}
+
+export interface Sandboxes {
+  create(options?: SandboxOptions): Promise<Sandbox>;
+}
+
 export interface InstallPackageOptions {
   /** Select one command exported by this package as the sandbox's shell. */
   asShell?: string;
@@ -180,6 +189,10 @@ let browserInitialization: Promise<void> | undefined;
 const MAX_WASM32_SIZE = 0xffff_ffff;
 
 export class Wasmer {
+  /** Package acquisition operations for this client. */
+  readonly packages: Packages;
+  /** Sandbox creation operations for this client. */
+  readonly sandboxes: Sandboxes;
   readonly #options: WasmerOptions;
   #core: Promise<WasmerCore> | undefined;
 
@@ -191,6 +204,10 @@ export class Wasmer {
           ? undefined
           : validateOutputBytes(options.outputBytes),
     };
+    this.packages = new PackagesService((source) => this.#loadPackage(source));
+    this.sandboxes = new SandboxesService((options) =>
+      this.#createSandbox(options),
+    );
   }
 
   /**
@@ -231,8 +248,20 @@ export class Wasmer {
     return this;
   }
 
-  /** Resolve a registry package or decode in-memory WEBC bytes. */
+  /**
+   * Resolve a registry package or decode in-memory WEBC bytes.
+   * @deprecated Use `wasmer.packages.load(source)`.
+   */
   async loadPackage(source: string | Uint8Array): Promise<Package> {
+    return this.packages.load(source);
+  }
+
+  /** @deprecated Use `wasmer.sandboxes.create(options)`. */
+  async createSandbox(options: SandboxOptions = {}): Promise<Sandbox> {
+    return this.sandboxes.create(options);
+  }
+
+  async #loadPackage(source: string | Uint8Array): Promise<Package> {
     const client = await this.getCore();
     const core = await rethrow(
       typeof source === "string"
@@ -242,11 +271,11 @@ export class Wasmer {
     return new Package(core);
   }
 
-  async createSandbox(options: SandboxOptions = {}): Promise<Sandbox> {
+  async #createSandbox(options: SandboxOptions): Promise<Sandbox> {
     const client = await this.getCore();
     const packages = await Promise.all(
       (options.packages ?? []).map((source) =>
-        source instanceof Package ? source : this.loadPackage(source),
+        source instanceof Package ? source : this.packages.load(source),
       ),
     );
     const builder = client.sandbox();
@@ -287,6 +316,31 @@ export class Wasmer {
   private getCore(): Promise<WasmerCore> {
     const implementation = this.constructor as typeof Wasmer;
     return rethrow((this.#core ??= implementation.initializeCore(this.#options)));
+  }
+}
+
+class PackagesService implements Packages {
+  readonly #load: (source: string | Uint8Array) => Promise<Package>;
+
+  constructor(load: (source: string | Uint8Array) => Promise<Package>) {
+    this.#load = load;
+  }
+
+  /** Resolve a registry package or decode in-memory WEBC bytes. */
+  load(source: string | Uint8Array): Promise<Package> {
+    return this.#load(source);
+  }
+}
+
+class SandboxesService implements Sandboxes {
+  readonly #create: (options: SandboxOptions) => Promise<Sandbox>;
+
+  constructor(create: (options: SandboxOptions) => Promise<Sandbox>) {
+    this.#create = create;
+  }
+
+  create(options: SandboxOptions = {}): Promise<Sandbox> {
+    return this.#create(options);
   }
 }
 

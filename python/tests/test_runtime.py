@@ -6,8 +6,11 @@ from wasmer_sdk import ExitReason, ProcessExitError, Wasmer, WasmerError
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.client = Wasmer(output_bytes=256 * 1024)
-        self.sandbox = await self.client.create_sandbox(
-            packages=["python/python@3.13.5"],
+        self.assertTrue(callable(self.client.packages.load))
+        self.assertTrue(callable(self.client.sandboxes.create))
+        python = await self.client.packages.load("python/python@3.13.5")
+        self.sandbox = await self.client.sandboxes.create(
+            packages=[python],
             files={"main.py": "print('hello from python binding')"},
             env={"SDK_TEST": "sandbox"},
         )

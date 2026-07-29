@@ -15,6 +15,12 @@ import {
 
 const UINT32_MAX = 0xffff_ffff;
 
+test("client exposes package and sandbox services synchronously", () => {
+  const wasmer = new Wasmer();
+  assert.equal(typeof wasmer.packages.load, "function");
+  assert.equal(typeof wasmer.sandboxes.create, "function");
+});
+
 test("wasm facade rejects invalid retention values from direct callers", async () => {
   const wasm = await readFile(
     new URL("../pkg/wasmer_sdk_js_bg.wasm", import.meta.url),

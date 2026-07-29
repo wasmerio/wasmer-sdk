@@ -38,7 +38,7 @@ test(
         const client = new Wasmer();
         let sandbox;
         try {
-          sandbox = await client.createSandbox({
+          sandbox = await client.sandboxes.create({
             // This package release contains CPython 3.12.0. Pin it exactly so
             // registry changes cannot silently alter the browser regression.
             packages: ["python/python@=0.2.0"],

@@ -43,7 +43,7 @@ The architectural decisions in
 | DX-034 | Use `timeoutMs` for a command deadline. Reserve `lifetimeMs` and `idleTimeoutMs` for sandbox lifecycle controls with independently specified semantics. | Accepted |
 | DX-035 | Create a sandbox in a process-free state. Package entrypoints do not execute implicitly during sandbox construction. Service startup and readiness remain explicit operations. | Accepted |
 | DX-036 | Keep a general code-interpreter or `runCode(language, code)` API above the core as a recipe or separate product surface. It composes packages, sandboxes, processes, and filesystems. | Accepted |
-| DX-037 | Make `preflight()` validate the same complete `SandboxOptions` accepted by `createSandbox()`, including all packages, mounts, policies, and requested enforcement. | Accepted |
+| DX-037 | Make `preflight()` validate the same complete `SandboxOptions` accepted by `sandboxes.create()`, including all packages, mounts, policies, and requested enforcement. | Accepted |
 | DX-038 | For `spawn()`, default stdin to closed and stdout/stderr to bounded pipes. Request writable stdin explicitly; closing it sends EOF and does not terminate the process. | Accepted |
 | DX-039 | Require applications to drain live stdout and stderr concurrently. `wait()` joins the process but does not implicitly close application-owned stdin or replace pipe backpressure with unbounded buffering. | Accepted |
 | DX-040 | In JavaScript, make `sandbox.command(program, args?, options?)` return an immutable, reusable `Command` description. `run()` or `spawn()` starts a new process. | Accepted |

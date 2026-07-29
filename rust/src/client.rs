@@ -52,10 +52,22 @@ impl Default for WasmerConfig {
     }
 }
 
-/// Shared entry point for package loading and sandbox construction.
+/// Shared entry point for package and sandbox services.
 #[derive(Clone)]
 pub struct Wasmer {
     pub(crate) inner: Arc<ClientInner>,
+}
+
+/// Package acquisition operations for one [`Wasmer`] client.
+#[derive(Clone, Debug)]
+pub struct Packages {
+    client: Wasmer,
+}
+
+/// Sandbox creation operations for one [`Wasmer`] client.
+#[derive(Clone, Debug)]
+pub struct Sandboxes {
+    client: Wasmer,
 }
 
 pub(crate) struct ClientInner {
@@ -174,21 +186,38 @@ impl Wasmer {
         })
     }
 
+    /// Access package acquisition operations.
+    #[must_use]
+    pub fn packages(&self) -> Packages {
+        Packages {
+            client: self.clone(),
+        }
+    }
+
+    /// Access sandbox creation operations.
+    #[must_use]
+    pub fn sandboxes(&self) -> Sandboxes {
+        Sandboxes {
+            client: self.clone(),
+        }
+    }
+
     /// Resolve a registry, local, or in-memory package.
     ///
     /// # Errors
     ///
     /// Returns an error if the client is closed, the source is invalid, package
     /// acquisition fails, or the package cannot be decoded and resolved.
+    #[deprecated(note = "use `wasmer.packages().load(source)`")]
     pub async fn load_package(&self, source: impl Into<PackageSource>) -> Result<Package> {
-        self.ensure_open()?;
-        self.load_package_source(source.into()).await
+        self.packages().load(source).await
     }
 
     /// Start configuring a fresh sandbox.
     #[must_use]
+    #[deprecated(note = "use `wasmer.sandboxes().create()`")]
     pub fn sandbox(&self) -> SandboxBuilder {
-        SandboxBuilder::new(self.clone())
+        self.sandboxes().create()
     }
 
     /// Reject future work through this client and every clone of it.
@@ -267,6 +296,29 @@ impl Wasmer {
         })?;
 
         Ok(Package::from_binary(binary))
+    }
+}
+
+impl Packages {
+    /// Resolve a registry, local, or in-memory package.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the client is closed, the source is invalid, package
+    /// acquisition fails, or the package cannot be decoded and resolved.
+    pub async fn load(&self, source: impl Into<PackageSource>) -> Result<Package> {
+        self.client.ensure_open()?;
+        self.client.load_package_source(source.into()).await
+    }
+}
+
+impl Sandboxes {
+    /// Begin creating a sandbox.
+    ///
+    /// Configure the returned builder and await it to finish creation.
+    #[must_use]
+    pub fn create(&self) -> SandboxBuilder {
+        SandboxBuilder::new(self.client.clone())
     }
 }
 

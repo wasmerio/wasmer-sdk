@@ -100,7 +100,8 @@ impl JsWasmer {
     #[wasm_bindgen(js_name = loadPackage)]
     pub async fn load_package(&self, specifier: String) -> Result<JsPackage, JsValue> {
         self.inner
-            .load_package(specifier)
+            .packages()
+            .load(specifier)
             .await
             .map(|inner| JsPackage { inner })
             .map_err(sdk_error)
@@ -109,7 +110,8 @@ impl JsWasmer {
     #[wasm_bindgen(js_name = loadPackageBytes)]
     pub async fn load_package_bytes(&self, bytes: Uint8Array) -> Result<JsPackage, JsValue> {
         self.inner
-            .load_package(PackageSource::webc(bytes.to_vec()))
+            .packages()
+            .load(PackageSource::webc(bytes.to_vec()))
             .await
             .map(|inner| JsPackage { inner })
             .map_err(sdk_error)
@@ -118,7 +120,7 @@ impl JsWasmer {
     #[wasm_bindgen(js_name = sandbox)]
     pub fn sandbox(&self) -> JsSandboxBuilder {
         JsSandboxBuilder {
-            inner: Some(self.inner.sandbox()),
+            inner: Some(self.inner.sandboxes().create()),
         }
     }
 
@@ -201,8 +203,8 @@ impl JsSandboxBuilder {
     }
 
     pub async fn start(mut self) -> Result<JsSandbox, JsValue> {
-        self.take()?
-            .start()
+        let builder = self.take()?;
+        builder
             .await
             .map(|inner| JsSandbox { inner })
             .map_err(sdk_error)

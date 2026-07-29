@@ -14,14 +14,17 @@ const RESPONSE_MARKER: &str = "<h1>Hello from Edge.js!</h1>";
 async fn main() -> Result<()> {
     let port = reserve_loopback_port()?;
     let wasmer = Wasmer::new(WasmerConfig::default())?;
-    let edgejs = wasmer.load_package("wasmer/edgejs-quickjs@0.1.0").await?;
+    let edgejs = wasmer
+        .packages()
+        .load("wasmer/edgejs-quickjs@0.1.0")
+        .await?;
     let sandbox = wasmer
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(edgejs.clone())
         .network(NetworkPolicy::Host)
         .env("PORT", port.to_string())
         .file("server.js", SERVER_JS)
-        .start()
         .await?;
 
     let mut process = sandbox

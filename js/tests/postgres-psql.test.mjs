@@ -18,8 +18,8 @@ test(
     const port = await reservePort();
     const packageBytes = await readFile(packagePath);
     const client = new Wasmer({ outputBytes: 256 * 1024 });
-    const postgres = await client.loadPackage(packageBytes);
-    const sandbox = await client.createSandbox({
+    const postgres = await client.packages.load(packageBytes);
+    const sandbox = await client.sandboxes.create({
       packages: [postgres],
       network: { mode: "host" },
       env: {

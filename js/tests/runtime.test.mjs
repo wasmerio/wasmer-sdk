@@ -6,7 +6,7 @@ import { Wasmer } from "../dist/node.js";
 
 test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   const client = new Wasmer();
-  const sandbox = await client.createSandbox({
+  const sandbox = await client.sandboxes.create({
     packages: ["python/python@3.13.5"],
   });
   const output = await sandbox
@@ -29,7 +29,7 @@ test("reuses commands and preserves filesystem and stream semantics", async () =
   const client = new Wasmer();
   let sandbox;
   try {
-    sandbox = await client.createSandbox({
+    sandbox = await client.sandboxes.create({
       packages: ["python/python@3.13.5"],
     });
 
@@ -91,7 +91,7 @@ test("ports.wait applies one wall-clock timeout", async () => {
   const client = new Wasmer();
   let sandbox;
   try {
-    sandbox = await client.createSandbox({
+    sandbox = await client.sandboxes.create({
       network: { mode: "host" },
     });
 

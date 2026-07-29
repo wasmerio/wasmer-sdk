@@ -75,10 +75,9 @@ Guest sockets require an explicit network capability:
 
 ```rust
 let sandbox = wasmer
-    .sandbox()
+    .sandboxes().create()
     .package(PackageSource::path(package_dir))
     .network(NetworkPolicy::Host)
-    .start()
     .await?;
 ```
 

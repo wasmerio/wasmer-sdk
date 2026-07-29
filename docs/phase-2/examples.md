@@ -64,7 +64,7 @@ import { Wasmer } from "@wasmer/sdk";
 
 const client = new Wasmer();
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["python/python@3.12"],
 });
 
@@ -90,9 +90,8 @@ async fn main() -> Result<()> {
     let wasmer = Wasmer::new(WasmerConfig::default())?;
 
     let sandbox = wasmer
-        .sandbox()
+        .sandboxes().create()
         .package("python/python@3.12")
-        .start()
         .await?;
 
     let output = sandbox
@@ -120,11 +119,11 @@ filesystem setup calls.
 ### JavaScript host
 
 ```ts
-const edgejs = await client.loadPackage(
+const edgejs = await client.packages.load(
   "wasmer/edgejs-quickjs@0.0.3",
 );
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: [edgejs],
   files: {
     "main.js": `
@@ -151,14 +150,14 @@ let source = r#"
 "#;
 
 let edgejs = wasmer
-    .load_package("wasmer/edgejs-quickjs@0.0.3")
+    .packages()
+    .load("wasmer/edgejs-quickjs@0.0.3")
     .await?;
 
 let sandbox = wasmer
-    .sandbox()
+    .sandboxes().create()
     .package(edgejs.clone())
     .file("/workspace/main.js", source.as_bytes())
-    .start()
     .await?;
 
 let output = sandbox
@@ -183,7 +182,7 @@ application discovers the required tool after the sandbox already exists.
 ### JavaScript
 
 ```ts
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   env: {
     APP_ENV: "test",
   },
@@ -221,11 +220,10 @@ console.log(listing.text());
 
 ```rust
 let sandbox = wasmer
-    .sandbox()
+    .sandboxes().create()
     .env("APP_ENV", "test")
     .memory_limit(512 * 1024 * 1024)
     .max_processes(8)
-    .start()
     .await?;
 
 let python = sandbox
@@ -283,7 +281,7 @@ const input = new Uint8Array(await fetch("/photo.png").then((r) =>
   r.arrayBuffer()
 ));
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["namespace/image-tools@<tested-pin>"],
   files: {
     "input.png": input,
@@ -307,12 +305,11 @@ const artifact = await sandbox.fs.readFile("output.webp");
 
 ```rust
 let sandbox = wasmer
-    .sandbox()
+    .sandboxes().create()
     .package("namespace/image-tools@<tested-pin>")
     .file("/workspace/input.png", image_bytes)
     .file("/workspace/config.json", br#"{"width":320}"#)
     .filesystem_limit(64 * 1024 * 1024)
-    .start()
     .await?;
 
 sandbox
@@ -340,7 +337,7 @@ let artifact = sandbox
 ### JavaScript
 
 ```ts
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["python/python@3.12"],
   files: {
     "progress.py": `
@@ -394,7 +391,7 @@ the command exits. Start both output readers before writing input so a chatty
 guest cannot block on a full pipe.
 
 ```ts
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["python/python@3.12"],
   files: {
     "uppercase.py": `
@@ -490,7 +487,7 @@ stdin/stdout pipes.
 ### Browser JavaScript with xterm.js
 
 ```ts
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["wasmer/bash@1.0.25"],
 });
 
@@ -575,7 +572,7 @@ may additionally expose a loopback URL.
 ### JavaScript
 
 ```ts
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["namespace/http-app@<tested-pin>"],
 });
 
@@ -645,7 +642,7 @@ const check = await client.preflight({
 });
 check.requireCompatible();
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: [POSTGRES],
   mounts: [
     {
@@ -693,7 +690,7 @@ build, `preflight()` must say so directly.
 Guest network is denied unless the application grants it.
 
 ```ts
-await using offline = await client.createSandbox({
+await using offline = await client.sandboxes.create({
   packages: ["namespace/app@<tested-pin>"],
   network: { mode: "disabled" },
 });
@@ -702,7 +699,7 @@ await using offline = await client.createSandbox({
 Unrestricted host networking is a conspicuous opt-in and may not be available:
 
 ```ts
-await using online = await client.createSandbox({
+await using online = await client.sandboxes.create({
   packages: ["namespace/app@<tested-pin>"],
   network: { mode: "host" },
 });
@@ -726,7 +723,7 @@ const report = await client.preflight({
 
 report.requireCompatible();
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["namespace/app@<tested-pin>"],
   network: policy,
   minimumEnforcement: "hard",
@@ -744,7 +741,7 @@ Limits are part of creation or execution, not a separate policy language.
 ### JavaScript
 
 ```ts
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["python/python@3.12"],
   limits: {
     memoryBytes: 128 * 1024 * 1024,
@@ -772,12 +769,11 @@ console.log({
 
 ```rust
 let sandbox = wasmer
-    .sandbox()
+    .sandboxes().create()
     .package("python/python@3.12")
     .memory_limit(128 * 1024 * 1024)
     .filesystem_limit(16 * 1024 * 1024)
     .max_processes(1)
-    .start()
     .await?;
 
 let output = sandbox
@@ -833,7 +829,7 @@ const shared = await Directory.create({
   "input.json": JSON.stringify({ values: [1, 2, 3] }),
 });
 
-await using producer = await client.createSandbox({
+await using producer = await client.sandboxes.create({
   packages: ["namespace/producer@<tested-pin>"],
   mounts: [
     { guest: "/shared", directory: shared, mode: "read-write" },
@@ -844,7 +840,7 @@ await producer
   .command("produce", ["/shared/input.json", "/shared/output.bin"])
   .run({ check: true });
 
-await using consumer = await client.createSandbox({
+await using consumer = await client.sandboxes.create({
   packages: ["namespace/consumer@<tested-pin>"],
   mounts: [
     { guest: "/shared", directory: shared, mode: "read-only" },
@@ -867,7 +863,7 @@ read-only by default and unavailable in browser builds.
 ### Node.js
 
 ```ts
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["namespace/compiler@<tested-pin>"],
   mounts: [
     {
@@ -889,10 +885,9 @@ const output = await sandbox
 let source = HostDirectory::open("/absolute/path/to/project/src")?;
 
 let sandbox = wasmer
-    .sandbox()
+    .sandboxes().create()
     .package("namespace/compiler@<tested-pin>")
     .host_mount("/src", source, MountMode::ReadOnly)
-    .start()
     .await?;
 ```
 
@@ -930,7 +925,7 @@ const report = await client.preflight({
 });
 report.requireCompatible();
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["python/python@3.12"],
   mounts: [{
     guest: "/project",
@@ -957,7 +952,7 @@ const volume = await BrowserFileSystem.fromDirectoryHandle(opfsRoot, {
   access: "read-write",
 });
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["namespace/database@<tested-pin>"],
   mounts: [{
     guest: "/data",
@@ -988,7 +983,7 @@ export the same name.
 ### JavaScript
 
 ```ts
-const tools = await client.loadPackage("namespace/toolbox@1.2.3");
+const tools = await client.packages.load("namespace/toolbox@1.2.3");
 
 console.table(
   tools.manifest.commands.map((command) => ({
@@ -999,7 +994,7 @@ console.table(
 
 const formatter = tools.command("format");
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: [tools],
   files: {
     "main.txt": "unformatted",
@@ -1015,15 +1010,15 @@ const output = await sandbox
 
 ```rust
 let tools = wasmer
-    .load_package("namespace/toolbox@1.2.3")
+    .packages()
+    .load("namespace/toolbox@1.2.3")
     .await?;
 
 let formatter = tools.command("format")?;
 
 let sandbox = wasmer
-    .sandbox()
+    .sandboxes().create()
     .package(tools)
-    .start()
     .await?;
 
 sandbox
@@ -1097,7 +1092,7 @@ more privileged operation.
 
 ```ts
 const jobs = inputs.map(async (input) => {
-  await using sandbox = await client.createSandbox({
+  await using sandbox = await client.sandboxes.create({
     packages: ["namespace/worker@<tested-pin>"],
     files: {
       "input.json": JSON.stringify(input),
@@ -1126,12 +1121,11 @@ let tasks = inputs.into_iter().map(|input| {
 
     tokio::spawn(async move {
         let sandbox = wasmer
-            .sandbox()
+            .sandboxes().create()
             .package("namespace/worker@<tested-pin>")
             .file("/workspace/input.json", serde_json::to_vec(&input)?)
             .memory_limit(128 * 1024 * 1024)
             .max_processes(2)
-            .start()
             .await?;
 
         let output = sandbox

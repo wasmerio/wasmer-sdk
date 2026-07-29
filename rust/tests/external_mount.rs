@@ -119,10 +119,10 @@ async fn guest_reads_and_writes_an_external_provider_mount() -> Result<()> {
     external.write_text("input.txt", "from provider").await?;
     let provider: Arc<dyn FileSystem> = Arc::new(external.clone());
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
         .mount("/external", provider, MountMode::ReadWrite)
-        .start()
         .await?;
 
     sandbox.command("copy-mount").output().await?.check()?;
@@ -145,10 +145,10 @@ async fn read_only_mount_rejects_guest_writes() -> Result<()> {
     external.write_text("input.txt", "readable").await?;
     let provider: Arc<dyn FileSystem> = Arc::new(external.clone());
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
         .mount("/external", provider, MountMode::ReadOnly)
-        .start()
         .await?;
 
     let output = sandbox.command("copy-mount").output().await?;

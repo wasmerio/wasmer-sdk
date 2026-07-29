@@ -33,8 +33,8 @@ class PostgresPsqlTests(unittest.IsolatedAsyncioTestCase):
         sandbox = None
         process = None
         try:
-            postgres = await client.load_package(package_path)
-            sandbox = await client.create_sandbox(
+            postgres = await client.packages.load(package_path)
+            sandbox = await client.sandboxes.create(
                 packages=[postgres],
                 network="host",
                 env={

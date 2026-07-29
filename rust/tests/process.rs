@@ -39,9 +39,9 @@ async fn spawned_process_streams_stdin_stdout_and_retains_diagnostics() -> Resul
     let state = TempDir::new().expect("create SDK state directory");
     let client = client(&state)?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
-        .start()
         .await?;
 
     let mut process = sandbox
@@ -86,9 +86,9 @@ async fn terminate_stops_a_process_blocked_on_live_stdin() -> Result<()> {
     let state = TempDir::new().expect("create SDK state directory");
     let client = client(&state)?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
-        .start()
         .await?;
     let mut process = sandbox
         .command("echo")
@@ -116,9 +116,9 @@ async fn process_handle_termination_returns_when_the_guest_exits() -> Result<()>
     let state = TempDir::new().expect("create SDK state directory");
     let client = client(&state)?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
-        .start()
         .await?;
     let mut process = sandbox
         .command("echo")
@@ -145,9 +145,9 @@ async fn command_timeout_is_classified_as_timed_out() -> Result<()> {
     let state = TempDir::new().expect("create SDK state directory");
     let client = client(&state)?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
-        .start()
         .await?;
     let output = sandbox
         .command("echo")
@@ -172,9 +172,9 @@ async fn closing_a_sandbox_kills_its_live_processes() -> Result<()> {
     let state = TempDir::new().expect("create SDK state directory");
     let client = client(&state)?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
-        .start()
         .await?;
     let mut process = sandbox
         .command("echo")
@@ -198,9 +198,9 @@ async fn closing_a_sandbox_preserves_a_natural_unwaited_exit() -> Result<()> {
     let state = TempDir::new().expect("create SDK state directory");
     let client = client(&state)?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
-        .start()
         .await?;
     let mut process = sandbox
         .command("echo")

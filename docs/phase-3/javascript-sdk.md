@@ -79,8 +79,9 @@ construction syntax.
 import { Wasmer } from "@wasmer/sdk/node";
 
 const client = new Wasmer();
-const sandbox = await client.createSandbox({
-  packages: ["python/python@3.12"],
+const python = await client.packages.load("python/python@3.12");
+const sandbox = await client.sandboxes.create({
+  packages: [python],
   files: { "main.py": "print('hello')" },
 });
 
@@ -141,9 +142,9 @@ Local packages are passed as bytes because a browser has no ambient host path:
 
 ```ts
 const webc = new Uint8Array(await file.arrayBuffer());
-const localPackage = await client.loadPackage(webc);
+const localPackage = await client.packages.load(webc);
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: [localPackage],
 });
 

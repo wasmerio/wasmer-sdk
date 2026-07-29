@@ -139,7 +139,7 @@ impl Wasmer {
         let client = self.inner.clone();
         let package = self
             .context
-            .sdk(async move { client.load_package(specifier).await })
+            .sdk(async move { client.packages().load(specifier).await })
             .await?;
         Ok(Package::new(Arc::clone(&self.context), package))
     }
@@ -150,7 +150,8 @@ impl Wasmer {
             .context
             .sdk(async move {
                 client
-                    .load_package(PackageSource::path(PathBuf::from(path)))
+                    .packages()
+                    .load(PackageSource::path(PathBuf::from(path)))
                     .await
             })
             .await?;
@@ -161,7 +162,7 @@ impl Wasmer {
         let client = self.inner.clone();
         let package = self
             .context
-            .sdk(async move { client.load_package(PackageSource::webc(bytes)).await })
+            .sdk(async move { client.packages().load(PackageSource::webc(bytes)).await })
             .await?;
         Ok(Package::new(Arc::clone(&self.context), package))
     }
@@ -177,9 +178,9 @@ impl Wasmer {
         let sandbox = self
             .context
             .sdk(async move {
-                let mut builder = client.sandbox().network(network.into());
+                let mut builder = client.sandboxes().create().network(network.into());
                 for specifier in registry_packages {
-                    let package = client.load_package(specifier).await?;
+                    let package = client.packages().load(specifier).await?;
                     builder = builder.package(package);
                 }
                 for (path, contents) in files {
@@ -188,7 +189,7 @@ impl Wasmer {
                 for (key, value) in env {
                     builder = builder.env(key, value);
                 }
-                builder.start().await
+                builder.await
             })
             .await?;
         Ok(Sandbox::new(Arc::clone(&self.context), sandbox))

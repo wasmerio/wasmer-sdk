@@ -36,8 +36,9 @@ Construction is synchronous; operations that can perform I/O are asynchronous:
 from wasmer_sdk import Wasmer
 
 client = Wasmer(cache_root=".wasmer")
-sandbox = await client.create_sandbox(
-    packages=["python/python@3.12"],
+python = await client.packages.load("python/python@3.12")
+sandbox = await client.sandboxes.create(
+    packages=[python],
     files={"main.py": "print('hello')"},
     env={"APP_ENV": "test"},
 )
@@ -68,9 +69,9 @@ Local and in-memory packages use the same object model:
 ```python
 from pathlib import Path
 
-local = await client.load_package(Path("./dist/tool.webc"))
-in_memory = await client.load_package(webc_bytes)
-sandbox = await client.create_sandbox(packages=[local, in_memory])
+local = await client.packages.load(Path("./dist/tool.webc"))
+in_memory = await client.packages.load(webc_bytes)
+sandbox = await client.sandboxes.create(packages=[local, in_memory])
 ```
 
 Commands are reusable immutable descriptions:

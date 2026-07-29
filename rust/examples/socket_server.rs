@@ -20,10 +20,10 @@ async fn main() -> Result<()> {
 
     let wasmer = Wasmer::new(WasmerConfig::default())?;
     let sandbox = wasmer
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(package))
         .network(NetworkPolicy::Host)
-        .start()
         .await?;
 
     // Stdout stays piped because the ready line is read live; stderr uses

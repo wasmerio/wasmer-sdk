@@ -108,8 +108,65 @@ class DirectoryEntry:
     size: int
 
 
+class Packages:
+    """Package acquisition operations for one Wasmer client."""
+
+    def __init__(self, wasmer: "Wasmer") -> None:
+        self._wasmer = wasmer
+
+    async def load(self, source: PackageSource) -> Package:
+        if isinstance(source, Package):
+            return source
+        if isinstance(source, str):
+            core = await _async(self._wasmer._core.load_package_registry(source))
+        elif isinstance(source, os.PathLike):
+            core = await _async(
+                self._wasmer._core.load_package_path(os.fspath(source))
+            )
+        elif isinstance(source, (bytes, bytearray, memoryview)):
+            core = await _async(
+                self._wasmer._core.load_package_bytes(bytes(source))
+            )
+        else:
+            raise WasmerError(
+                "package source must be a registry string, pathlib path, bytes, or Package",
+                "INVALID_PACKAGE_SOURCE",
+            )
+        return Package(core)
+
+
+class Sandboxes:
+    """Sandbox creation operations for one Wasmer client."""
+
+    def __init__(self, wasmer: "Wasmer") -> None:
+        self._wasmer = wasmer
+
+    async def create(
+        self,
+        *,
+        packages: Iterable[PackageSource] = (),
+        files: Optional[Mapping[str, FileContents]] = None,
+        env: Optional[Mapping[str, str]] = None,
+        network: Union[NetworkPolicy, str] = NetworkPolicy.DISABLED,
+        shell: Optional[CommandSelector] = None,
+    ) -> Sandbox:
+        resolved = [await self._wasmer.packages.load(source) for source in packages]
+        encoded_files = {
+            path: _bytes(contents) for path, contents in (files or {}).items()
+        }
+        core = await _async(
+            self._wasmer._core.create_sandbox(
+                [package._core for package in resolved],
+                encoded_files,
+                dict(env or {}),
+                _network_mode(network),
+            )
+        )
+        return Sandbox(self._wasmer, core, shell=shell)
+
+
 class Wasmer:
-    """Shared entry point for package loading and sandbox creation."""
+    """Shared entry point for package and sandbox services."""
 
     def __init__(
         self,
@@ -123,22 +180,12 @@ class Wasmer:
             output_bytes=output_bytes,
         )
         self._core = _sync(lambda: _native.WasmerCore(options))
+        self.packages = Packages(self)
+        self.sandboxes = Sandboxes(self)
 
     async def load_package(self, source: PackageSource) -> Package:
-        if isinstance(source, Package):
-            return source
-        if isinstance(source, str):
-            core = await _async(self._core.load_package_registry(source))
-        elif isinstance(source, os.PathLike):
-            core = await _async(self._core.load_package_path(os.fspath(source)))
-        elif isinstance(source, (bytes, bytearray, memoryview)):
-            core = await _async(self._core.load_package_bytes(bytes(source)))
-        else:
-            raise WasmerError(
-                "package source must be a registry string, pathlib path, bytes, or Package",
-                "INVALID_PACKAGE_SOURCE",
-            )
-        return Package(core)
+        """Deprecated: use ``wasmer.packages.load(source)``."""
+        return await self.packages.load(source)
 
     async def create_sandbox(
         self,
@@ -149,19 +196,14 @@ class Wasmer:
         network: Union[NetworkPolicy, str] = NetworkPolicy.DISABLED,
         shell: Optional[CommandSelector] = None,
     ) -> Sandbox:
-        resolved = [await self.load_package(source) for source in packages]
-        encoded_files = {
-            path: _bytes(contents) for path, contents in (files or {}).items()
-        }
-        core = await _async(
-            self._core.create_sandbox(
-                [package._core for package in resolved],
-                encoded_files,
-                dict(env or {}),
-                _network_mode(network),
-            )
+        """Deprecated: use ``wasmer.sandboxes.create(...)``."""
+        return await self.sandboxes.create(
+            packages=packages,
+            files=files,
+            env=env,
+            network=network,
+            shell=shell,
         )
-        return Sandbox(self, core, shell=shell)
 
     async def close(self) -> None:
         await _async(self._core.close())

@@ -131,7 +131,7 @@ impl WasmerCore {
         let client = self.inner.clone();
         let package = self
             .context
-            .sdk(async move { client.load_package(specifier).await })
+            .sdk(async move { client.packages().load(specifier).await })
             .await?;
         Ok(Arc::new(PackageCore::new(
             Arc::clone(&self.context),
@@ -145,7 +145,8 @@ impl WasmerCore {
             .context
             .sdk(async move {
                 client
-                    .load_package(PackageSource::path(PathBuf::from(path)))
+                    .packages()
+                    .load(PackageSource::path(PathBuf::from(path)))
                     .await
             })
             .await?;
@@ -159,7 +160,7 @@ impl WasmerCore {
         let client = self.inner.clone();
         let package = self
             .context
-            .sdk(async move { client.load_package(PackageSource::webc(bytes)).await })
+            .sdk(async move { client.packages().load(PackageSource::webc(bytes)).await })
             .await?;
         Ok(Arc::new(PackageCore::new(
             Arc::clone(&self.context),
@@ -174,7 +175,7 @@ impl WasmerCore {
         env: HashMap<String, String>,
         network: NetworkMode,
     ) -> Result<Arc<SandboxCore>, SdkError> {
-        let mut builder = self.inner.sandbox().network(network.into());
+        let mut builder = self.inner.sandboxes().create().network(network.into());
         for package in packages {
             builder = builder.package(package.inner.clone());
         }
@@ -184,7 +185,7 @@ impl WasmerCore {
         for (key, value) in env {
             builder = builder.env(key, value);
         }
-        let sandbox = self.context.sdk(builder.start()).await?;
+        let sandbox = self.context.sdk(async move { builder.await }).await?;
         Ok(Arc::new(SandboxCore::new(
             Arc::clone(&self.context),
             sandbox,

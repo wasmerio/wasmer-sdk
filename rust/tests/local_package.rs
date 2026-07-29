@@ -63,10 +63,10 @@ async fn runs_a_local_package_with_finite_stdio_and_a_persistent_workspace() -> 
         output_bytes: 1024,
     })?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
         .file("seed.txt", b"persistent".to_vec())
-        .start()
         .await?;
 
     let output = sandbox
@@ -98,7 +98,7 @@ async fn installs_after_creation_and_selects_a_package_entrypoint() -> Result<()
         },
         output_bytes: 1024,
     })?;
-    let sandbox = client.sandbox().start().await?;
+    let sandbox = client.sandboxes().create().await?;
 
     let echo = sandbox
         .install_package(PackageSource::path(fixture.path()))
@@ -135,10 +135,10 @@ async fn command_environment_overrides_the_sandbox_environment() -> Result<()> {
         output_bytes: 1024,
     })?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(fixture.path()))
         .env("SDK_SCOPE", "sandbox")
-        .start()
         .await?;
 
     let output = sandbox

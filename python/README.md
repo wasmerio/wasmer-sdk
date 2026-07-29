@@ -10,8 +10,9 @@ operations that perform I/O and deterministic shutdown are awaited.
 from wasmer_sdk import Wasmer
 
 client = Wasmer(cache_root=".wasmer")
-sandbox = await client.create_sandbox(
-    packages=["python/python@3.12"],
+python = await client.packages.load("python/python@3.12")
+sandbox = await client.sandboxes.create(
+    packages=[python],
     files={"main.py": "print('hello from WASIX')"},
 )
 output = await sandbox.command(

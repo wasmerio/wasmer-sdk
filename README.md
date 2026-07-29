@@ -4,6 +4,9 @@ This repository is the design and implementation workspace for a universal SDK
 for running Wasmer packages from Rust, Python, JavaScript, Swift, and additional
 host languages.
 
+The standalone proposal for expert review is the
+[Universal Wasmer SDK WARP](docs/warp-universal-wasmer-sdk.md).
+
 The work is intentionally split into three phases:
 
 | Phase | Status | Deliverable |
@@ -49,11 +52,15 @@ use wasmer_sdk::{PackageSource, Result, Wasmer, WasmerConfig};
 #[tokio::main]
 async fn main() -> Result<()> {
     let wasmer = Wasmer::new(WasmerConfig::default())?;
+    let package = wasmer
+        .packages()
+        .load(PackageSource::path("./my-package"))
+        .await?;
     let sandbox = wasmer
-        .sandbox()
-        .package(PackageSource::path("./my-package"))
+        .sandboxes()
+        .create()
+        .package(package)
         .file("input.txt", b"hello".to_vec())
-        .start()
         .await?;
 
     let output = sandbox
@@ -101,9 +108,8 @@ project.write_text("input.txt", "hello").await?;
 
 let provider: Arc<dyn FileSystem> = Arc::new(project);
 let sandbox = wasmer
-    .sandbox()
+    .sandboxes().create()
     .mount("/project", provider, MountMode::ReadOnly)
-    .start()
     .await?;
 ```
 
@@ -162,8 +168,9 @@ command, process, output, filesystem, and ports model:
 from wasmer_sdk import Wasmer
 
 client = Wasmer()
-sandbox = await client.create_sandbox(
-    packages=["python/python@3.12"],
+python = await client.packages.load("python/python@3.12")
+sandbox = await client.sandboxes.create(
+    packages=[python],
     files={"main.py": "print(sum(n * n for n in range(10)))"},
 )
 output = await sandbox.command(
@@ -201,8 +208,9 @@ is supplied by a JavaScript virtual-network adapter over `node:net` and
 import { Wasmer } from "@wasmer/sdk/node";
 
 const client = new Wasmer();
-const sandbox = await client.createSandbox({
-  packages: ["python/python@3.12"],
+const python = await client.packages.load("python/python@3.12");
+const sandbox = await client.sandboxes.create({
+  packages: [python],
 });
 
 const output = await sandbox

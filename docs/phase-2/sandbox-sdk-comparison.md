@@ -28,7 +28,7 @@ The conclusion is:
 The short path remains short:
 
 ```ts
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["python/python@3.12"],
 });
 
@@ -450,8 +450,8 @@ Adding a `CommandRef` overload blurs the distinction further.
 With the revised proposal:
 
 ```ts
-client.loadPackage(source);
-client.createSandbox(options);
+client.packages.load(source);
+client.sandboxes.create(options);
 sandbox.command(command, args, options).run();
 ```
 
@@ -493,7 +493,7 @@ The explicit line communicates that execution creates an isolated environment
 with a lifecycle:
 
 ```ts
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["python/python@3.12"],
 });
 ```
@@ -508,7 +508,7 @@ belong.
 ```ts
 const client = new Wasmer();
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["python/python@3.12"],
   files: {
     "main.py": "print(sum(range(10)))",
@@ -548,11 +548,10 @@ const output = await sandbox
 
 ```rust
 let sandbox = wasmer
-    .sandbox()
+    .sandboxes().create()
     .package("python/python@3.12")
     .file("/workspace/main.py", b"print(sum(range(10)))")
     .network(NetworkPolicy::Disabled)
-    .start()
     .await?;
 
 let output = sandbox
@@ -570,7 +569,7 @@ The Rust command builder still mirrors `std::process::Command`; removing
 `Wasmer::run()` makes that analogy stronger because commands only exist inside
 an environment.
 
-### 10.3 What `createSandbox()` means
+### 10.3 What `sandboxes.create()` means
 
 In the embedded SDK, creation means:
 
@@ -752,5 +751,5 @@ The proofs of concept should now validate one execution model:
 
 Only after those tests should the project consider a separate convenience
 recipe. If added, it should live outside the core and be visibly defined as
-`createSandbox` + `run` + `close`, rather than becoming another semantic
+`sandboxes.create` + `run` + `close`, rather than becoming another semantic
 center.

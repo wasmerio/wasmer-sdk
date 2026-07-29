@@ -2,8 +2,10 @@
 use std::borrow::Cow;
 use std::{
     collections::BTreeMap,
+    future::{Future, IntoFuture},
     net::SocketAddr,
     path::{Path, PathBuf},
+    pin::Pin,
     sync::{
         Arc, Mutex, RwLock, Weak,
         atomic::{AtomicBool, Ordering},
@@ -148,7 +150,12 @@ impl SandboxBuilder {
     ///
     /// Returns an error if the client is closed, a package cannot be loaded, or
     /// a seeded workspace file cannot be written.
+    #[deprecated(note = "await the sandbox builder directly")]
     pub async fn start(self) -> Result<Sandbox> {
+        self.create().await
+    }
+
+    async fn create(self) -> Result<Sandbox> {
         self.client.ensure_open()?;
 
         let mut packages = Vec::with_capacity(self.packages.len());
@@ -204,6 +211,15 @@ impl SandboxBuilder {
                 closed: AtomicBool::new(false),
             }),
         })
+    }
+}
+
+impl IntoFuture for SandboxBuilder {
+    type Output = Result<Sandbox>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(self.create())
     }
 }
 
@@ -286,7 +302,7 @@ impl Sandbox {
     /// fails, or internal package state is unavailable.
     pub async fn install_package(&self, source: impl Into<PackageSource>) -> Result<Package> {
         self.ensure_open()?;
-        let package = self.inner.client.load_package(source).await?;
+        let package = self.inner.client.packages().load(source).await?;
         self.ensure_open()?;
         let mut packages = self
             .inner

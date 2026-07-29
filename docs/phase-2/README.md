@@ -31,7 +31,7 @@ The SDK has one execution boundary:
 ```ts
 const client = new Wasmer();
 
-await using sandbox = await client.createSandbox({
+await using sandbox = await client.sandboxes.create({
   packages: ["python/python@3.12"],
 });
 
@@ -46,9 +46,8 @@ copying JavaScript:
 
 ```rust
 let sandbox = wasmer
-    .sandbox()
+    .sandboxes().create()
     .package("python/python@3.12")
-    .start()
     .await?;
 
 sandbox

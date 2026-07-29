@@ -23,7 +23,8 @@ async fn main() -> Result<()> {
 
     let wasmer = Wasmer::new(WasmerConfig::default())?;
     let sandbox = wasmer
-        .sandbox()
+        .sandboxes()
+        .create()
         .package(PackageSource::path(package_dir.path()))
         .network(NetworkPolicy::Host)
         .env("OLIPHAUNT_WASIX_SOCKET_PORT", port.to_string())
@@ -37,7 +38,6 @@ async fn main() -> Result<()> {
         .env("TZ", "UTC")
         .env("PGTZ", "UTC")
         .env("PG_COLOR", "never")
-        .start()
         .await?;
 
     let mut process = sandbox

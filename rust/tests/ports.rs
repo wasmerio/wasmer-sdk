@@ -21,9 +21,9 @@ async fn port_wait_uses_one_wall_clock_timeout() -> Result<()> {
         output_bytes: 1024,
     })?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .network(NetworkPolicy::Host)
-        .start()
         .await?;
 
     let started = Instant::now();
@@ -61,9 +61,9 @@ async fn successful_port_wait_opens_and_closes_a_real_connection() -> Result<()>
         output_bytes: 1024,
     })?;
     let sandbox = client
-        .sandbox()
+        .sandboxes()
+        .create()
         .network(NetworkPolicy::Host)
-        .start()
         .await?;
 
     sandbox.ports().wait(port, Duration::from_secs(1)).await?;
