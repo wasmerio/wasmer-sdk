@@ -148,12 +148,12 @@ mod tests {
             .build()
             .unwrap();
         let msg = crate::tasks::task_wasm::to_scheduler_message(TaskWasm::new(
-            Box::new({
+            {
                 let flag = Arc::clone(&flag);
-                move |_| {
+                move |_| async move {
                     flag.store(true, Ordering::SeqCst);
                 }
-            }),
+            },
             env,
             module,
             false,

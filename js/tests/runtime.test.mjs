@@ -7,12 +7,12 @@ import { Wasmer } from "../dist/node.js";
 test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   const client = new Wasmer();
   const sandbox = await client.createSandbox({
-    packages: ["python/python@3.12"],
+    packages: ["python/python@3.13.5"],
   });
-  const output = await sandbox.command("python", ["--version"]).run({
-    check: true,
-  });
-  assert.match(output.text(), /^Python 3\./);
+  const output = await sandbox
+    .command("python", ["-c", "print(sum(range(10)))"])
+    .run({ check: true });
+  assert.equal(output.text(), "45\n");
   assert.equal(output.reason, "exited");
   assert.ok(output.ok);
   await sandbox.close();
@@ -30,7 +30,7 @@ test("reuses commands and preserves filesystem and stream semantics", async () =
   let sandbox;
   try {
     sandbox = await client.createSandbox({
-      packages: ["python/python@3.12"],
+      packages: ["python/python@3.13.5"],
     });
 
     const command = sandbox.command("python", ["--version"]);

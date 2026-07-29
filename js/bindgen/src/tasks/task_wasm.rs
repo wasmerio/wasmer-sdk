@@ -104,7 +104,7 @@ pub(crate) struct SpawnWasm {
     /// An async callback to perform before running.
     #[derivative(Debug(format_with = "crate::worker_utils::hidden"))]
     pre_run: Option<Box<TaskWasmPreRun>>,
-    /// A blocking callback to run.
+    /// The callback that runs the WebAssembly task.
     #[derivative(Debug(format_with = "crate::worker_utils::hidden"))]
     run: Box<TaskWasmRun>,
     /// How the memory should be instantiated to execute the [`SpawnWasm::run`]
@@ -158,7 +158,7 @@ impl SpawnWasm {
 pub struct ReadySpawnWasm(SpawnWasm);
 
 impl ReadySpawnWasm {
-    /// Execute the callback, blocking until it has completed.
+    /// Execute the callback, waiting until it has completed.
     pub(crate) async fn execute(
         self,
         wasm_module: js_sys::WebAssembly::Module,
@@ -201,7 +201,7 @@ impl ReadySpawnWasm {
             trigger_result: result,
             recycle,
         };
-        run(properties);
+        run(properties).await;
 
         Ok(())
     }

@@ -7,7 +7,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.client = Wasmer(output_bytes=256 * 1024)
         self.sandbox = await self.client.create_sandbox(
-            packages=["python/python@3.12"],
+            packages=["python/python@3.13.5"],
             files={"main.py": "print('hello from python binding')"},
             env={"SDK_TEST": "sandbox"},
         )
@@ -48,7 +48,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await process.wait(check=True)).ok)
 
     async def test_stdin_and_dynamic_install(self) -> None:
-        installed = await self.sandbox.install_package("python/python@3.12")
+        installed = await self.sandbox.install_package("python/python@3.13.5")
         self.assertIn("python", installed.commands)
 
         process = await self.sandbox.command(
