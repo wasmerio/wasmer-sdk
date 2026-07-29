@@ -424,18 +424,15 @@ impl Command {
 }
 
 /// Browsers may reject large synchronous compilations on the window thread.
-/// Prime WASIX's thread-local module cache asynchronously before handing the
-/// compiled module to an execution worker. Workers and Node deliberately
-/// retain the synchronous path needed by WASIX dynamic linking.
+/// Prime WASIX's thread-local module cache through Wasmer's asynchronous
+/// module API before handing the compiled module to an execution worker.
+/// Workers and Node deliberately retain the synchronous path needed by WASIX
+/// dynamic linking.
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 async fn precompile_browser_command(
     runtime: &(dyn Runtime + Send + Sync),
     command: &BinaryPackageCommand,
 ) -> Result<()> {
-    use js_sys::{Uint8Array, WebAssembly};
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
-
     if web_sys::window().is_none() {
         return Ok(());
     }
@@ -454,41 +451,17 @@ async fn precompile_browser_command(
     }
 
     let bytes = command.atom();
-    let js_bytes = Uint8Array::from(bytes.as_ref());
-    let module = JsFuture::from(WebAssembly::compile(&js_bytes))
+    let module = wasmer::Module::new_async(&engine, bytes.as_ref())
         .await
         .map_err(|error| Error::Execution {
-            message: format!(
-                "unable to compile the command: {}",
-                javascript_error_message(&error)
-            ),
-        })?
-        .dyn_into::<WebAssembly::Module>()
-        .map_err(|error| Error::Execution {
-            message: format!(
-                "browser returned an invalid compiled module: {}",
-                javascript_error_message(&error)
-            ),
+            message: format!("unable to compile the command: {error}"),
         })?;
-    let module: wasmer::Module = (module, bytes.as_ref()).into();
     cache
         .save(hash, &engine, &module)
         .await
         .map_err(|error| Error::Execution {
             message: format!("unable to cache the compiled command: {error}"),
         })
-}
-
-#[cfg(all(target_arch = "wasm32", feature = "js"))]
-fn javascript_error_message(error: &wasm_bindgen::JsValue) -> String {
-    error
-        .as_string()
-        .or_else(|| {
-            js_sys::Reflect::get(error, &wasm_bindgen::JsValue::from_str("message"))
-                .ok()
-                .and_then(|message| message.as_string())
-        })
-        .unwrap_or_else(|| format!("{error:?}"))
 }
 
 /// Build the guest-side file and optional user-side stream for one output.
