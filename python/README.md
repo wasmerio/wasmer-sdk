@@ -50,13 +50,11 @@ Serve HTTP with `wasmer/edgejs-quickjs`:
 PYTHONPATH=python/src python3 python/examples/edgejs_http.py
 ```
 
-Run a local WASIX PostgreSQL package under Wasmer, then query it with the
-standard native `psql` client:
+Run `wasmer/pglite` under Wasmer, then query it with the standard native
+`psql` client:
 
 ```console
-PYTHONPATH=python/src python3 python/examples/postgres_psql.py \
-  /path/to/postgres.webc
+PYTHONPATH=python/src python3 python/examples/postgres_psql.py
 ```
 
-The PostgreSQL example accepts `--psql /path/to/psql` when the client is not on
-`PATH`.
+The example accepts `--psql /path/to/psql` when the client is not on `PATH`.

@@ -1,71 +1,33 @@
 import asyncio
 import os
 import shutil
-import socket
 import subprocess
 import unittest
-from pathlib import Path
 
 from wasmer_sdk import ExitReason, Wasmer
 
 
-POSTGRES_PACKAGE = os.environ.get(
-    "WASMER_POSTGRES_PACKAGE",
-    os.environ.get("WASMER_POSTGRES_WEBC"),
-)
 PSQL = os.environ.get("PSQL") or shutil.which("psql")
+PORT = 5432
 
 
 class PostgresPsqlTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_psql_connects_to_wasix_postgres(self) -> None:
-        if not POSTGRES_PACKAGE:
-            self.skipTest(
-                "set WASMER_POSTGRES_PACKAGE or WASMER_POSTGRES_WEBC"
-            )
-        package_path = Path(POSTGRES_PACKAGE)
-        if not package_path.exists():
-            self.skipTest(f"PostgreSQL package does not exist: {package_path}")
         if not PSQL:
             self.skipTest("set PSQL or install psql on PATH")
 
-        port = reserve_port()
         client = Wasmer(output_bytes=256 * 1024)
         sandbox = None
         process = None
         try:
-            postgres = await client.packages.load(package_path)
+            pglite = await client.packages.load("wasmer/pglite@0.1.0")
+            self.assertEqual(pglite.entrypoint, "pglite")
+            self.assertIn("pglite", pglite.commands)
             sandbox = await client.sandboxes.create(
-                packages=[postgres],
+                packages=[pglite],
                 network="host",
-                env={
-                    "OLIPHAUNT_WASIX_SOCKET_PORT": str(port),
-                    "PREFIX": "/",
-                    "PGDATA": "/base",
-                    "PGUSER": "postgres",
-                    "PGDATABASE": "postgres",
-                    "PGSYSCONFDIR": "/base",
-                    "PGCLIENTENCODING": "UTF8",
-                    "LC_CTYPE": "C.UTF-8",
-                    "TZ": "UTC",
-                    "PGTZ": "UTC",
-                    "PG_COLOR": "never",
-                },
             )
-            process = await sandbox.command(
-                postgres,
-                [
-                    "--single",
-                    "-F",
-                    "-O",
-                    "-j",
-                    "-c",
-                    "io_method=sync",
-                    "-D",
-                    "/base",
-                    "postgres",
-                ],
-                cwd="/",
-            ).spawn(
+            process = await sandbox.command(pglite).spawn(
                 stdout="capture",
                 stderr="pipe",
                 output_bytes=256 * 1024,
@@ -73,13 +35,13 @@ class PostgresPsqlTests(unittest.IsolatedAsyncioTestCase):
             stderr = process.stderr
             self.assertIsNotNone(stderr)
             assert stderr is not None
-            marker = f"OLIPHAUNT_WASIX_SOCKET_READY {port}"
+            marker = f"OLIPHAUNT_WASIX_SOCKET_READY {PORT}"
             await asyncio.wait_for(
                 wait_for_line(stderr.lines(), marker),
                 timeout=30,
             )
             result = await asyncio.wait_for(
-                asyncio.to_thread(run_psql, port),
+                asyncio.to_thread(run_psql, PORT),
                 timeout=15,
             )
             if result.returncode != 0:
@@ -135,9 +97,3 @@ def run_psql(port: int) -> subprocess.CompletedProcess[str]:
         timeout=10,
         check=False,
     )
-
-
-def reserve_port() -> int:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return listener.getsockname()[1]

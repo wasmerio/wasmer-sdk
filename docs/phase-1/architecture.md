@@ -1030,8 +1030,8 @@ Long-running and multi-package behavior uses the same model:
 ```text
 await sandbox.install_package(bash)
 await sandbox.install_package(coreutils)
-postgres = await sandbox.command(postgres_package.command("postgres")).spawn()
-endpoint = await sandbox.network.bridge(postgres, guest_port=5432)
+pglite = await sandbox.install_package("wasmer/pglite@0.1.0")
+postgres = await sandbox.command(pglite).spawn()
 ```
 
 The architecture does not require installation to copy package bytes. It means

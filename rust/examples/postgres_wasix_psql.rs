@@ -1,59 +1,25 @@
-use std::{
-    net::TcpListener,
-    path::{Path, PathBuf},
-    process::Command as HostCommand,
-    time::Duration,
-};
+use std::{path::PathBuf, process::Command as HostCommand, time::Duration};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
-use wasmer_sdk::{Error, NetworkPolicy, PackageSource, Result, Stdio, Wasmer, WasmerConfig};
+use wasmer_sdk::{Error, NetworkPolicy, Result, Stdio, Wasmer, WasmerConfig};
+
+const PORT: u16 = 5432;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let postgres_wasm = required_file(1, "PostgreSQL WASIX module")?;
-    let runtime_root = required_directory(2, "Oliphaunt runtime root")?;
-    let pgdata = required_directory(3, "initialized PGDATA")?;
-    let psql = required_file(4, "native psql client")?;
-    require_file(&pgdata.join("PG_VERSION"), "PG_VERSION")?;
-    require_file(&pgdata.join("global/pg_control"), "pg_control")?;
-
-    let port = reserve_loopback_port()?;
-    let package_dir = tempfile::TempDir::new()?;
-    write_package(package_dir.path(), &postgres_wasm, &runtime_root, &pgdata)?;
+    let psql = required_file(1, "native psql client")?;
 
     let wasmer = Wasmer::new(WasmerConfig::default())?;
+    let pglite = wasmer.packages().load("wasmer/pglite@0.1.0").await?;
     let sandbox = wasmer
         .sandboxes()
         .create()
-        .package(PackageSource::path(package_dir.path()))
+        .package(pglite.clone())
         .network(NetworkPolicy::Host)
-        .env("OLIPHAUNT_WASIX_SOCKET_PORT", port.to_string())
-        .env("PREFIX", "/")
-        .env("PGDATA", "/base")
-        .env("PGUSER", "postgres")
-        .env("PGDATABASE", "postgres")
-        .env("PGSYSCONFDIR", "/base")
-        .env("PGCLIENTENCODING", "UTF8")
-        .env("LC_CTYPE", "C.UTF-8")
-        .env("TZ", "UTC")
-        .env("PGTZ", "UTC")
-        .env("PG_COLOR", "never")
         .await?;
 
     let mut process = sandbox
-        .command("postgres")
-        .args([
-            "--single",
-            "-F",
-            "-O",
-            "-j",
-            "-c",
-            "io_method=sync",
-            "-D",
-            "/base",
-            "postgres",
-        ])
-        .current_dir("/")
+        .command(pglite)
         .stdin(Stdio::Null)
         .stdout(Stdio::Capture)
         .stderr(Stdio::Piped)
@@ -63,10 +29,9 @@ async fn main() -> Result<()> {
     let stderr = process.take_stderr().ok_or_else(|| Error::InternalState {
         message: "missing piped PostgreSQL stderr".to_owned(),
     })?;
-    wait_for_socket_ready(BufReader::new(stderr).lines(), port).await?;
+    wait_for_socket_ready(BufReader::new(stderr).lines()).await?;
 
-    let (uri, psql_output) = run_psql(psql, port).await?;
-
+    let (uri, psql_output) = run_psql(psql).await?;
     let output = process.wait().await?.check()?;
     let result = validate_psql(psql_output)?;
 
@@ -82,14 +47,11 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn wait_for_socket_ready<R>(
-    mut lines: tokio::io::Lines<BufReader<R>>,
-    port: u16,
-) -> Result<()>
+async fn wait_for_socket_ready<R>(mut lines: tokio::io::Lines<BufReader<R>>) -> Result<()>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    let marker = format!("OLIPHAUNT_WASIX_SOCKET_READY {port}");
+    let marker = format!("OLIPHAUNT_WASIX_SOCKET_READY {PORT}");
     tokio::time::timeout(Duration::from_secs(30), async {
         while let Some(line) = lines.next_line().await? {
             if line.contains(&marker) {
@@ -108,8 +70,8 @@ where
     Ok(())
 }
 
-async fn run_psql(psql: PathBuf, port: u16) -> Result<(String, std::process::Output)> {
-    let uri = format!("postgresql://postgres@127.0.0.1:{port}/postgres?sslmode=disable");
+async fn run_psql(psql: PathBuf) -> Result<(String, std::process::Output)> {
+    let uri = format!("postgresql://postgres@127.0.0.1:{PORT}/postgres?sslmode=disable");
     tokio::task::spawn_blocking(move || {
         HostCommand::new(psql)
             .args([
@@ -156,80 +118,10 @@ fn validate_psql(output: std::process::Output) -> Result<String> {
     })
 }
 
-fn reserve_loopback_port() -> Result<u16> {
-    let listener = TcpListener::bind(("127.0.0.1", 0))?;
-    Ok(listener.local_addr()?.port())
-}
-
-fn write_package(
-    package: &Path,
-    postgres_wasm: &Path,
-    runtime: &Path,
-    pgdata: &Path,
-) -> Result<()> {
-    let manifest = format!(
-        r#"[package]
-name = "local/postgres-wasix-socket"
-version = "18.4.0"
-description = "PostgreSQL WASIX with a guest-owned TCP listener"
-entrypoint = "postgres"
-
-[fs]
-"/" = "{runtime}"
-"/base" = "{pgdata}"
-
-[[module]]
-name = "postgres"
-source = "{postgres_wasm}"
-abi = "wasi"
-
-[[command]]
-name = "postgres"
-module = "postgres"
-runner = "wasi"
-
-[command.annotations.wasi]
-exec-name = "/bin/oliphaunt"
-"#,
-        runtime = toml_path(runtime),
-        pgdata = toml_path(pgdata),
-        postgres_wasm = toml_path(postgres_wasm),
-    );
-    std::fs::write(package.join("wasmer.toml"), manifest)?;
-    Ok(())
-}
-
 fn required_file(index: usize, description: &str) -> Result<PathBuf> {
     let path = argument(index, description)?.canonicalize()?;
-    require_file(&path, description)?;
-    Ok(path)
-}
-
-fn required_directory(index: usize, description: &str) -> Result<PathBuf> {
-    let path = argument(index, description)?.canonicalize()?;
-    if !path.is_dir() {
-        return Err(Error::Initialization {
-            message: format!("{description} is not a directory: {}", path.display()),
-        });
-    }
-    Ok(path)
-}
-
-fn argument(index: usize, description: &str) -> Result<PathBuf> {
-    std::env::args_os()
-        .nth(index)
-        .map(PathBuf::from)
-        .ok_or_else(|| Error::Initialization {
-            message: format!(
-                "usage: postgres_wasix_psql <postgres.wasm> <runtime-root> \
-                 <initialized-pgdata> <psql>; missing {description}"
-            ),
-        })
-}
-
-fn require_file(path: &Path, description: &str) -> Result<()> {
     if path.is_file() {
-        Ok(())
+        Ok(path)
     } else {
         Err(Error::Initialization {
             message: format!("{description} is not a file: {}", path.display()),
@@ -237,8 +129,11 @@ fn require_file(path: &Path, description: &str) -> Result<()> {
     }
 }
 
-fn toml_path(path: &Path) -> String {
-    path.to_string_lossy()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
+fn argument(index: usize, description: &str) -> Result<PathBuf> {
+    std::env::args_os()
+        .nth(index)
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::Initialization {
+            message: format!("usage: postgres_wasix_psql <psql>; missing {description}"),
+        })
 }

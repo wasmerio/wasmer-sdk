@@ -153,32 +153,28 @@ The runtime suite loads `python/python@3.12` and verifies:
 - dynamic package installation; and
 - Python-side numeric validation.
 
-The Edge.js HTTP regression runs by default. PostgreSQL is opt-in because its
-rebuilt package and initialized database are local build artifacts:
+The Edge.js and PostgreSQL examples resolve their packages from the registry:
 
 ```console
 PYTHONPATH=python/src \
   python3 python/examples/edgejs_http.py
 
 PYTHONPATH=python/src \
-  python3 python/examples/postgres_psql.py \
-    /absolute/path/postgres.webc
+  python3 python/examples/postgres_psql.py
 ```
 
-The PostgreSQL example starts the WASIX process with host networking and uses
-the standard native `psql` client to connect over its exposed TCP socket.
+The PostgreSQL example loads `wasmer/pglite@0.1.0`, enables host networking,
+starts its package entrypoint without custom arguments or environment, and
+uses the standard native `psql` client to connect to port 5432.
 
 ```console
-WASMER_POSTGRES_PACKAGE=/absolute/path/postgres.webc \
 PSQL=/absolute/path/psql \
 PYTHONPATH=python/src \
   python3 -m unittest \
     python/tests/test_postgres_psql.py -v
 ```
 
-`WASMER_POSTGRES_WEBC`, used by the JavaScript test, is accepted as an alias.
-The package must embed the rebuilt socket-enabled module, runtime root, and
-initialized `PGDATA`.
+If `PSQL` is omitted, the test uses `psql` from `PATH`.
 
 The macOS development cdylib exposed an invalid compact-unwind base calculation
 in the linked Wasmer checkout: JIT functions and their personality GOT slot can

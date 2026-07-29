@@ -194,17 +194,16 @@ and the native Rust server proofs:
 npm run test:edgejs
 npm run test:browser
 
-WASMER_POSTGRES_WEBC=/absolute/path/postgres.webc \
-  PSQL=/absolute/path/psql \
+PSQL=/absolute/path/psql \
   npm run test:postgres
 
 npm run test:workers
 ```
 
-The PostgreSQL WEBC must contain the rebuilt WASIX module, its runtime root,
-and initialized `PGDATA`, using the same manifest as the Rust proof. The test
-starts PostgreSQL through the wasm-bindgen SDK and connects with the host's
-standard `psql`; it contains no PostgreSQL protocol proxy.
+The test resolves `wasmer/pglite@0.1.0` directly, starts its entrypoint without
+recreating its PostgreSQL arguments or environment, and connects through the
+wasm-bindgen SDK's Node network bridge with the host's standard `psql`. It
+contains no PostgreSQL protocol proxy.
 
 The EdgeJS test serves a real HTTP response from
 `wasmer/edgejs-quickjs`. The PostgreSQL test starts the WASIX PostgreSQL

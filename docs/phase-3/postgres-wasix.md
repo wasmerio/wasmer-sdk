@@ -1,160 +1,142 @@
-# PostgreSQL WASIX socket proof
+# `wasmer/pglite`: PostgreSQL for WASIX
 
-Status: verified locally on July 27, 2026.
+Status: packaged and verified locally on July 29, 2026.
 
-This proof has one server process and one client:
+`wasmer/pglite@0.1.0` contains PostgreSQL 18.4 compiled for WASIX, its
+Oliphaunt runtime tree, and an initialized database. PostgreSQL itself owns a
+loopback TCP socket and speaks the standard wire protocol directly to native
+clients. There is no native PostgreSQL server or protocol proxy.
 
-1. `wasmer-sdk` starts PostgreSQL 18.4 as a WASIX process.
-2. That guest process calls `socket()`, `bind()`, `listen()`, and `accept()`.
-3. A separately installed, native `psql` connects to the guest-owned TCP
-   socket and executes SQL.
+## Package contract
 
-There is no native PostgreSQL server and no protocol proxy in this path.
-
-## Why the artifact was rebuilt
-
-The existing Oliphaunt artifact was an embedded, single-backend PostgreSQL
-module. It could process PostgreSQL wire frames supplied through exported host
-callbacks, but its command entrypoint did not open a socket. That did not meet
-this proof's requirement.
-
-The rebuilt artifact keeps Oliphaunt's one-backend model and adds a direct
-command-mode socket entrypoint. Setting `OLIPHAUNT_WASIX_SOCKET_PORT` makes the
-guest:
-
-- bind an IPv4 loopback TCP listener;
-- accept one standard PostgreSQL client;
-- read the PostgreSQL startup packet from the socket;
-- send authentication and connection metadata on the socket;
-- run PostgreSQL's normal frontend/backend protocol loop; and
-- shut down after that client disconnects.
-
-The source delta is preserved as
-[`postgres-18.4-direct-wasix-socket.patch`](../../rust/examples/postgres-wasix/postgres-18.4-direct-wasix-socket.patch).
-It applies to the PostgreSQL 18.4 source tree prepared by Oliphaunt's WASIX
-build, not to an unmodified upstream PostgreSQL tarball.
-
-The verified module was rebuilt with `wasixcc 0.4.3` and Oliphaunt's existing
-WASIX bridge. Its relevant configuration is:
-
-```text
---host=wasm32-wasix
---with-template=wasix-dl
---without-readline
---without-icu
---without-zlib
---without-llvm
---disable-largefile
---without-pam
---with-openssl=no
-```
-
-The verified rebuilt module SHA-256 is:
-
-```text
-ab171fd55658967c728f6d67c0c805cc76786bd5bfddaacfb1211a6ad17fc03d
-```
-
-Build output under `target/` is intentionally not checked into the SDK.
-
-## SDK composition
-
-[`postgres_wasix_psql.rs`](../../rust/examples/postgres_wasix_psql.rs) generates a
-temporary local Wasmer package with two filesystem mappings:
+The package exports one command, `pglite`, and declares it as its entrypoint:
 
 ```toml
-[fs]
-"/" = "<oliphaunt-runtime-root>"
-"/base" = "<initialized-pgdata>"
+[package]
+name = "wasmer/pglite"
+version = "0.1.0"
+entrypoint = "pglite"
+
+[[command]]
+name = "pglite"
+module = "pglite"
+runner = "wasi"
 ```
 
-The SDK treats `/` as a copy-on-write package layer. `/base` is a distinct
-writable mapping, so database changes persist in the selected `PGDATA`.
-
-Guest sockets require an explicit network capability:
+The command annotations in
+[`wasmer.toml`](../../packages/pglite/wasmer.toml) define PostgreSQL's working
+directory, fixed launch arguments, runtime environment, and default port
+`5432`. Callers therefore select the package itself as the command:
 
 ```rust
+let pglite = wasmer
+    .packages()
+    .load("wasmer/pglite@0.1.0")
+    .await?;
 let sandbox = wasmer
-    .sandboxes().create()
-    .package(PackageSource::path(package_dir))
+    .sandboxes()
+    .create()
+    .package(pglite.clone())
     .network(NetworkPolicy::Host)
     .await?;
+let process = sandbox.command(pglite).spawn().await?;
 ```
 
-`NetworkPolicy::Host` selects Wasmer WASIX's native local-networking backend.
-The default `NetworkPolicy::Disabled` rejects guest socket operations.
+Networking remains an explicit sandbox capability. Packages may define how a
+process starts, but may not silently grant host access.
 
-The example then starts PostgreSQL through the SDK:
+The package maps its immutable runtime tree at `/` and initialized database at
+`/base`. Wasmer presents package files through a writable copy-on-write layer,
+so each sandbox can mutate its database without changing the published
+container.
 
-```rust
-let mut postgres = sandbox.command("postgres");
-postgres
-    .args([
-        "--single",
-        "-F",
-        "-O",
-        "-j",
-        "-c",
-        "io_method=sync",
-        "-D",
-        "/base",
-        "postgres",
-    ])
-    .env("OLIPHAUNT_WASIX_SOCKET_PORT", port.to_string());
+## Build and publish
 
-let process = postgres.spawn().await?;
-```
-
-The host waits for the guest readiness marker, then invokes the local `psql`
-binary. The SDK does not parse or forward PostgreSQL protocol frames.
-
-## Run the verified proof
-
-First unpack an initialized data directory:
+Build output is intentionally excluded from Git. Assemble the package from the
+rebuilt module, Oliphaunt runtime tree, and initialized `PGDATA`:
 
 ```console
-mkdir -p .wasmer/postgres-poc/pgdata
-zstd -dc \
-  /Users/syrusakbary/Development/oliphaunt/target/oliphaunt-wasix/downloads/28621618569/target/oliphaunt-wasix/assets/prepopulated/pgdata-template.tar.zst \
-  | tar -xf - -C .wasmer/postgres-poc/pgdata
-```
-
-Then run:
-
-```console
-cargo run --example postgres_wasix_psql -- \
+bash packages/pglite/build.sh \
   target/postgres-wasix-socket-build/src/backend/oliphaunt \
-  /Users/syrusakbary/Development/oliphaunt/target/oliphaunt-wasix/downloads/28621618569/target/oliphaunt-wasix/wasix-build/build/package-stage/runtime/oliphaunt \
-  .wasmer/postgres-poc/pgdata \
+  /path/to/oliphaunt/runtime/root \
+  .wasmer/postgres-poc/pgdata
+```
+
+The script populates the complete runnable package directly at
+`packages/pglite` and builds the container at
+`target/wasmer-pglite-0.1.0.webc`. Generated module, runtime, and database
+directories are ignored by Git.
+
+Run the package directly:
+
+```console
+cd packages/pglite
+wasmer run . --net
+```
+
+The `--net` flag is required because networking is a host capability grant;
+package metadata cannot enable it for itself.
+
+Validate locally without publishing:
+
+```console
+wasmer package build --check packages/pglite
+wasmer package push --dry-run --non-interactive packages/pglite
+```
+
+Publish when ready:
+
+```console
+wasmer package publish --wait=container packages/pglite
+```
+
+## Verified execution
+
+The Rust example resolves `wasmer/pglite@0.1.0` from the registry:
+
+```console
+cargo run -p wasmer-sdk --example postgres_wasix_psql -- \
   /opt/homebrew/opt/libpq/bin/psql
 ```
 
-The example selects an ephemeral loopback port and runs:
+The Python example also resolves `wasmer/pglite@0.1.0`:
+
+```console
+PYTHONPATH=python/src \
+  python3 python/examples/postgres_psql.py
+```
+
+Both issue:
 
 ```sql
 select version(), 40 + 2 as answer;
 ```
 
-The locally verified output was:
+The verified result is:
 
 ```text
-connected directly to WASIX PostgreSQL: postgresql://postgres@127.0.0.1:<port>/postgres?sslmode=disable
 PostgreSQL 18.4 on wasm32-unknown-wasix, compiled by wasixcc 0.4.3, 32-bit|42
 ```
 
-## Scope of the proof
+The built WEBC is approximately 71 MB. The embedded patched module retains its
+verified SHA-256:
 
-This demonstrates:
+```text
+ab171fd55658967c728f6d67c0c805cc76786bd5bfddaacfb1211a6ad17fc03d
+```
 
-- PostgreSQL itself runs as the process spawned by `wasmer-sdk`;
-- the WASIX guest owns the listening and accepted sockets;
-- an unmodified local `psql` speaks the standard wire protocol directly to
-  the guest;
-- the database identifies itself as PostgreSQL 18.4 on
-  `wasm32-unknown-wasix`;
-- mutable `PGDATA` works through an SDK filesystem mapping; and
-- host networking is opt-in.
+## Why PostgreSQL was rebuilt
 
-It deliberately remains a single-backend, single-client process. It is not a
-concurrent PostgreSQL postmaster, and Unix-domain sockets were not part of this
-proof.
+The original Oliphaunt artifact processed wire frames supplied through
+exported host callbacks but did not open a command-mode socket. The rebuilt
+module adds a direct WASIX path which binds, listens, accepts one standard
+PostgreSQL client, runs the normal frontend/backend protocol loop, and exits
+after that client disconnects.
+
+The source delta is preserved as
+[`postgres-18.4-direct-wasix-socket.patch`](../../rust/examples/postgres-wasix/postgres-18.4-direct-wasix-socket.patch).
+The module was built with `wasixcc 0.4.3`; it identifies itself as
+`wasm32-unknown-wasix`.
+
+This remains a single-backend, single-client process rather than a concurrent
+PostgreSQL postmaster. Unix-domain sockets are outside the current proof.

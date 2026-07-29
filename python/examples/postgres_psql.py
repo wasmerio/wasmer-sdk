@@ -1,21 +1,16 @@
 import argparse
 import asyncio
 import shutil
-import socket
 import subprocess
-from pathlib import Path
 
 from wasmer_sdk import Wasmer
+
+PORT = 5432
 
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run PostgreSQL under Wasmer and query it with native psql"
-    )
-    parser.add_argument(
-        "package",
-        type=Path,
-        help="path to a WASIX PostgreSQL WEBC package",
     )
     parser.add_argument(
         "--psql",
@@ -56,55 +51,19 @@ def query(psql: str, port: int) -> subprocess.CompletedProcess[str]:
     )
 
 
-def reserve_port() -> int:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return listener.getsockname()[1]
-
-
 async def main() -> None:
     args = arguments()
-    if not args.package.is_file():
-        raise SystemExit(f"PostgreSQL package not found: {args.package}")
     if not args.psql:
         raise SystemExit("psql was not found; install it or pass --psql")
 
-    port = reserve_port()
     async with Wasmer(output_bytes=256 * 1024) as client:
-        postgres = await client.packages.load(args.package)
+        pglite = await client.packages.load("wasmer/pglite@0.1.0")
         sandbox = await client.sandboxes.create(
-            packages=[postgres],
+            packages=[pglite],
             network="host",
-            env={
-                "OLIPHAUNT_WASIX_SOCKET_PORT": str(port),
-                "PREFIX": "/",
-                "PGDATA": "/base",
-                "PGUSER": "postgres",
-                "PGDATABASE": "postgres",
-                "PGSYSCONFDIR": "/base",
-                "PGCLIENTENCODING": "UTF8",
-                "LC_CTYPE": "C.UTF-8",
-                "TZ": "UTC",
-                "PGTZ": "UTC",
-                "PG_COLOR": "never",
-            },
         )
         async with sandbox:
-            process = await sandbox.command(
-                postgres,
-                [
-                    "--single",
-                    "-F",
-                    "-O",
-                    "-j",
-                    "-c",
-                    "io_method=sync",
-                    "-D",
-                    "/base",
-                    "postgres",
-                ],
-                cwd="/",
-            ).spawn(
+            process = await sandbox.command(pglite).spawn(
                 stdout="capture",
                 stderr="pipe",
                 output_bytes=256 * 1024,
@@ -115,11 +74,11 @@ async def main() -> None:
                 await asyncio.wait_for(
                     wait_for_line(
                         process.stderr.lines(),
-                        f"OLIPHAUNT_WASIX_SOCKET_READY {port}",
+                        f"OLIPHAUNT_WASIX_SOCKET_READY {PORT}",
                     ),
                     timeout=30,
                 )
-                result = await asyncio.to_thread(query, args.psql, port)
+                result = await asyncio.to_thread(query, args.psql, PORT)
                 if result.returncode != 0:
                     raise RuntimeError(
                         f"psql exited with {result.returncode}\n"

@@ -131,21 +131,19 @@ always built in separate target-specific invocations. Do not use
 `cargo test --workspace`: that would select both Wasmer's mutually exclusive
 `sys` and `js` feature sets for one host build.
 
-The PostgreSQL 18 WASIX proof starts a rebuilt single-backend PostgreSQL
-command through this SDK. The guest owns the loopback TCP socket, and a
-separately installed standard `psql` connects directly to it:
+The `wasmer/pglite@0.1.0` package starts PostgreSQL 18 through this SDK. The
+package entrypoint owns PostgreSQL's arguments, environment, working directory,
+runtime tree, and initialized database. The guest owns the loopback TCP
+socket, and a separately installed standard `psql` connects directly to it:
 
 ```console
 cargo run --example postgres_wasix_psql -- \
-  <postgres-wasix-module> \
-  <oliphaunt-runtime-root> \
-  <initialized-pgdata> \
   <psql>
 ```
 
 There is no native server or PostgreSQL protocol proxy in that path. See
-[the PostgreSQL WASIX proof](docs/phase-3/postgres-wasix.md) for the source
-patch, exact artifact layout, and locally verified command.
+[the PostgreSQL WASIX package](packages/pglite/README.md) for assembly and
+publishing instructions.
 
 The Edge.js HTTP example loads `wasmer/edgejs-quickjs`, seeds a Node-compatible
 `server.js`, starts it with host networking, and verifies the resulting site
