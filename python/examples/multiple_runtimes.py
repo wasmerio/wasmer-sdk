@@ -20,13 +20,9 @@ async def main() -> None:
         ("php", ["-r", "echo 'hello from PHP';"]),
     ]
 
-    try:
-        for executable, args in commands:
-            output = await sandbox.command(executable, args).run(check=True)
-            print(output.text().strip())
-    finally:
-        await sandbox.close()
-        await client.close()
+    for executable, args in commands:
+        output = await sandbox.command(executable, args).run(check=True)
+        print(output.text().strip())
 
 
 asyncio.run(main())
