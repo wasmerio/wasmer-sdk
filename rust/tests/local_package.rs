@@ -1,4 +1,8 @@
-use std::path::Path;
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 use tempfile::TempDir;
 use wasmer_sdk::{CacheConfig, PackageSource, Result, Wasmer, WasmerConfig};
@@ -83,7 +87,35 @@ async fn runs_a_local_package_with_finite_stdio_and_a_persistent_workspace() -> 
         "persistent"
     );
     assert!(state.path().join(".wasmer/cache-v1/packages").is_dir());
-    assert!(state.path().join(".wasmer/cache-v1/compiled").is_dir());
+    let compiled = state.path().join(".wasmer/cache-v1/compiled");
+    let first_artifacts = artifact_timestamps(&compiled);
+    assert!(
+        !first_artifacts.is_empty(),
+        "executing a command should persist its compiled module"
+    );
+    drop(sandbox);
+    drop(client);
+
+    std::thread::sleep(std::time::Duration::from_millis(25));
+    let client = Wasmer::new(WasmerConfig {
+        cache: CacheConfig {
+            root: state.path().join(".wasmer"),
+        },
+        output_bytes: 1024,
+    })?;
+    let sandbox = client
+        .sandboxes()
+        .create()
+        .package(PackageSource::path(fixture.path()))
+        .await?;
+    let cached = sandbox.command("echo").input("cached").output().await?;
+
+    assert_eq!(cached.text()?, "cached");
+    assert_eq!(
+        artifact_timestamps(&compiled),
+        first_artifacts,
+        "a fresh client should deserialize the existing artifact without rewriting it"
+    );
     Ok(())
 }
 
@@ -195,4 +227,35 @@ module = "env"
         wat::parse_str(ENV_WAT).expect("compile environment WAT"),
     )
     .expect("write environment Wasm module");
+}
+
+fn artifact_timestamps(root: &Path) -> BTreeMap<PathBuf, SystemTime> {
+    let mut artifacts = BTreeMap::new();
+    collect_artifact_timestamps(root, root, &mut artifacts);
+    artifacts
+}
+
+fn collect_artifact_timestamps(
+    root: &Path,
+    directory: &Path,
+    artifacts: &mut BTreeMap<PathBuf, SystemTime>,
+) {
+    for entry in std::fs::read_dir(directory).expect("read compiled cache") {
+        let entry = entry.expect("read compiled-cache entry");
+        let path = entry.path();
+        if path.is_dir() {
+            collect_artifact_timestamps(root, &path, artifacts);
+        } else {
+            let relative = path
+                .strip_prefix(root)
+                .expect("artifact is inside the cache")
+                .to_path_buf();
+            let modified = entry
+                .metadata()
+                .expect("read artifact metadata")
+                .modified()
+                .expect("read artifact timestamp");
+            artifacts.insert(relative, modified);
+        }
+    }
 }

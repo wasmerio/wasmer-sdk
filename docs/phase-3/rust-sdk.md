@@ -10,8 +10,11 @@ This phase implements the semantic Rust core beneath the UniFFI and
 
 - `Wasmer` client construction and shared shutdown state.
 - A project-local `.wasmer` cache by default, with a configurable root.
-- Separate package and compiled-module cache trees.
-- Compiled artifacts partitioned by native target and engine family.
+- Registry metadata cached for ten minutes, matching the Wasmer CLI policy.
+- Content-addressed WEBC blobs reused across fresh clients and processes.
+- Resolved registry packages reused in memory within one client.
+- Compiled artifacts persisted across native clients and partitioned by target,
+  engine family, engine fingerprint, and artifact format.
 - Registry package resolution.
 - Local package directories containing `wasmer.toml`.
 - Local package `[fs]` host mappings during spawned execution.
@@ -94,9 +97,10 @@ vertical slices rather than placeholder methods:
 - browser runtime construction and the browser File System API adapter;
 - Swift packaging and its handwritten veneer.
 
-Live streams deliberately do not use WASIX's existing unbounded pipe. Tokio
-duplex buffers impose a configurable queue bound and backpressure, while a
-separate write-time capture retains only the configured diagnostic limit.
+Live streams deliberately do not use WASIX's existing unbounded pipe. A
+byte-bounded, wake-based SDK pipe provides backpressure without a blocking
+mutex, while a separate write-time capture retains only the configured
+diagnostic limit.
 
 The provider-to-Wasmer adapter in this slice is native-only in behavior:
 Wasmer's synchronous metadata/open calls dispatch the asynchronous provider
@@ -113,10 +117,18 @@ must not block the JavaScript event loop.
 2. first-use compilation through Cranelift;
 3. finite stdin and captured stdout;
 4. persistent `/workspace` files;
-5. package and compiled-cache directory creation;
-6. dynamic package installation;
-7. package-as-entrypoint command selection; and
-8. write-time output truncation.
+5. native compilation artifacts are written on first execution;
+6. a fresh client deserializes the existing artifact without rewriting it;
+7. dynamic package installation;
+8. package-as-entrypoint command selection; and
+9. write-time output truncation.
+
+A focused client test uses a mock registry to prove that the first registry
+load fetches metadata and one WEBC, a repeated load in the same client is
+memory-only, and a fresh client resolves and loads the package with zero HTTP
+requests. The UniFFI crate repeats the two-client compilation test through its
+exported facade, proving that it inherits the Rust cache rather than creating a
+binding-specific cache.
 
 `tests/process.rs` additionally verifies:
 

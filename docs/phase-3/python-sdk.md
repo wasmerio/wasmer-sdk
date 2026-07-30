@@ -88,6 +88,9 @@ decoding stdout, while `output.stdout.text()` only decodes the retained bytes.
 `Wasmer()` inherits the Rust core's `.wasmer` cache root. Passing
 `cache_root=Path(...)` relocates both the package cache and target-separated
 compiled-artifact cache; the binding does not introduce a second cache format.
+Within that root, registry metadata has a short freshness window, WEBC blobs
+are content-addressed, and native compiled modules survive client and Python
+process restarts.
 
 ## Live processes
 

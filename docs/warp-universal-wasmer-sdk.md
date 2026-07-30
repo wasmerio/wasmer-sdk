@@ -131,10 +131,12 @@ Blocking WASIX work in JavaScript runs in a dynamic Web Worker pool using a shar
 
 The default cache is `.wasmer` at the project root and is configurable. It has two independent layers:
 
-- downloaded or locally normalized package artifacts; and
+- registry metadata plus content-addressed downloaded package artifacts; and
 - compiled artifacts partitioned by target, engine, and compatibility identity.
 
 Target partitioning is required because native Cranelift artifacts, browser WebAssembly artifacts, and future mobile artifacts are not interchangeable. Cache behavior is an implementation concern of `Wasmer`, not a second public package-management API.
+
+Native language bindings use the Rust cache directly. A UniFFI client therefore shares registry metadata, package blobs, and compiled artifacts with a Rust client that uses the same cache root.
 
 `wasmer.lock` is intentionally outside the initial proposal. Reproducible resolution is valuable, but introducing lockfile ownership before the package and cache contracts stabilize would couple several independent design decisions.
 

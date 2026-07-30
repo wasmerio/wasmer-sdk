@@ -7,10 +7,13 @@ use std::{
     },
 };
 
+#[cfg(feature = "sys")]
+use std::{collections::HashMap, sync::RwLock, time::Duration};
 use wasmer_config::package::PackageSource as WasmerPackageSource;
 #[cfg(feature = "sys")]
 use wasmer_wasix::runtime::{
     module_cache::{FileSystemCache, ModuleCache, SharedCache},
+    resolver::{BackendSource, MultiSource},
     task_manager::tokio::TokioTaskManager,
 };
 use wasmer_wasix::{
@@ -19,6 +22,9 @@ use wasmer_wasix::{
 };
 
 use crate::{Error, Package, PackageSource, Result, SandboxBuilder};
+
+#[cfg(feature = "sys")]
+const REGISTRY_QUERY_CACHE_TTL: Duration = Duration::from_mins(10);
 
 /// Persistent cache configuration.
 #[derive(Clone, Debug)]
@@ -75,6 +81,8 @@ pub(crate) struct ClientInner {
     #[cfg(feature = "sys")]
     pub(crate) tasks: Arc<TokioTaskManager>,
     pub(crate) output_bytes: usize,
+    #[cfg(feature = "sys")]
+    registry_packages: RwLock<HashMap<String, Package>>,
     closed: AtomicBool,
 }
 
@@ -96,15 +104,30 @@ impl Wasmer {
     /// HTTP client cannot be initialized.
     #[cfg(feature = "sys")]
     pub fn new(config: WasmerConfig) -> Result<Self> {
+        let http_client: Arc<dyn HttpClient + Send + Sync> =
+            Arc::new(wasmer_wasix::http::default_http_client().ok_or_else(|| {
+                Error::Initialization {
+                    message: "this target has no default HTTP client".to_owned(),
+                }
+            })?);
+        Self::new_with_http_client(config, http_client)
+    }
+
+    #[cfg(feature = "sys")]
+    fn new_with_http_client(
+        config: WasmerConfig,
+        http_client: Arc<dyn HttpClient + Send + Sync>,
+    ) -> Result<Self> {
         let cache_root = absolutize(config.cache.root)?;
         let package_cache = cache_root.join("cache-v1").join("packages");
+        let registry_cache = cache_root.join("cache-v1").join("registry");
         let compiled_cache = cache_root
             .join("cache-v1")
             .join("compiled")
             .join(target_identity())
             .join(engine_identity());
 
-        for directory in [&package_cache, &compiled_cache] {
+        for directory in [&package_cache, &registry_cache, &compiled_cache] {
             std::fs::create_dir_all(directory).map_err(|error| Error::Initialization {
                 message: format!(
                     "unable to create cache directory `{}`: {error}",
@@ -125,18 +148,22 @@ impl Wasmer {
                 })?;
             Arc::new(TokioTaskManager::new(tokio_runtime))
         };
-        let http_client: Arc<dyn HttpClient + Send + Sync> =
-            Arc::new(wasmer_wasix::http::default_http_client().ok_or_else(|| {
-                Error::Initialization {
-                    message: "this target has no default HTTP client".to_owned(),
-                }
-            })?);
-
         let module_cache = SharedCache::default()
             .with_fallback(FileSystemCache::new(compiled_cache, Arc::clone(&tasks)));
+        let mut source = MultiSource::new();
+        source.add_source(
+            BackendSource::new(
+                BackendSource::WASMER_PROD_ENDPOINT
+                    .parse()
+                    .expect("the Wasmer registry endpoint is valid"),
+                Arc::clone(&http_client),
+            )
+            .with_local_cache(registry_cache, REGISTRY_QUERY_CACHE_TTL),
+        );
         let mut runtime = PluggableRuntime::new(Arc::clone(&tasks) as Arc<_>);
         runtime
             .set_module_cache(module_cache)
+            .set_source(source)
             .set_package_loader(
                 BuiltinPackageLoader::new()
                     .with_cache_dir(package_cache)
@@ -149,6 +176,7 @@ impl Wasmer {
                 runtime: Arc::new(runtime),
                 tasks,
                 output_bytes: config.output_bytes,
+                registry_packages: RwLock::new(HashMap::new()),
                 closed: AtomicBool::new(false),
             }),
         })
@@ -254,7 +282,45 @@ impl Wasmer {
                         message: error.to_string(),
                     }
                 })?;
-                BinaryPackage::from_registry(&parsed, self.inner.runtime.as_ref()).await
+                #[cfg(feature = "sys")]
+                {
+                    let cache_key = parsed.to_string();
+                    if let Some(package) = self
+                        .inner
+                        .registry_packages
+                        .read()
+                        .map_err(|_| Error::InternalState {
+                            message: "the loaded-package cache lock is poisoned".to_owned(),
+                        })?
+                        .get(&cache_key)
+                        .cloned()
+                    {
+                        return Ok(package);
+                    }
+
+                    let binary = BinaryPackage::from_registry(&parsed, self.inner.runtime.as_ref())
+                        .await
+                        .map_err(|error| Error::PackageLoad {
+                            package_source: label,
+                            message: format!("{error:#}"),
+                        })?;
+                    let package = Package::from_binary(binary);
+                    let mut packages =
+                        self.inner
+                            .registry_packages
+                            .write()
+                            .map_err(|_| Error::InternalState {
+                                message: "the loaded-package cache lock is poisoned".to_owned(),
+                            })?;
+                    return Ok(packages
+                        .entry(cache_key)
+                        .or_insert_with(|| package.clone())
+                        .clone());
+                }
+                #[cfg(not(feature = "sys"))]
+                {
+                    BinaryPackage::from_registry(&parsed, self.inner.runtime.as_ref()).await
+                }
             }
             #[cfg(feature = "sys")]
             PackageSource::Path(path) if path.is_dir() => {
@@ -357,5 +423,186 @@ fn engine_identity() -> &'static str {
     #[cfg(not(any(feature = "sys", feature = "js")))]
     {
         "headless"
+    }
+}
+
+#[cfg(all(test, feature = "sys"))]
+mod tests {
+    use std::{
+        collections::VecDeque,
+        path::Path,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    use futures::future::BoxFuture;
+    use http::{HeaderMap, StatusCode};
+    use tempfile::TempDir;
+    use wasmer_wasix::{
+        http::{HttpClient, HttpRequest, HttpResponse},
+        runtime::resolver::WebcHash,
+    };
+
+    use super::{CacheConfig, Wasmer, WasmerConfig};
+
+    #[derive(Debug, Default)]
+    struct MockHttpClient {
+        responses: Mutex<VecDeque<HttpResponse>>,
+        requests: AtomicUsize,
+    }
+
+    impl MockHttpClient {
+        fn new(responses: impl IntoIterator<Item = HttpResponse>) -> Self {
+            Self {
+                responses: Mutex::new(responses.into_iter().collect()),
+                requests: AtomicUsize::new(0),
+            }
+        }
+
+        fn requests(&self) -> usize {
+            self.requests.load(Ordering::Acquire)
+        }
+    }
+
+    impl HttpClient for MockHttpClient {
+        fn request(&self, _request: HttpRequest) -> BoxFuture<'_, anyhow::Result<HttpResponse>> {
+            self.requests.fetch_add(1, Ordering::AcqRel);
+            let response = self
+                .responses
+                .lock()
+                .expect("mock response lock poisoned")
+                .pop_front();
+            Box::pin(
+                async move { response.ok_or_else(|| anyhow::anyhow!("unexpected HTTP request")) },
+            )
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn registry_metadata_and_packages_survive_a_fresh_client() {
+        let fixture = TempDir::new().expect("create package fixture");
+        let webc = registry_fixture(fixture.path());
+        let hash = WebcHash::sha256(&webc);
+        let container =
+            wasmer_package::utils::from_bytes(webc.clone()).expect("decode package fixture");
+        let manifest = serde_json::to_string(container.manifest()).expect("serialize manifest");
+        let release = serde_json::json!({
+            "version": "1.0.0",
+            "isArchived": false,
+            "v2": {
+                "webcManifest": manifest,
+                "piritaDownloadUrl": "https://packages.test/cache.webc",
+                "piritaSha256Hash": hash.as_hex(),
+            },
+            "v3": {
+                "webcManifest": manifest,
+                "piritaDownloadUrl": "https://packages.test/cache.webc",
+                "piritaSha256Hash": hash.as_hex(),
+            },
+        });
+        let registry_response = HttpResponse {
+            body: Some(
+                serde_json::to_vec(&serde_json::json!({
+                    "data": {
+                        "getPackage": {
+                            "packageName": "cache",
+                            "namespace": "sdk-test",
+                            "versions": [release],
+                        },
+                        "info": {
+                            "defaultFrontend": "https://wasmer.io/",
+                        },
+                    },
+                }))
+                .expect("serialize registry response"),
+            ),
+            redirected: false,
+            status: StatusCode::OK,
+            headers: HeaderMap::new(),
+        };
+        let package_response = HttpResponse {
+            body: Some(webc.to_vec()),
+            redirected: false,
+            status: StatusCode::OK,
+            headers: HeaderMap::new(),
+        };
+
+        let state = TempDir::new().expect("create cache fixture");
+        let config = WasmerConfig {
+            cache: CacheConfig {
+                root: state.path().join(".wasmer"),
+            },
+            ..WasmerConfig::default()
+        };
+        let online = Arc::new(MockHttpClient::new([registry_response, package_response]));
+        let client = Wasmer::new_with_http_client(config.clone(), online.clone());
+        let client = client.expect("create online client");
+        let first = client
+            .packages()
+            .load("sdk-test/cache@1.0.0")
+            .await
+            .expect("load registry package");
+        let in_memory = client
+            .packages()
+            .load("sdk-test/cache@1.0.0")
+            .await
+            .expect("reuse loaded registry package");
+
+        assert!(Arc::ptr_eq(&first.inner, &in_memory.inner));
+        assert_eq!(online.requests(), 2);
+        drop(first);
+        drop(in_memory);
+        drop(client);
+
+        let offline = Arc::new(MockHttpClient::default());
+        let client = Wasmer::new_with_http_client(config, offline.clone())
+            .expect("create cache-only client");
+        let cached = client
+            .packages()
+            .load("sdk-test/cache@1.0.0")
+            .await
+            .expect("load registry package entirely from disk");
+
+        assert_eq!(cached.id(), "sdk-test/cache@1.0.0");
+        assert_eq!(offline.requests(), 0);
+        assert!(state.path().join(".wasmer/cache-v1/registry").is_dir());
+        assert!(
+            state
+                .path()
+                .join(".wasmer/cache-v1/packages")
+                .join(format!("{}.bin", hash.as_hex()))
+                .is_file()
+        );
+    }
+
+    fn registry_fixture(directory: &Path) -> bytes::Bytes {
+        let manifest = r#"
+[package]
+name = "sdk-test/cache"
+version = "1.0.0"
+description = "SDK cache fixture"
+entrypoint = "echo"
+
+[[module]]
+name = "echo"
+source = "echo.wasm"
+abi = "wasi"
+
+[[command]]
+name = "echo"
+module = "echo"
+"#;
+        std::fs::write(directory.join("wasmer.toml"), manifest).expect("write manifest");
+        std::fs::write(
+            directory.join("echo.wasm"),
+            wat::parse_str("(module (func (export \"_start\")))").expect("compile fixture"),
+        )
+        .expect("write module");
+        wasmer_package::package::Package::from_manifest(directory.join("wasmer.toml"))
+            .expect("build package")
+            .serialize()
+            .expect("serialize package")
     }
 }

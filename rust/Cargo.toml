@@ -39,6 +39,8 @@ tokio = { version = "1.49", features = ["fs", "rt-multi-thread"] }
 web-sys = { version = "0.3", features = ["Window"], optional = true }
 
 [dev-dependencies]
+http = "1.4"
+serde_json = "1.0"
 tempfile = "3.23"
 wat = "1.244"
 

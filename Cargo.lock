@@ -5200,6 +5200,8 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "http",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
@@ -5259,9 +5261,12 @@ dependencies = [
 name = "wasmer-sdk-uniffi"
 version = "0.1.0"
 dependencies = [
+ "futures",
+ "tempfile",
  "tokio",
  "uniffi",
  "wasmer-sdk",
+ "wat",
 ]
 
 [[package]]

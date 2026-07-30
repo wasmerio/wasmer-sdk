@@ -735,3 +735,132 @@ impl From<FileType> for FileKind {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::{BTreeMap, HashMap},
+        path::{Path, PathBuf},
+        sync::Arc,
+        time::SystemTime,
+    };
+
+    use tempfile::TempDir;
+
+    use super::{ClientOptions, NetworkMode, RunOptions, WasmerCore};
+
+    #[test]
+    fn uniffi_clients_reuse_the_native_compilation_cache() {
+        let fixture = TempDir::new().expect("create package fixture");
+        write_package(fixture.path());
+        let state = TempDir::new().expect("create cache fixture");
+        let options = ClientOptions {
+            cache_root: Some(state.path().join(".wasmer").display().to_string()),
+            output_bytes: None,
+        };
+
+        run_fixture(&options, fixture.path());
+        let compiled = state.path().join(".wasmer/cache-v1/compiled");
+        let first_artifacts = artifact_timestamps(&compiled);
+        assert!(
+            !first_artifacts.is_empty(),
+            "the UniFFI client should persist native compilation artifacts"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        run_fixture(&options, fixture.path());
+        assert_eq!(
+            artifact_timestamps(&compiled),
+            first_artifacts,
+            "a fresh UniFFI client should deserialize without rewriting the artifact"
+        );
+    }
+
+    fn run_fixture(options: &ClientOptions, package_path: &Path) {
+        futures::executor::block_on(async {
+            let client = WasmerCore::new(options.clone()).expect("create UniFFI client");
+            let package = client
+                .load_package_path(package_path.display().to_string())
+                .await
+                .expect("load local package");
+            let sandbox = client
+                .create_sandbox(
+                    vec![Arc::clone(&package)],
+                    HashMap::new(),
+                    HashMap::new(),
+                    NetworkMode::Disabled,
+                )
+                .await
+                .expect("create sandbox");
+            let command = sandbox.command_package(package, Vec::new(), None, HashMap::new());
+            let output = command
+                .run(RunOptions {
+                    input: None,
+                    timeout_ms: None,
+                    output_bytes: None,
+                })
+                .await
+                .expect("run fixture");
+            assert_eq!(output.exit_code, 0);
+            sandbox.close().await.expect("close sandbox");
+            client.close().await.expect("close client");
+        });
+    }
+
+    fn write_package(directory: &Path) {
+        let manifest = r#"
+[package]
+name = "sdk-test/uniffi-cache"
+version = "1.0.0"
+description = "UniFFI cache fixture"
+entrypoint = "fixture"
+
+[[module]]
+name = "fixture"
+source = "fixture.wasm"
+abi = "wasi"
+
+[[command]]
+name = "fixture"
+module = "fixture"
+"#;
+        std::fs::write(directory.join("wasmer.toml"), manifest).expect("write manifest");
+        std::fs::write(
+            directory.join("fixture.wasm"),
+            wat::parse_str("(module (memory (export \"memory\") 1) (func (export \"_start\")))")
+                .expect("compile fixture"),
+        )
+        .expect("write fixture");
+    }
+
+    fn artifact_timestamps(root: &Path) -> BTreeMap<PathBuf, SystemTime> {
+        let mut artifacts = BTreeMap::new();
+        collect_artifact_timestamps(root, root, &mut artifacts);
+        artifacts
+    }
+
+    fn collect_artifact_timestamps(
+        root: &Path,
+        directory: &Path,
+        artifacts: &mut BTreeMap<PathBuf, SystemTime>,
+    ) {
+        for entry in std::fs::read_dir(directory).expect("read compiled cache") {
+            let entry = entry.expect("read compiled-cache entry");
+            let path = entry.path();
+            if path.is_dir() {
+                collect_artifact_timestamps(root, &path, artifacts);
+            } else {
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("artifact is inside the cache")
+                    .to_path_buf();
+                let modified = entry
+                    .metadata()
+                    .expect("read artifact metadata")
+                    .modified()
+                    .expect("read artifact timestamp");
+                artifacts.insert(relative, modified);
+            }
+        }
+    }
+}
