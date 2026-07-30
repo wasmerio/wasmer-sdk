@@ -47,6 +47,12 @@ Run a Python package:
 PYTHONPATH=python/src python3 python/examples/python_package.py
 ```
 
+Run shell tools, Python, Edge.js, and PHP in one sandbox:
+
+```console
+PYTHONPATH=python/src python3 python/examples/multiple_runtimes.py
+```
+
 Serve HTTP with `wasmer/edgejs-quickjs`:
 
 ```console
