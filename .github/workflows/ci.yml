@@ -63,16 +63,13 @@ jobs:
         working-directory: js
         run: npm ci
 
-      - name: Install browser
+      - name: Build
         working-directory: js
-        run: npx playwright install --with-deps chromium
+        run: npm run build
 
-      - name: Build and test
+      - name: Test
         working-directory: js
-        run: |
-          npm run build
-          npm test
-          npm run test:browser
+        run: npm test
 
       - name: Test Edge.js
         working-directory: js
@@ -86,6 +83,46 @@ jobs:
             fi
             sleep 10
           done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasmer-sdk-js-${{ github.sha }}
+          path: |
+            js/dist
+            js/pkg
+          if-no-files-found: error
+          retention-days: 1
+
+  browser:
+    name: Browser
+    needs: javascript
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+
+      - name: Install JavaScript dependencies
+        working-directory: js
+        run: npm ci
+
+      - name: Install browser
+        working-directory: js
+        run: npx playwright install --with-deps chromium
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasmer-sdk-js-${{ github.sha }}
+          path: js
+
+      - name: Test Python in the browser
+        working-directory: js
+        run: npm run test:browser
 
   python:
     name: Python

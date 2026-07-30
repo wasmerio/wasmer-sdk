@@ -64,11 +64,10 @@ test("reuses commands and preserves filesystem and stream semantics", async () =
       stdout: "discard",
       stderr: "discard",
     });
-    const terminationStarted = performance.now();
-    await terminable.terminate();
-    assert.ok(
-      performance.now() - terminationStarted < 750,
-      "terminate() waited through its default grace period",
+    await withDeadline(
+      terminable.terminate({ gracePeriodMs: 10_000 }),
+      2_000,
+      "terminate() waited through its configured grace period",
     );
     assert.equal((await terminable.wait()).reason, "terminated");
 
@@ -119,4 +118,16 @@ async function reservePort() {
     server.close((error) => (error ? reject(error) : resolve())),
   );
   return address.port;
+}
+
+async function withDeadline(promise, timeoutMs, message) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
