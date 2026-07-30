@@ -1,6 +1,6 @@
 {
   "name": "@wasmer/sdk2",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A portable, package-first sandbox SDK powered by Wasmer",
   "type": "module",
   "license": "MIT",
