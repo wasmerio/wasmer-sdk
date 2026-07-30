@@ -2,7 +2,7 @@ use std::{
     io,
     pin::Pin,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicU8, Ordering},
     },
     task::{Context, Poll},
@@ -10,7 +10,7 @@ use std::{
 };
 
 use futures::future::Either;
-use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use wasmer_wasix::{
     os::task::{TaskJoinHandle, process::WasiProcess},
     runtime::task_manager::VirtualTaskManager,
@@ -20,30 +20,28 @@ use wasmer_wasix_types::wasi::ExitCode;
 use wasmer_wasix_types::wasi::Signal;
 
 use crate::{
-    CapturedOutput, Error, ExitReason, ExitStatus, Output, Result, capture::CaptureHandle,
+    CapturedOutput, Error, ExitReason, ExitStatus, Output, Result,
+    capture::CaptureHandle,
+    stream::{PipeCloser, PipeReader, PipeWriter},
 };
 
 /// Writable live stdin for a spawned guest process.
 #[derive(Debug)]
 pub struct ProcessStdin {
-    inner: Arc<Mutex<Option<DuplexStream>>>,
+    inner: Option<PipeWriter>,
+    closer: PipeCloser,
 }
 
 impl ProcessStdin {
-    pub(crate) fn new(inner: DuplexStream) -> Self {
+    pub(crate) fn new(inner: PipeWriter, closer: PipeCloser) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(Some(inner))),
+            inner: Some(inner),
+            closer,
         }
     }
 
-    pub(crate) fn clone_handle(&self) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-        }
-    }
-
-    pub(crate) fn close_now(&self) {
-        self.inner.lock().expect("stdin lock poisoned").take();
+    pub(crate) fn closer(&self) -> PipeCloser {
+        self.closer.clone()
     }
 
     /// Close the stream and deliver EOF to the guest.
@@ -62,29 +60,29 @@ impl AsyncWrite for ProcessStdin {
         cx: &mut Context<'_>,
         bytes: &[u8],
     ) -> Poll<io::Result<usize>> {
-        let mut inner = self.inner.lock().expect("stdin lock poisoned");
-        let Some(stream) = inner.as_mut() else {
+        let this = self.get_mut();
+        let Some(stream) = this.inner.as_mut() else {
             return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
         };
         Pin::new(stream).poll_write(cx, bytes)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        let mut inner = self.inner.lock().expect("stdin lock poisoned");
-        let Some(stream) = inner.as_mut() else {
+        let this = self.get_mut();
+        let Some(stream) = this.inner.as_mut() else {
             return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
         };
         Pin::new(stream).poll_flush(cx)
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        let mut inner = self.inner.lock().expect("stdin lock poisoned");
-        let Some(stream) = inner.as_mut() else {
+        let this = self.get_mut();
+        let Some(stream) = this.inner.as_mut() else {
             return Poll::Ready(Ok(()));
         };
         match Pin::new(stream).poll_shutdown(cx) {
             Poll::Ready(result) => {
-                inner.take();
+                this.inner.take();
                 Poll::Ready(result)
             }
             Poll::Pending => Poll::Pending,
@@ -97,11 +95,11 @@ macro_rules! process_output_stream {
         #[doc = $description]
         #[derive(Debug)]
         pub struct $name {
-            inner: DuplexStream,
+            inner: PipeReader,
         }
 
         impl $name {
-            pub(crate) fn new(inner: DuplexStream) -> Self {
+            pub(crate) fn new(inner: PipeReader) -> Self {
                 Self { inner }
             }
         }
@@ -154,7 +152,7 @@ impl Process {
         stdout_capture: CaptureHandle,
         stderr_capture: CaptureHandle,
     ) -> Self {
-        let stdin_control = stdin.as_ref().map(ProcessStdin::clone_handle);
+        let stdin_control = stdin.as_ref().map(ProcessStdin::closer);
         let control = Arc::new(ProcessControl {
             process,
             stdin: stdin_control,
@@ -371,7 +369,7 @@ const EXIT_TIMED_OUT: u8 = 3;
 #[derive(Debug)]
 pub(crate) struct ProcessControl {
     process: WasiProcess,
-    stdin: Option<ProcessStdin>,
+    stdin: Option<PipeCloser>,
     /// The first SDK-requested exit, if any. Once set it is never replaced,
     /// so a terminate that escalates to a kill still reports `Terminated`.
     exit: AtomicU8,
@@ -384,7 +382,7 @@ impl ProcessControl {
         }
         self.process.signal_process(Signal::Sigterm);
         if let Some(stdin) = &self.stdin {
-            stdin.close_now();
+            stdin.close();
         }
     }
 
@@ -394,7 +392,7 @@ impl ProcessControl {
         }
         self.force_exit();
         if let Some(stdin) = &self.stdin {
-            stdin.close_now();
+            stdin.close();
         }
     }
 
@@ -404,7 +402,7 @@ impl ProcessControl {
         }
         self.force_exit();
         if let Some(stdin) = &self.stdin {
-            stdin.close_now();
+            stdin.close();
         }
     }
 

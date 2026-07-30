@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use tokio::io::{AsyncWriteExt, DuplexStream};
+use tokio::io::AsyncWriteExt;
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 use wasmer_wasix::bin_factory::BinaryPackageCommand;
 use wasmer_wasix::{
@@ -18,7 +18,7 @@ use crate::{
     ProcessStdout, Result, Sandbox,
     capture::{CaptureFile, CaptureHandle},
     fs::validate_guest_path,
-    stream::{DuplexVirtualFile, RetainedOutput},
+    stream::{PipeReader, PipeVirtualFile, RetainedOutput, bounded_pipe},
 };
 
 /// Live stdio configuration for [`Command::spawn`].
@@ -218,11 +218,11 @@ impl Command {
 
         let (guest_stdin, process_stdin) = match self.stdin {
             Stdio::Piped => {
-                let (guest, user) = tokio::io::duplex(self.stream_bytes);
+                let (guest, user, closer) = bounded_pipe(self.stream_bytes);
                 (
-                    Box::new(DuplexVirtualFile::new(guest))
+                    Box::new(PipeVirtualFile::reader(guest))
                         as Box<dyn virtual_fs::VirtualFile + Send + Sync>,
-                    Some(ProcessStdin::new(user)),
+                    Some(ProcessStdin::new(user, closer)),
                 )
             }
             Stdio::Capture | Stdio::Null => (
@@ -471,11 +471,11 @@ fn guest_output_file(
     stream_bytes: usize,
 ) -> (
     Box<dyn virtual_fs::VirtualFile + Send + Sync>,
-    Option<DuplexStream>,
+    Option<PipeReader>,
 ) {
     match mode {
         Stdio::Piped => {
-            let (guest, user) = tokio::io::duplex(stream_bytes);
+            let (user, guest, _closer) = bounded_pipe(stream_bytes);
             (
                 Box::new(RetainedOutput::new(guest, capture.clone())),
                 Some(user),
