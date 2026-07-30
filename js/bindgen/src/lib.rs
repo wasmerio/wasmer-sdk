@@ -9,6 +9,7 @@
 )]
 
 mod node_network;
+mod package_cache;
 mod task_manager;
 mod tasks;
 mod worker_utils;
@@ -21,6 +22,7 @@ use std::{
 use js_sys::Uint8Array;
 use node_network::{NodeNetworkBridge, NodeNetworking};
 use once_cell::sync::Lazy;
+use package_cache::{HostPackageCache, NodeCacheBridge};
 use serde::Deserialize;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -32,6 +34,7 @@ use wasmer_sdk::{
     ProcessStdin, ProcessStdout, Sandbox, SandboxBuilder, Stdio, Wasmer, WasmerConfig,
 };
 use wasmer_wasix::PluggableRuntime;
+use wasmer_wasix::runtime::{package_loader::PackageCache, resolver::QueryCache};
 
 pub use tasks::ThreadPoolWorker;
 
@@ -57,6 +60,15 @@ pub fn set_worker_url(url: String) {
 #[serde(rename_all = "camelCase")]
 struct ClientOptions {
     output_bytes: Option<f64>,
+    cache: Option<ClientCacheOptions>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientCacheOptions {
+    mode: Option<String>,
+    namespace: Option<String>,
+    read_only: Option<bool>,
 }
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -74,6 +86,7 @@ impl JsWasmer {
     pub fn create(
         options: JsValue,
         node_network: Option<NodeNetworkBridge>,
+        node_cache: Option<NodeCacheBridge>,
     ) -> Result<Self, JsValue> {
         let options: ClientOptions = if options.is_null() || options.is_undefined() {
             ClientOptions::default()
@@ -93,7 +106,43 @@ impl JsWasmer {
                 .unwrap_or(16 * 1024 * 1024),
             ..WasmerConfig::default()
         };
-        let inner = Wasmer::from_js_runtime(&config, runtime).map_err(sdk_error)?;
+        let cache = match options
+            .cache
+            .as_ref()
+            .and_then(|cache| cache.mode.as_deref())
+        {
+            Some("disabled" | "memory") => None,
+            Some("node") => {
+                let bridge = node_cache.as_ref().ok_or_else(|| {
+                    custom_error(
+                        "INITIALIZATION_ERROR",
+                        "the Node package cache bridge was not provided",
+                    )
+                })?;
+                Some(Arc::new(HostPackageCache::node(bridge)))
+            }
+            Some("browser") | None => Some(Arc::new(HostPackageCache::browser(
+                options
+                    .cache
+                    .as_ref()
+                    .and_then(|cache| cache.namespace.as_deref()),
+                options
+                    .cache
+                    .as_ref()
+                    .and_then(|cache| cache.read_only)
+                    .unwrap_or(false),
+            ))),
+            Some(other) => {
+                return Err(custom_error(
+                    "INVALID_ARGUMENT",
+                    &format!("unsupported cache mode `{other}`"),
+                ));
+            }
+        };
+        let query_cache = cache.clone().map(|cache| -> Arc<dyn QueryCache> { cache });
+        let package_cache = cache.map(|cache| -> Arc<dyn PackageCache> { cache });
+        let inner = Wasmer::from_js_runtime(&config, runtime, query_cache, package_cache)
+            .map_err(sdk_error)?;
         Ok(Self { inner, tasks })
     }
 

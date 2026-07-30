@@ -1,22 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { Wasmer } from "../dist/node.js";
 import { nodeWorkerStats } from "../dist/node-worker-adapter.js";
 
+const runtimeCache = fileURLToPath(new URL("../../.wasmer", import.meta.url));
+
 test("runs blocking WASIX processes concurrently on separate workers", async () => {
-  const client = new Wasmer();
-  const python = await client.packages.load("python/python@3.12");
+  const client = new Wasmer({ cache: { directory: runtimeCache } });
+  const hello = await client.packages.load("wasmer/hello-world@0.2.5");
   const sandbox = await client.sandboxes.create({
-    packages: [python],
+    packages: [hello],
   });
 
   try {
     const first = await sandbox
-      .command("python", ["--version"])
+      .command("hello")
       .spawn({ stdout: "capture", stderr: "capture" });
     const second = await sandbox
-      .command("python", ["--version"])
+      .command("hello")
       .spawn({ stdout: "capture", stderr: "capture" });
 
     const [firstOutput, secondOutput] = await Promise.all([
@@ -24,8 +27,8 @@ test("runs blocking WASIX processes concurrently on separate workers", async () 
       second.wait({ check: true }),
     ]);
 
-    assert.match(firstOutput.text(), /^Python 3\./);
-    assert.match(secondOutput.text(), /^Python 3\./);
+    assert.match(firstOutput.text(), /Hello from Wasmer/);
+    assert.match(secondOutput.text(), /Hello from Wasmer/);
     assert.ok(nodeWorkerStats().workersCreated >= 2);
   } finally {
     await sandbox.close();

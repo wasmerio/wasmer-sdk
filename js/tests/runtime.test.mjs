@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
+import { readFile, stat } from "node:fs/promises";
 import net from "node:net";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { Wasmer } from "../dist/node.js";
 
+const runtimeCache = fileURLToPath(new URL("../../.wasmer", import.meta.url));
+
 test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
-  const client = new Wasmer();
+  const client = new Wasmer({ cache: { directory: runtimeCache } });
   const sandbox = await client.sandboxes.create({
     packages: ["python/python@3.13.5"],
   });
@@ -17,6 +22,41 @@ test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   assert.ok(output.ok);
   await sandbox.close();
   await client.close();
+
+  const registryEntry = JSON.parse(
+    await readFile(
+      join(runtimeCache, "cache-v1", "registry", "python#python"),
+      "utf8",
+    ),
+  );
+  assert.equal(registryEntry.package_name, "python/python");
+  assert.ok(Number.isSafeInteger(registryEntry.unix_timestamp));
+  assert.equal(
+    (
+      await stat(
+        join(
+          runtimeCache,
+          "cache-v1",
+          "packages",
+          "c03ebe0946e66edf598fd7a1f192101f60e4e9c0095aecd04e049989692bdcab.bin",
+        ),
+      )
+    ).size,
+    44_680_028,
+  );
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error("persistent package cache attempted network access");
+  };
+  const cachedClient = new Wasmer({ cache: { directory: runtimeCache } });
+  try {
+    const cached = await cachedClient.packages.load("python/python@3.13.5");
+    assert.equal(cached.id, "python/python@3.13.5");
+  } finally {
+    await cachedClient.close();
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("keeps Wasmer.create as an eager compatibility factory", async () => {
@@ -26,7 +66,7 @@ test("keeps Wasmer.create as an eager compatibility factory", async () => {
 });
 
 test("reuses commands and preserves filesystem and stream semantics", async () => {
-  const client = new Wasmer();
+  const client = new Wasmer({ cache: { directory: runtimeCache } });
   let sandbox;
   try {
     sandbox = await client.sandboxes.create({

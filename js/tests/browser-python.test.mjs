@@ -27,6 +27,7 @@ test(
           written: "HELLO BROWSER",
           lines: ["STREAMED THROUGH BROWSER"],
           streamedReason: "exited",
+          persistentCacheHit: true,
         });
         return;
       } catch (error) {
@@ -160,12 +161,35 @@ async function runBrowserAttempt(signal, attempt) {
               process.wait({ check: true }),
             );
 
+            const persistentCacheHit = await stage(
+              "persistent-cache",
+              async () => {
+                const originalFetch = globalThis.fetch;
+                globalThis.fetch = () =>
+                  Promise.reject(
+                    new Error("persistent package cache attempted network access"),
+                  );
+                const cachedClient = new Wasmer();
+                try {
+                  const cached = await cachedClient.packages.load(
+                    "python/python@=0.2.0",
+                  );
+                  return cached.id === python.id;
+                } finally {
+                  await cachedClient.close();
+                  globalThis.fetch = originalFetch;
+                }
+              },
+              packageLoadTimeoutMs,
+            );
+
             return {
               crossOriginIsolated: globalThis.crossOriginIsolated,
               output: output.text(),
               written,
               lines,
               streamedReason: streamed.reason,
+              persistentCacheHit,
             };
           } finally {
             if (sandbox) {

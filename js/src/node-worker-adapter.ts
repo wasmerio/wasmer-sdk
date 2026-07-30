@@ -7,6 +7,11 @@ import {
   nodeNetworkBridge,
   type NodeNetworkMethod,
 } from "./node-network.js";
+import {
+  dispatchNodeCacheCall,
+  nodePackageCache,
+  type NodeCacheMethod,
+} from "./node-cache.js";
 import { NETWORK_RPC_CONTROL_BYTES } from "./node-network-rpc.js";
 
 interface WorkerEvent<T> {
@@ -19,6 +24,14 @@ interface NetworkRequest {
   method: NodeNetworkMethod;
   args: unknown[];
   response: SharedArrayBuffer;
+}
+
+interface CacheRequest {
+  type: "wasmer-cache-rpc";
+  cacheId: number;
+  requestId: number;
+  method: NodeCacheMethod;
+  args: unknown[];
 }
 
 let workersCreated = 0;
@@ -59,6 +72,8 @@ export class NodeWorkerAdapter {
     this.#worker.on("message", (data) => {
       if (isNetworkRequest(data)) {
         void respondToNetworkRequest(data);
+      } else if (isCacheRequest(data)) {
+        void respondToCacheRequest(this.#worker, data);
       } else {
         this.onmessage?.({ data });
       }
@@ -87,6 +102,53 @@ export class NodeWorkerAdapter {
   terminate(): void {
     this.#terminating = true;
     void this.#worker.terminate();
+  }
+}
+
+function isCacheRequest(value: unknown): value is CacheRequest {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { type?: unknown }).type === "wasmer-cache-rpc"
+  );
+}
+
+async function respondToCacheRequest(
+  worker: NodeWorker,
+  request: CacheRequest,
+): Promise<void> {
+  try {
+    const result = await dispatchNodeCacheCall(
+      nodePackageCache(request.cacheId),
+      request.method,
+      request.args,
+    );
+    if (result instanceof Uint8Array) {
+      const bytes = Uint8Array.from(result);
+      worker.postMessage(
+        {
+          type: "wasmer-cache-rpc-response",
+          requestId: request.requestId,
+          ok: true,
+          value: bytes,
+        },
+        [bytes.buffer],
+      );
+    } else {
+      worker.postMessage({
+        type: "wasmer-cache-rpc-response",
+        requestId: request.requestId,
+        ok: true,
+        value: result,
+      });
+    }
+  } catch (error) {
+    worker.postMessage({
+      type: "wasmer-cache-rpc-response",
+      requestId: request.requestId,
+      ok: false,
+      error: String(error),
+    });
   }
 }
 

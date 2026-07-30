@@ -4,12 +4,14 @@ import {
   NETWORK_RPC_CONTROL_BYTES,
   networkResponseBufferBytes,
 } from "./node-network-rpc.js";
+import type { NodeCacheMethod } from "./node-cache.js";
 
 if (!parentPort) throw new Error("Wasmer SDK worker has no parent port");
 const port: NonNullable<typeof parentPort> = parentPort;
 
 Error.stackTraceLimit = 50;
 installNetworkProxy();
+installCacheProxy();
 
 Object.defineProperty(globalThis, "postMessage", {
   configurable: true,
@@ -22,6 +24,14 @@ let worker:
     }
   | undefined;
 const pendingMessages: unknown[] = [];
+let nextCacheRequestId = 1;
+const pendingCacheRequests = new Map<
+  number,
+  {
+    resolve(value: unknown): void;
+    reject(error: Error): void;
+  }
+>();
 
 port.on("message", async (data) => {
   try {
@@ -33,6 +43,15 @@ port.on("message", async (data) => {
 });
 
 async function handleMessage(data: any): Promise<void> {
+  if (data?.type === "wasmer-cache-rpc-response") {
+    const pending = pendingCacheRequests.get(data.requestId);
+    if (!pending) return;
+    pendingCacheRequests.delete(data.requestId);
+    if (data.ok) pending.resolve(data.value);
+    else pending.reject(new Error(data.error));
+    return;
+  }
+
   if (data?.type === "init") {
     const sdk = await import(data.sdkUrl);
     await sdk.default({
@@ -49,6 +68,37 @@ async function handleMessage(data: any): Promise<void> {
 
   if (worker) await worker.handle(data);
   else pendingMessages.push(data);
+}
+
+function installCacheProxy(): void {
+  const scope = globalThis as Record<string, unknown>;
+  scope.__wasmerNodeCacheGet = (cacheId: number, path: string) =>
+    callCache(cacheId, "get", [path]);
+  scope.__wasmerNodeCachePut = (
+    cacheId: number,
+    path: string,
+    bytes: Uint8Array,
+  ) => callCache(cacheId, "put", [path, bytes.slice()]);
+  scope.__wasmerNodeCacheRemove = (cacheId: number, path: string) =>
+    callCache(cacheId, "remove", [path]);
+}
+
+function callCache(
+  cacheId: number,
+  method: NodeCacheMethod,
+  args: unknown[],
+): Promise<unknown> {
+  const requestId = nextCacheRequestId++;
+  return new Promise((resolve, reject) => {
+    pendingCacheRequests.set(requestId, { resolve, reject });
+    port.postMessage({
+      type: "wasmer-cache-rpc",
+      cacheId,
+      requestId,
+      method,
+      args,
+    });
+  });
 }
 
 function installNetworkProxy(): void {

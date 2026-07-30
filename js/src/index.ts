@@ -10,6 +10,20 @@ import init, {
 export interface WasmerOptions {
   outputBytes?: number;
   wasm?: Parameters<typeof init>[0];
+  /**
+   * Persistent package and registry caching. Browsers use an origin-scoped
+   * cache namespace; Node uses `directory`, which defaults to `.wasmer`.
+   */
+  cache?: false | "memory" | CacheOptions;
+}
+
+export interface CacheOptions {
+  /** Node-only cache root, resolved when the client is created. */
+  directory?: string;
+  /** Logical browser cache namespace. */
+  namespace?: string;
+  /** Read existing entries without writing new ones. */
+  readOnly?: boolean;
 }
 
 export type PackageSource = string | Uint8Array | Package;
@@ -239,7 +253,10 @@ export class Wasmer {
       });
     await browserInitialization;
     setSDKUrl(new URL("../pkg/wasmer_sdk_js.js", import.meta.url).href);
-    return WasmerCore.create({ outputBytes: options.outputBytes });
+    return WasmerCore.create({
+      outputBytes: options.outputBytes,
+      cache: browserCacheOptions(options.cache),
+    });
   }
 
   /** Wait for the target runtime to finish initializing. */
@@ -317,6 +334,24 @@ export class Wasmer {
     const implementation = this.constructor as typeof Wasmer;
     return rethrow((this.#core ??= implementation.initializeCore(this.#options)));
   }
+}
+
+function browserCacheOptions(
+  cache: WasmerOptions["cache"],
+): { mode: string; namespace?: string; readOnly?: boolean } {
+  if (cache === false) return { mode: "disabled" };
+  if (cache === "memory") return { mode: "memory" };
+  if (cache?.directory !== undefined) {
+    throw new WasmerError(
+      "`cache.directory` is only available from the Node entrypoint",
+      "INVALID_ARGUMENT",
+    );
+  }
+  return {
+    mode: "browser",
+    namespace: cache?.namespace,
+    readOnly: cache?.readOnly,
+  };
 }
 
 class PackagesService implements Packages {

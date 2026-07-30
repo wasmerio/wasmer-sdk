@@ -3,8 +3,13 @@ import { readFile } from "node:fs/promises";
 import init, * as core from "../pkg/wasmer_sdk_js.js";
 import {
   Wasmer as BrowserWasmer,
+  WasmerError,
   type WasmerOptions,
 } from "./index.js";
+import {
+  installNodeCacheGlobals,
+  NodePackageCache,
+} from "./node-cache.js";
 import {
   installNodeNetworkGlobals,
   NodeNetworkBridge,
@@ -15,6 +20,7 @@ export * from "./index.js";
 
 let nodeInitialization: Promise<void> | undefined;
 const nodeNetworks = new WeakMap<core.WasmerCore, NodeNetworkBridge>();
+const nodeCaches = new WeakMap<core.WasmerCore, NodePackageCache>();
 
 /**
  * Node entrypoint. WASIX TCP listeners, outbound TCP connections, and DNS are
@@ -37,15 +43,35 @@ export class Wasmer extends BrowserWasmer {
         throw error;
       });
     await nodeInitialization;
-    const network = new NodeNetworkBridge();
     installNodeNetworkGlobals();
+    installNodeCacheGlobals();
     installNodeWorkers();
-    const client = core.WasmerCore.create(
-      { outputBytes: options.outputBytes },
-      network,
-    );
-    nodeNetworks.set(client, network);
-    return client;
+    const cache = createNodeCache(options.cache);
+    const network = new NodeNetworkBridge();
+    try {
+      const client = core.WasmerCore.create(
+        {
+          outputBytes: options.outputBytes,
+          cache: {
+            mode:
+              options.cache === false
+                ? "disabled"
+                : options.cache === "memory"
+                  ? "memory"
+                  : "node",
+          },
+        },
+        network,
+        cache,
+      );
+      nodeNetworks.set(client, network);
+      if (cache) nodeCaches.set(client, cache);
+      return client;
+    } catch (error) {
+      network.close();
+      cache?.close();
+      throw error;
+    }
   }
 
   protected override async closeCore(client: core.WasmerCore): Promise<void> {
@@ -54,8 +80,26 @@ export class Wasmer extends BrowserWasmer {
     } finally {
       nodeNetworks.get(client)?.close();
       nodeNetworks.delete(client);
+      nodeCaches.get(client)?.close();
+      nodeCaches.delete(client);
     }
   }
+}
+
+function createNodeCache(
+  options: WasmerOptions["cache"],
+): NodePackageCache | undefined {
+  if (options === false || options === "memory") return undefined;
+  if (options?.namespace !== undefined) {
+    throw new WasmerError(
+      "`cache.namespace` is only available from the browser entrypoint",
+      "INVALID_ARGUMENT",
+    );
+  }
+  return new NodePackageCache(
+    options?.directory ?? ".wasmer",
+    options?.readOnly ?? false,
+  );
 }
 
 function installNodeWorkers(): void {

@@ -1,29 +1,34 @@
 use std::{
+    collections::HashMap,
     path::PathBuf,
     str::FromStr,
     sync::{
-        Arc,
+        Arc, RwLock,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
-#[cfg(feature = "sys")]
-use std::{collections::HashMap, sync::RwLock, time::Duration};
 use wasmer_config::package::PackageSource as WasmerPackageSource;
 #[cfg(feature = "sys")]
 use wasmer_wasix::runtime::{
     module_cache::{FileSystemCache, ModuleCache, SharedCache},
-    resolver::{BackendSource, MultiSource},
     task_manager::tokio::TokioTaskManager,
 };
+#[cfg(feature = "js")]
+use wasmer_wasix::runtime::{package_loader::PackageCache, resolver::QueryCache};
 use wasmer_wasix::{
-    PluggableRuntime, bin_factory::BinaryPackage, http::HttpClient,
-    runtime::package_loader::BuiltinPackageLoader,
+    PluggableRuntime,
+    bin_factory::BinaryPackage,
+    http::HttpClient,
+    runtime::{
+        package_loader::BuiltinPackageLoader,
+        resolver::{BackendSource, MultiSource},
+    },
 };
 
 use crate::{Error, Package, PackageSource, Result, SandboxBuilder};
 
-#[cfg(feature = "sys")]
 const REGISTRY_QUERY_CACHE_TTL: Duration = Duration::from_mins(10);
 
 /// Persistent cache configuration.
@@ -81,7 +86,6 @@ pub(crate) struct ClientInner {
     #[cfg(feature = "sys")]
     pub(crate) tasks: Arc<TokioTaskManager>,
     pub(crate) output_bytes: usize,
-    #[cfg(feature = "sys")]
     registry_packages: RwLock<HashMap<String, Package>>,
     closed: AtomicBool,
 }
@@ -185,30 +189,54 @@ impl Wasmer {
     /// Create a JavaScript-target client around an injected WASIX runtime.
     ///
     /// The `wasmer-sdk-js` facade uses this constructor to supply its task
-    /// manager and target-specific virtual networking. Package and
-    /// compiled-module caching is currently in-memory on this target.
+    /// manager, target-specific virtual networking, and persistent package
+    /// storage. Compiled-module caching remains in-memory on this target.
     ///
     /// # Errors
     ///
     /// Returns an error if the target has no default HTTP client.
     #[cfg(feature = "js")]
-    pub fn from_js_runtime(config: &WasmerConfig, mut runtime: PluggableRuntime) -> Result<Self> {
+    pub fn from_js_runtime(
+        config: &WasmerConfig,
+        mut runtime: PluggableRuntime,
+        query_cache: Option<Arc<dyn QueryCache>>,
+        package_cache: Option<Arc<dyn PackageCache>>,
+    ) -> Result<Self> {
         let http_client: Arc<dyn HttpClient + Send + Sync> =
             Arc::new(wasmer_wasix::http::default_http_client().ok_or_else(|| {
                 Error::Initialization {
                     message: "this target has no default HTTP client".to_owned(),
                 }
             })?);
+
+        let mut backend = BackendSource::new(
+            BackendSource::WASMER_PROD_ENDPOINT
+                .parse()
+                .expect("the Wasmer registry endpoint is valid"),
+            Arc::clone(&http_client),
+        );
+        if let Some(cache) = query_cache {
+            backend = backend.with_query_cache(cache, REGISTRY_QUERY_CACHE_TTL);
+        }
+        let mut source = MultiSource::new();
+        source.add_source(backend);
+
+        let mut loader =
+            BuiltinPackageLoader::new().with_shared_http_client(Arc::clone(&http_client));
+        if let Some(cache) = package_cache {
+            loader = loader.with_cache(cache);
+        }
+
         runtime
-            .set_package_loader(
-                BuiltinPackageLoader::new().with_shared_http_client(Arc::clone(&http_client)),
-            )
+            .set_source(source)
+            .set_package_loader(loader)
             .set_http_client(http_client);
 
         Ok(Self {
             inner: Arc::new(ClientInner {
                 runtime: Arc::new(runtime),
                 output_bytes: config.output_bytes,
+                registry_packages: RwLock::new(HashMap::new()),
                 closed: AtomicBool::new(false),
             }),
         })
@@ -282,45 +310,38 @@ impl Wasmer {
                         message: error.to_string(),
                     }
                 })?;
-                #[cfg(feature = "sys")]
+                let cache_key = parsed.to_string();
+                if let Some(package) = self
+                    .inner
+                    .registry_packages
+                    .read()
+                    .map_err(|_| Error::InternalState {
+                        message: "the loaded-package cache lock is poisoned".to_owned(),
+                    })?
+                    .get(&cache_key)
+                    .cloned()
                 {
-                    let cache_key = parsed.to_string();
-                    if let Some(package) = self
-                        .inner
+                    return Ok(package);
+                }
+
+                let binary = BinaryPackage::from_registry(&parsed, self.inner.runtime.as_ref())
+                    .await
+                    .map_err(|error| Error::PackageLoad {
+                        package_source: label,
+                        message: format!("{error:#}"),
+                    })?;
+                let package = Package::from_binary(binary);
+                let mut packages =
+                    self.inner
                         .registry_packages
-                        .read()
+                        .write()
                         .map_err(|_| Error::InternalState {
                             message: "the loaded-package cache lock is poisoned".to_owned(),
-                        })?
-                        .get(&cache_key)
-                        .cloned()
-                    {
-                        return Ok(package);
-                    }
-
-                    let binary = BinaryPackage::from_registry(&parsed, self.inner.runtime.as_ref())
-                        .await
-                        .map_err(|error| Error::PackageLoad {
-                            package_source: label,
-                            message: format!("{error:#}"),
                         })?;
-                    let package = Package::from_binary(binary);
-                    let mut packages =
-                        self.inner
-                            .registry_packages
-                            .write()
-                            .map_err(|_| Error::InternalState {
-                                message: "the loaded-package cache lock is poisoned".to_owned(),
-                            })?;
-                    return Ok(packages
-                        .entry(cache_key)
-                        .or_insert_with(|| package.clone())
-                        .clone());
-                }
-                #[cfg(not(feature = "sys"))]
-                {
-                    BinaryPackage::from_registry(&parsed, self.inner.runtime.as_ref()).await
-                }
+                return Ok(packages
+                    .entry(cache_key)
+                    .or_insert_with(|| package.clone())
+                    .clone());
             }
             #[cfg(feature = "sys")]
             PackageSource::Path(path) if path.is_dir() => {

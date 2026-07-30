@@ -1,7 +1,7 @@
 # JavaScript SDK implementation
 
 Status: multi-worker Node vertical slice complete  
-Last updated: 2026-07-28
+Last updated: 2026-07-30
 
 ## Shape
 
@@ -151,6 +151,52 @@ await using sandbox = await client.sandboxes.create({
 const output = await sandbox.command(localPackage).run({ check: true });
 ```
 
+## Package caching
+
+Registry metadata and immutable WEBC package bytes are persistent by default.
+Node stores them under `.wasmer`; the directory can be changed or made
+read-only:
+
+```ts
+const client = new Wasmer({
+  cache: {
+    directory: "/var/cache/my-app/wasmer",
+    readOnly: false,
+  },
+});
+```
+
+The Node layout is deliberately identical to the native Rust and Python
+layout:
+
+```text
+.wasmer/
+└── cache-v1/
+    ├── registry/
+    │   └── python#python
+    └── packages/
+        └── <sha256>.bin
+```
+
+This makes `.wasmer` a language-neutral acquisition cache: a package fetched
+by a Python process can be consumed offline by Node, and vice versa. Package
+blobs are addressed and verified by SHA-256; registry entries retain the same
+JSON format and expiry rules on every host. JavaScript compilation artifacts
+are intentionally excluded. Native Rust and Python may share their
+target-specific compiled artifacts, while JavaScript leaves compilation
+caching to the WebAssembly host.
+
+Browsers use origin-scoped Cache Storage because they have no host directory.
+`cache.namespace` separates applications within an origin. The logical
+registry and package keys remain the same, but browser storage is not a
+filesystem and therefore cannot be shared directly with native runtimes.
+
+Use `cache: "memory"` for explicitly process-local behavior or `cache: false`
+to disable persistent storage. Packages already loaded by the same client may
+still be reused. Cache failures are treated as misses, so unavailable browser
+storage or an unwritable Node directory does not prevent an otherwise valid
+online package load.
+
 ## Build and validation
 
 The native SDK and `js/bindgen` are members of one source workspace,
@@ -182,8 +228,12 @@ Validation currently covers:
 - TypeScript strict type-checking;
 - creation and shutdown of the Node WASM runtime;
 - registry package loading and a finite WASIX command;
+- persistent Node package reuse from the same layout as Rust and Python,
+  including a fresh-client offline load;
 - Python execution, sandbox files, and live process streams in a real
   cross-origin-isolated Chromium page;
+- persistent browser package reuse across fresh clients without network
+  access;
 - concurrent blocking WASIX processes on distinct workers;
 - real TCP and DNS calls through the Node bridge.
 

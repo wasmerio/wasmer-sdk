@@ -19,12 +19,16 @@ The cache stores two fundamentally different things:
 A cache is disposable. Deleting it may make the next run download or compile
 again, but does not alter guest-visible program semantics.
 
+Phase 3 implements registry and package caching for JavaScript. Compiled
+WebAssembly caching remains host-managed and is intentionally outside the
+JavaScript SDK cache.
+
 ## 2. Defaults
 
 | Host | Default persistent storage | Notes |
 | --- | --- | --- |
 | Native Rust, Node.js, desktop Python/Swift | `<project-root>/.wasmer` | `project-root` defaults to the working directory captured during `Wasmer` creation. |
-| Browser | IndexedDB under an SDK cache namespace | There is no host path. The namespace defaults to the current origin plus SDK contract version and can be customized. |
+| Browser | Cache Storage under an SDK cache namespace | There is no host path. The namespace defaults to the current origin plus SDK contract version and can be customized. |
 | iOS | Application cache container | A caller may supply an app-container URL; arbitrary host paths are unavailable. |
 | Tests | Deterministic memory cache | Tests opt into filesystem behavior explicitly. |
 
@@ -158,9 +162,9 @@ const client = new Wasmer({
 });
 ```
 
-The browser implementation uses IndexedDB or another browser-appropriate store
-behind the same logical cache contract. It does not pretend `.wasmer` is a
-browser filesystem path.
+The browser implementation uses origin-scoped Cache Storage behind the same
+logical cache contract. It does not pretend `.wasmer` is a browser filesystem
+path.
 
 ## 4. On-disk layout
 

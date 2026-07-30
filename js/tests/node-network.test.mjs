@@ -1,13 +1,63 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
+import {
+  installNodeCacheGlobals,
+  NodePackageCache,
+  nodePackageCache,
+} from "../dist/node-cache.js";
 import {
   installNodeNetworkGlobals,
   NodeNetworkBridge,
   nodeNetworkBridge,
 } from "../dist/node-network.js";
 import { networkResponseBufferBytes } from "../dist/node-network-rpc.js";
+
+test("Node package caches are client-scoped and path-safe", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "wasmer-sdk-node-cache-"));
+  installNodeCacheGlobals();
+
+  const first = new NodePackageCache(join(root, "first"));
+  const second = new NodePackageCache(join(root, "second"));
+  context.after(async () => {
+    first.close();
+    second.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  assert.notEqual(first.id, second.id);
+  assert.equal(nodePackageCache(first.id), first);
+
+  const path = "cache-v1/packages/abc.bin";
+  await globalThis.__wasmerNodeCachePut(
+    first.id,
+    path,
+    new TextEncoder().encode("package"),
+  );
+  assert.equal(
+    new TextDecoder().decode(
+      await globalThis.__wasmerNodeCacheGet(first.id, path),
+    ),
+    "package",
+  );
+  assert.equal(
+    await globalThis.__wasmerNodeCacheGet(second.id, path),
+    undefined,
+  );
+  assert.equal(
+    new TextDecoder().decode(
+      await readFile(join(root, "first", "cache-v1", "packages", "abc.bin")),
+    ),
+    "package",
+  );
+  await assert.rejects(
+    first.put("../outside", new Uint8Array()),
+    /invalid Wasmer cache path/,
+  );
+});
 
 test("Node worker RPC buffers scale only with socket reads", () => {
   assert.equal(networkResponseBufferBytes("socketReadable", [1]), 528);
