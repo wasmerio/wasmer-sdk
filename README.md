@@ -204,7 +204,7 @@ is supplied by a JavaScript virtual-network adapter over `node:net` and
 `node:dns`; it is not a native addon.
 
 ```ts
-import { Wasmer } from "@wasmer/sdk/node";
+import { Wasmer } from "@wasmer/sdk2/node";
 
 const client = new Wasmer();
 const python = await client.packages.load("python/python@3.12");

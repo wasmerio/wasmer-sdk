@@ -1,5 +1,5 @@
 {
-  "name": "@wasmer/sdk",
+  "name": "@wasmer/sdk2",
   "version": "0.1.0",
   "description": "A portable, package-first sandbox SDK powered by Wasmer",
   "type": "module",
@@ -10,7 +10,8 @@
     "directory": "js"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   },
   "exports": {
     ".": {

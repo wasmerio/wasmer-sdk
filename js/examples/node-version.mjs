@@ -1,4 +1,4 @@
-import { Wasmer } from "@wasmer/sdk/node";
+import { Wasmer } from "@wasmer/sdk2/node";
 
 const client = new Wasmer();
 const python = await client.packages.load("python/python@3.13.5");

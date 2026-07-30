@@ -1,0 +1,67 @@
+name: Publish JavaScript to npm
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish @wasmer/sdk2
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install an OIDC-capable npm CLI
+        run: npm install --global npm@11.12.1
+
+      - name: Install Rust and wasm-bindgen
+        run: |
+          rustup toolchain install nightly --profile minimal --component rust-src --target wasm32-unknown-unknown --no-self-update
+          cargo +nightly install wasm-bindgen-cli --version 0.2.126 --locked
+
+      - name: Install JavaScript dependencies
+        working-directory: js
+        run: npm ci
+
+      - name: Validate package identity
+        working-directory: js
+        run: |
+          test "$(node --print "require('./package.json').name")" = "@wasmer/sdk2"
+          sdk_npm_version="$(node --print "require('./package.json').version")"
+          echo "Publishing @wasmer/sdk2@${sdk_npm_version}"
+          if npm view "@wasmer/sdk2@${sdk_npm_version}" version >/dev/null 2>&1; then
+            echo "::error::@wasmer/sdk2@${sdk_npm_version} is already published"
+            exit 1
+          fi
+          npm --version
+
+      - name: Build
+        working-directory: js
+        run: npm run build
+
+      - name: Test
+        working-directory: js
+        run: timeout --kill-after=30s 10m npm test
+
+      - name: Inspect package
+        working-directory: js
+        run: npm pack --dry-run
+
+      - name: Publish with npm trusted publishing
+        working-directory: js
+        run: npm publish --access public

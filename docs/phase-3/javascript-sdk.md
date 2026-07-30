@@ -76,7 +76,7 @@ asynchronous operation and is shared by all operations on that client. Use
 construction syntax.
 
 ```ts
-import { Wasmer } from "@wasmer/sdk/node";
+import { Wasmer } from "@wasmer/sdk2/node";
 
 const client = new Wasmer();
 const python = await client.packages.load("python/python@3.12");
@@ -260,6 +260,21 @@ The EdgeJS test serves a real HTTP response from
 process through the SDK, waits for its TCP listener, and runs the host's normal
 `psql` binary against it. Both are end-to-end regression tests for the worker
 and network architecture.
+
+## Publishing
+
+`.github/workflows/publish-npm.yml` publishes `@wasmer/sdk2` manually from the
+`main` branch. The publish job runs on a GitHub-hosted runner in the `npm`
+environment with `id-token: write`, uses npm 11.12.1, rebuilds the wasm-bindgen
+and TypeScript artifacts, runs the Node regression suite under a hard
+process-level deadline, inspects the package, and invokes `npm publish`
+directly. It does not use or require an npm token.
+
+Configure the package's npm trusted publisher with organization `wasmerio`,
+repository `wasmer-sdk`, workflow filename `publish-npm.yml`, environment
+`npm`, and permission for `npm publish`. These values are exact and
+case-sensitive. The package must already exist before npm allows the trusted
+publisher to be configured.
 
 Four narrow upstream JS-target gaps are carried in the linked Wasmer checkout;
 the SDK's Cargo patch table resolves the Wasmer ecosystem crates from that
