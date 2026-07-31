@@ -40,8 +40,8 @@ asyncio.run(main())
 ```
 
 Constructing `Wasmer()` is synchronous. Operations that perform I/O are
-awaited. For long-lived applications and tests, use `async with` for
-deterministic cleanup:
+awaited. A `wasmer` instance can be reused across multiple sandboxes. For
+long-lived applications and tests, use `async with` for deterministic cleanup:
 
 ```python
 async def main() -> None:
