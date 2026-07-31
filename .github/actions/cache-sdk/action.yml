@@ -14,19 +14,15 @@ runs:
   using: composite
   steps:
     - name: Restore Cargo build cache
-      uses: actions/cache@v6
+      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       with:
-        path: |
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git/db
-          ~/.cargo/bin/wasm-bindgen
-          ~/.cargo/bin/wasm-bindgen-test-runner
-          ~/.cargo/bin/wasm2es6js
-          target
-        key: cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cargo-profile }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
-        restore-keys: |
-          cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cargo-profile }}-
+        prefix-key: cargo-v2
+        shared-key: ${{ inputs.cargo-profile }}
+        add-job-id-key: "false"
+        env-vars: CARGO_INCREMENTAL RUSTFLAGS
+        cache-bin: "true"
+        cache-on-failure: "false"
+        save-if: ${{ github.ref == 'refs/heads/main' }}
 
     - name: Restore Wasmer registry and package cache
       uses: actions/cache@v6
