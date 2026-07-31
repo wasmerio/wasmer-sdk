@@ -30,6 +30,8 @@ available in every language SDK.
 
 ## What can you run?
 
+- **Unix commands in an interactive browser shell** —
+  [wasmer.sh application](wasmer-sh)
 - **Python 3.13** — [JavaScript example](js/examples/python.mjs),
   [Python example](python/examples/python.py),
   [Rust example](rust/examples/python.rs)
