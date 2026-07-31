@@ -1,0 +1,34 @@
+use wasmer_sdk::{Result, Sandbox, Wasmer, WasmerConfig};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let wasmer = Wasmer::new(WasmerConfig::default())?;
+    let sandbox = wasmer
+        .sandboxes()
+        .create()
+        .package("python/python")
+        .package("wasmer/edgejs-quickjs")
+        .package("php/php-32")
+        .await?;
+
+    run(&sandbox, "echo", &["hello from shell tools"]).await?;
+    run(&sandbox, "python", &["-c", "print('hello from Python')"]).await?;
+    run(
+        &sandbox,
+        "edge",
+        &["-e", r#"console.log("hello from Edge.js")"#],
+    )
+    .await?;
+    run(&sandbox, "php", &["-r", "echo 'hello from PHP';"]).await?;
+    Ok(())
+}
+
+async fn run(sandbox: &Sandbox, command: &str, args: &[&str]) -> Result<()> {
+    let output = sandbox
+        .command(command)
+        .args(args.iter().copied())
+        .output()
+        .await?;
+    println!("{}", output.text()?.trim());
+    Ok(())
+}

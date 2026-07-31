@@ -2,16 +2,20 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import net from "node:net";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { Wasmer } from "../dist/node.js";
 
 const serverSource = await readFile(
-  new URL("../../rust/examples/edgejs-http/server.js", import.meta.url),
+  new URL("../../fixtures/edgejs/server.js", import.meta.url),
+);
+const cacheDirectory = fileURLToPath(
+  new URL("../../.wasmer", import.meta.url),
 );
 
 test("serves HTTP from EdgeJS QuickJS through the Node network bridge", async (context) => {
   const port = await reservePort();
-  const client = new Wasmer();
+  const client = new Wasmer({ cache: { directory: cacheDirectory } });
   const edgejs = await client.packages.load("wasmer/edgejs-quickjs@0.1.0");
   const sandbox = await client.sandboxes.create({
     packages: [edgejs],
@@ -78,7 +82,7 @@ test(
 
 async function startServer(name) {
   const port = await reservePort();
-  const client = new Wasmer();
+  const client = new Wasmer({ cache: { directory: cacheDirectory } });
   const edgejs = await client.packages.load("wasmer/edgejs-quickjs@0.1.0");
   const source = new TextDecoder()
     .decode(serverSource)

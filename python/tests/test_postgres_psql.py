@@ -3,12 +3,17 @@ import os
 import shutil
 import subprocess
 import unittest
+from pathlib import Path
 
 from wasmer_sdk import ExitReason, Wasmer
 
 
 PSQL = os.environ.get("PSQL") or shutil.which("psql")
 PORT = 5432
+QUERY = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures/postgres/query.sql"
+)
 
 
 class PostgresPsqlTests(unittest.IsolatedAsyncioTestCase):
@@ -89,8 +94,8 @@ def run_psql(port: int) -> subprocess.CompletedProcess[str]:
             "-v",
             "ON_ERROR_STOP=1",
             "-At",
-            "-c",
-            "select version(), 40 + 2 as answer;",
+            "-f",
+            str(QUERY),
         ],
         capture_output=True,
         text=True,

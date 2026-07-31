@@ -1,3 +1,5 @@
+mod support;
+
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
@@ -7,28 +9,24 @@ use std::{
 use tokio::io::{AsyncBufReadExt, BufReader};
 use wasmer_sdk::{Error, NetworkPolicy, Result, Stdio, Wasmer, WasmerConfig};
 
-const SERVER_JS: &[u8] = include_bytes!("edgejs-http/server.js");
 const RESPONSE_MARKER: &str = "<h1>Hello from Edge.js!</h1>";
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let port = reserve_loopback_port()?;
+    let server_js = std::fs::read(support::fixture("edgejs/server.js"))?;
     let wasmer = Wasmer::new(WasmerConfig::default())?;
-    let edgejs = wasmer
-        .packages()
-        .load("wasmer/edgejs-quickjs@0.1.0")
-        .await?;
     let sandbox = wasmer
         .sandboxes()
         .create()
-        .package(edgejs.clone())
+        .package("wasmer/edgejs-quickjs@0.1.0")
         .network(NetworkPolicy::Host)
         .env("PORT", port.to_string())
-        .file("server.js", SERVER_JS)
+        .file("server.js", server_js)
         .await?;
 
     let mut process = sandbox
-        .command(edgejs)
+        .command("edge")
         .arg("/workspace/server.js")
         .stdout(Stdio::Piped)
         .stderr(Stdio::Capture)

@@ -6,7 +6,10 @@ from pathlib import Path
 from wasmer_sdk import Wasmer
 
 
-SERVER_SOURCE = Path(__file__).with_name("edgejs_server.js")
+SERVER_SOURCE = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures/edgejs/server.js"
+)
 
 
 async def wait_for_line(lines, marker: str) -> None:
@@ -36,16 +39,15 @@ async def main() -> None:
     port = reserve_port()
 
     async with Wasmer(output_bytes=256 * 1024) as client:
-        edgejs = await client.packages.load("wasmer/edgejs-quickjs@0.1.0")
         sandbox = await client.sandboxes.create(
-            packages=[edgejs],
+            packages=["wasmer/edgejs-quickjs@0.1.0"],
             files={"server.js": SERVER_SOURCE.read_bytes()},
             env={"PORT": str(port)},
             network="host",
         )
         async with sandbox:
             process = await sandbox.command(
-                edgejs,
+                "edge",
                 ["/workspace/server.js"],
             ).spawn(
                 stdout="pipe",

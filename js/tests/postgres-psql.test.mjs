@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { Wasmer } from "../dist/node.js";
@@ -8,12 +9,21 @@ import { Wasmer } from "../dist/node.js";
 const execFileAsync = promisify(execFile);
 const psql = process.env.PSQL ?? "psql";
 const port = 5432;
+const query = fileURLToPath(
+  new URL("../../fixtures/postgres/query.sql", import.meta.url),
+);
+const cacheDirectory = fileURLToPath(
+  new URL("../../.wasmer", import.meta.url),
+);
 
 test(
   "connects native psql to PostgreSQL running inside WASIX",
   { timeout: 90_000 },
   async () => {
-    const client = new Wasmer({ outputBytes: 256 * 1024 });
+    const client = new Wasmer({
+      outputBytes: 256 * 1024,
+      cache: { directory: cacheDirectory },
+    });
     const pglite = await client.packages.load("wasmer/pglite@0.1.0");
     assert.equal(pglite.entrypoint, "pglite");
     assert(pglite.commands.includes("pglite"));
@@ -42,8 +52,8 @@ test(
           "-v",
           "ON_ERROR_STOP=1",
           "-At",
-          "-c",
-          "select version(), 40 + 2 as answer;",
+          "-f",
+          query,
         ],
         { timeout: 10_000 },
       );

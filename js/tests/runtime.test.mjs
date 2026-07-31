@@ -129,7 +129,7 @@ test("reuses commands and preserves filesystem and stream semantics", async () =
 
 test("ports.wait applies one wall-clock timeout", async () => {
   const port = await reservePort();
-  const client = new Wasmer();
+  const client = new Wasmer({ cache: { directory: runtimeCache } });
   let sandbox;
   try {
     sandbox = await client.sandboxes.create({

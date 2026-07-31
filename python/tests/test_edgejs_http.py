@@ -8,7 +8,7 @@ from wasmer_sdk import ExitReason, Wasmer
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-SERVER_SOURCE = REPOSITORY / "rust/examples/edgejs-http/server.js"
+SERVER_SOURCE = REPOSITORY / "fixtures/edgejs/server.js"
 RESPONSE_MARKER = "<h1>Hello from Edge.js!</h1>"
 
 

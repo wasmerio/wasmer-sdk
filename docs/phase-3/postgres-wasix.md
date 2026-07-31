@@ -95,7 +95,7 @@ wasmer package publish --wait=container packages/pglite
 The Rust example resolves `wasmer/pglite@0.1.0` from the registry:
 
 ```console
-cargo run -p wasmer-sdk --example postgres_wasix_psql -- \
+cargo run -p wasmer-sdk --example postgres_psql -- \
   /opt/homebrew/opt/libpq/bin/psql
 ```
 

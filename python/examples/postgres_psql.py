@@ -2,10 +2,15 @@ import argparse
 import asyncio
 import shutil
 import subprocess
+from pathlib import Path
 
 from wasmer_sdk import Wasmer
 
 PORT = 5432
+QUERY = (
+    Path(__file__).resolve().parents[2]
+    / "fixtures/postgres/query.sql"
+)
 
 
 def arguments() -> argparse.Namespace:
@@ -41,8 +46,8 @@ def query(psql: str, port: int) -> subprocess.CompletedProcess[str]:
             "-v",
             "ON_ERROR_STOP=1",
             "-At",
-            "-c",
-            "select version(), 40 + 2 as answer;",
+            "-f",
+            str(QUERY),
         ],
         capture_output=True,
         text=True,
@@ -57,13 +62,12 @@ async def main() -> None:
         raise SystemExit("psql was not found; install it or pass --psql")
 
     async with Wasmer(output_bytes=256 * 1024) as client:
-        pglite = await client.packages.load("wasmer/pglite@0.1.0")
         sandbox = await client.sandboxes.create(
-            packages=[pglite],
+            packages=["wasmer/pglite@0.1.0"],
             network="host",
         )
         async with sandbox:
-            process = await sandbox.command(pglite).spawn(
+            process = await sandbox.command("pglite").spawn(
                 stdout="capture",
                 stderr="pipe",
                 output_bytes=256 * 1024,

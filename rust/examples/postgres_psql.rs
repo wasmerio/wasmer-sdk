@@ -1,4 +1,6 @@
-use std::{path::PathBuf, process::Command as HostCommand, time::Duration};
+mod support;
+
+use std::{env, ffi::OsString, path::PathBuf, process::Command as HostCommand, time::Duration};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use wasmer_sdk::{Error, NetworkPolicy, Result, Stdio, Wasmer, WasmerConfig};
@@ -7,35 +9,37 @@ const PORT: u16 = 5432;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let psql = required_file(1, "native psql client")?;
+    let psql = env::var_os("PSQL")
+        .or_else(|| env::args_os().nth(1))
+        .unwrap_or_else(|| OsString::from("psql"));
+    let query = support::fixture("postgres/query.sql");
 
     let wasmer = Wasmer::new(WasmerConfig::default())?;
-    let pglite = wasmer.packages().load("wasmer/pglite@0.1.0").await?;
     let sandbox = wasmer
         .sandboxes()
         .create()
-        .package(pglite.clone())
+        .package("wasmer/pglite@0.1.0")
         .network(NetworkPolicy::Host)
         .await?;
 
-    let mut process = sandbox
-        .command(pglite)
+    let mut postgres = sandbox
+        .command("pglite")
         .stdin(Stdio::Null)
         .stdout(Stdio::Capture)
         .stderr(Stdio::Piped)
         .spawn()
         .await?;
 
-    let stderr = process.take_stderr().ok_or_else(|| Error::InternalState {
+    let stderr = postgres.take_stderr().ok_or_else(|| Error::InternalState {
         message: "missing piped PostgreSQL stderr".to_owned(),
     })?;
     wait_for_socket_ready(BufReader::new(stderr).lines()).await?;
 
-    let (uri, psql_output) = run_psql(psql).await?;
-    let output = process.wait().await?.check()?;
+    let (uri, psql_output) = run_psql(psql, query).await?;
+    let output = postgres.wait().await?.check()?;
     let result = validate_psql(psql_output)?;
 
-    println!("connected directly to WASIX PostgreSQL: {uri}");
+    println!("Connected native psql to PostgreSQL running in Wasmer: {uri}");
     print!("{result}");
     if !output.stdout.bytes().is_empty() {
         eprintln!(
@@ -70,19 +74,12 @@ where
     Ok(())
 }
 
-async fn run_psql(psql: PathBuf) -> Result<(String, std::process::Output)> {
+async fn run_psql(psql: OsString, query: PathBuf) -> Result<(String, std::process::Output)> {
     let uri = format!("postgresql://postgres@127.0.0.1:{PORT}/postgres?sslmode=disable");
     tokio::task::spawn_blocking(move || {
         HostCommand::new(psql)
-            .args([
-                &uri,
-                "-X",
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-At",
-                "-c",
-                "select version(), 40 + 2 as answer;",
-            ])
+            .args([uri.as_str(), "-X", "-v", "ON_ERROR_STOP=1", "-At", "-f"])
+            .arg(query)
             .output()
             .map(|output| (uri, output))
     })
@@ -116,24 +113,4 @@ fn validate_psql(output: std::process::Output) -> Result<String> {
             String::from_utf8_lossy(&output.stderr),
         ),
     })
-}
-
-fn required_file(index: usize, description: &str) -> Result<PathBuf> {
-    let path = argument(index, description)?.canonicalize()?;
-    if path.is_file() {
-        Ok(path)
-    } else {
-        Err(Error::Initialization {
-            message: format!("{description} is not a file: {}", path.display()),
-        })
-    }
-}
-
-fn argument(index: usize, description: &str) -> Result<PathBuf> {
-    std::env::args_os()
-        .nth(index)
-        .map(PathBuf::from)
-        .ok_or_else(|| Error::Initialization {
-            message: format!("usage: postgres_wasix_psql <psql>; missing {description}"),
-        })
 }
