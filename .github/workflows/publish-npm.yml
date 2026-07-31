@@ -11,15 +11,13 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  publish:
-    name: Publish @wasmer/sdk2
+  build:
+    name: Build @wasmer/sdk2
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    environment: npm
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -32,9 +30,6 @@ jobs:
         with:
           cargo-profile: js-nightly
           cache-compiled-artifacts: "false"
-
-      - name: Install an OIDC-capable npm CLI
-        run: npm install --global npm@11.12.1
 
       - name: Install Rust and wasm-bindgen
         run: |
@@ -65,10 +60,47 @@ jobs:
         working-directory: js
         run: timeout --kill-after=30s 6m npm test
 
-      - name: Inspect package
+      - name: Pack package
         working-directory: js
-        run: npm pack --dry-run
+        run: |
+          npm pack --dry-run
+          mkdir -p ../npm-package
+          npm pack --pack-destination ../npm-package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasmer-sdk2-${{ github.sha }}
+          path: npm-package/*.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish @wasmer/sdk2
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasmer-sdk2-${{ github.sha }}
+          path: npm-package
+
+      - name: Mint npm OIDC token
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const token = await core.getIDToken("npm:registry.npmjs.org");
+            core.setSecret(token);
+            core.exportVariable("NPM_ID_TOKEN", token);
 
       - name: Publish with npm trusted publishing
-        working-directory: js
-        run: npm publish --access public
+        run: npm publish npm-package/*.tgz --access public
