@@ -36,6 +36,10 @@ edge -e "console.log('hello from Edge.js')"
 php -r "echo 'hello from PHP';"
 ```
 
+Running `python`, `edge`, or `php` without arguments automatically selects
+that runtime's interactive mode. Input is line-buffered by the browser shell,
+with local echo, backspace, Ctrl-C termination, and Ctrl-D EOF handling.
+
 Package data is persisted in the browser cache under the `wasmer.sh`
 namespace, so subsequent sessions avoid downloading the same packages again.
 

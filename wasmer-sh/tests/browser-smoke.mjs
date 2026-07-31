@@ -61,6 +61,51 @@ try {
     { timeout: 30_000 },
   );
 
+  await page.waitForFunction(
+    () => document.querySelector("#session-status")?.textContent === "Ready",
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send("python\n");
+    await globalThis.__wasmerShell.send(
+      "print('PYTHON_' + 'STDIN_OK')\n",
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("PYTHON_STDIN_OK"),
+    undefined,
+    { timeout: 120_000 },
+  );
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send("exit()\n");
+  });
+  await page.waitForFunction(
+    () => document.querySelector("#session-status")?.textContent === "Ready",
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send("edge\n");
+    await globalThis.__wasmerShell.send(
+      "console.log('EDGE_' + 'STDIN_OK')\n",
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("EDGE_STDIN_OK"),
+    undefined,
+    { timeout: 120_000 },
+  );
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(".exit\n");
+  });
+  await page.waitForFunction(
+    () => document.querySelector("#session-status")?.textContent === "Ready",
+    undefined,
+    { timeout: 30_000 },
+  );
+
   console.log("wasmer.sh browser smoke test passed");
 } catch (error) {
   console.error(error);

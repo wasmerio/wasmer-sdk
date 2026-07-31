@@ -107,6 +107,8 @@ let generation = 0;
 let inputQueue = Promise.resolve();
 let currentDirectory = "/workspace";
 let lineBuffer = "";
+let processInputBuffer = "";
+let pendingProcessInput = "";
 let transcript = "";
 let acceptingCommands = false;
 
@@ -158,6 +160,8 @@ async function start(): Promise<void> {
     await closeActiveSession();
     transcript = "";
     lineBuffer = "";
+    processInputBuffer = "";
+    pendingProcessInput = "";
     currentDirectory = "/workspace";
     acceptingCommands = false;
     terminal.reset();
@@ -222,16 +226,13 @@ async function handleTerminalData(data: string): Promise<void> {
   if (!session) return;
 
   if (session.process && session.stdin) {
-    if (data === "\x03") {
-      await session.process.terminate({ gracePeriodMs: 250 });
-    } else if (data === "\x04") {
-      await session.stdin.close();
-    } else {
-      await session.stdin.write(data);
-    }
+    await handleProcessInput(data, session.process, session.stdin);
     return;
   }
-  if (!acceptingCommands) return;
+  if (!acceptingCommands) {
+    pendingProcessInput += data;
+    return;
+  }
 
   for (const character of data) {
     if (character === "\r" || character === "\n") {
@@ -239,8 +240,9 @@ async function handleTerminalData(data: string): Promise<void> {
       const commandLine = lineBuffer;
       lineBuffer = "";
       acceptingCommands = false;
-      await executeCommandLine(commandLine);
-      continue;
+      pendingProcessInput = "";
+      void executeCommandLine(commandLine);
+      return;
     }
     if (character === "\x7f" || character === "\b") {
       if (lineBuffer.length > 0) {
@@ -281,8 +283,9 @@ async function executeCommandLine(commandLine: string): Promise<void> {
     const selector = session.mainPackage.commands.includes(commandName!)
       ? session.mainPackage.command(commandName!)
       : commandName!;
+    const processArgs = interactiveArguments(commandName!, args);
     const process = await session.sandbox
-      .command(selector, args, { cwd: currentDirectory })
+      .command(selector, processArgs, { cwd: currentDirectory })
       .spawn({
         stdin: "pipe",
         stdout: "pipe",
@@ -296,6 +299,12 @@ async function executeCommandLine(commandLine: string): Promise<void> {
 
     session.process = process;
     session.stdin = process.stdin;
+    processInputBuffer = "";
+    if (pendingProcessInput) {
+      const pending = pendingProcessInput;
+      pendingProcessInput = "";
+      await handleProcessInput(pending, process, process.stdin);
+    }
     const streams = Promise.allSettled([
       pumpOutput(process.stdout),
       pumpOutput(process.stderr),
@@ -304,6 +313,7 @@ async function executeCommandLine(commandLine: string): Promise<void> {
     await streams;
     session.process = undefined;
     session.stdin = undefined;
+    processInputBuffer = "";
 
     if (!output.ok) {
       writeTerminal(
@@ -318,6 +328,45 @@ async function executeCommandLine(commandLine: string): Promise<void> {
       acceptingCommands = true;
       writePrompt();
     }
+  }
+}
+
+async function handleProcessInput(
+  data: string,
+  process: Process,
+  stdin: WritableBytes,
+): Promise<void> {
+  for (const character of data) {
+    if (character === "\x03") {
+      processInputBuffer = "";
+      writeTerminal("^C\r\n");
+      await process.terminate({ gracePeriodMs: 250 });
+      return;
+    }
+    if (character === "\x04") {
+      if (processInputBuffer) {
+        await stdin.write(processInputBuffer);
+        processInputBuffer = "";
+      }
+      await stdin.close();
+      return;
+    }
+    if (character === "\x7f" || character === "\b") {
+      if (processInputBuffer.length > 0) {
+        processInputBuffer = processInputBuffer.slice(0, -1);
+        writeTerminal("\b \b");
+      }
+      continue;
+    }
+    if (character === "\r" || character === "\n") {
+      writeTerminal("\r\n");
+      await stdin.write(`${processInputBuffer}\n`);
+      processInputBuffer = "";
+      continue;
+    }
+    if (character === "\x1b" || character < " ") continue;
+    processInputBuffer += character;
+    writeTerminal(character);
   }
 }
 
@@ -536,6 +585,19 @@ function resolveGuestPath(cwd: string, requested: string): string {
     else resolved.push(segment);
   }
   return `/${resolved.join("/")}`;
+}
+
+function interactiveArguments(command: string, args: string[]): string[] {
+  if (args.length > 0) return args;
+  switch (command) {
+    case "python":
+    case "edge":
+      return ["-i"];
+    case "php":
+      return ["-a"];
+    default:
+      return args;
+  }
 }
 
 function selectCommand(mainPackage: Package): CommandSelector {
