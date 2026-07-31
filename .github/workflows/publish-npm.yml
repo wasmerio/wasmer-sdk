@@ -86,23 +86,18 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@v6
+
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
       - uses: actions/download-artifact@v4
         with:
           name: wasmer-sdk2-${{ github.sha }}
           path: npm-package
-
-      - name: Mint npm OIDC token
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const token = await core.getIDToken("npm:registry.npmjs.org");
-            core.setSecret(token);
-            core.exportVariable("NPM_ID_TOKEN", token);
 
       - name: Publish with npm trusted publishing
         run: npm publish ./npm-package/*.tgz --access public
