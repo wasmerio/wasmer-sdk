@@ -7,7 +7,9 @@ import test from "node:test";
 
 import { Wasmer } from "../dist/node.js";
 
-const runtimeCache = fileURLToPath(new URL("../../.wasmer", import.meta.url));
+const runtimeCache =
+  process.env.WASMER_TEST_CACHE ??
+  fileURLToPath(new URL("../../.wasmer", import.meta.url));
 
 test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   const client = new Wasmer({ cache: { directory: runtimeCache } });
