@@ -72,7 +72,6 @@ const output = await sandbox.command(
   "python",
   ["-c", "print(sum(n * n for n in range(10)))"],
 ).run({
-  check: true,
   timeoutMs: 5_000,
 });
 
@@ -98,9 +97,8 @@ async fn main() -> Result<()> {
         .command("python")
         .args(["-c", "print(sum(n * n for n in range(10)))"])
         .timeout(Duration::from_secs(5))
-        .output()
-        .await?
-        .check()?;
+        .run()
+        .await?;
 
     println!("{}", output.text()?.trim());
     sandbox.close().await?;
@@ -135,7 +133,7 @@ await using sandbox = await client.sandboxes.create({
 
 const output = await sandbox
   .command(edgejs, ["main.js", "Ada"])
-  .run({ check: true });
+  .run();
 
 const value = JSON.parse(output.text());
 console.log(value.greeting);
@@ -163,9 +161,8 @@ let sandbox = wasmer
 let output = sandbox
     .command(edgejs)
     .args(["/workspace/main.js", "Ada"])
-    .output()
-    .await?
-    .check()?;
+    .run()
+    .await?;
 
 sandbox.close().await?;
 ```
@@ -207,11 +204,11 @@ Path("/workspace/result.txt").write_text("built in " + __import__("os").environ[
 
 await sandbox
   .command(python.command("python"), ["build.py"])
-  .run({ check: true });
+  .run();
 
 const listing = await sandbox
   .sh`wc -c result.txt && cat result.txt`
-  .run({ check: true });
+  .run();
 
 console.log(listing.text());
 ```
@@ -249,9 +246,8 @@ Path("/workspace/result.txt").write_text(
 sandbox
     .command(python.command("python")?)
     .arg("/workspace/build.py")
-    .output()
-    .await?
-    .check()?;
+    .run()
+    .await?;
 
 let listing = sandbox
     .command("bash")
@@ -259,9 +255,8 @@ let listing = sandbox
         "-lc",
         "wc -c /workspace/result.txt && cat /workspace/result.txt",
     ])
-    .output()
-    .await?
-    .check()?;
+    .run()
+    .await?;
 ```
 
 The shell comes from the explicitly installed Bash package. It is not an
@@ -296,7 +291,7 @@ await sandbox.command("resize", [
   "--config", "config.json",
   "input.png",
   "output.webp",
-]).run({ check: true });
+]).run();
 
 const artifact = await sandbox.fs.readFile("output.webp");
 ```
@@ -320,9 +315,8 @@ sandbox
         "/workspace/input.png",
         "/workspace/output.webp",
     ])
-    .output()
-    .await?
-    .check()?;
+    .run()
+    .await?;
 
 let artifact = sandbox
     .fs()
@@ -474,7 +468,6 @@ prefer the smaller captured form:
 
 ```ts
 const output = await sandbox.command("python", ["uppercase.py"]).run({
-  check: true,
   stdin: "hello\nfrom wasmer\n",
 });
 ```
@@ -838,7 +831,7 @@ await using producer = await client.sandboxes.create({
 
 await producer
   .command("produce", ["/shared/input.json", "/shared/output.bin"])
-  .run({ check: true });
+  .run();
 
 await using consumer = await client.sandboxes.create({
   packages: ["namespace/consumer@<tested-pin>"],
@@ -849,7 +842,7 @@ await using consumer = await client.sandboxes.create({
 
 const output = await consumer
   .command("inspect", ["/shared/output.bin"])
-  .run({ check: true });
+  .run();
 ```
 
 Concurrent read-write sharing has explicit filesystem consistency semantics.
@@ -876,7 +869,7 @@ await using sandbox = await client.sandboxes.create({
 
 const output = await sandbox
   .command("compile", ["/src/main.c", "-o", "main.wasm"])
-  .run({ check: true });
+  .run();
 ```
 
 ### Rust
@@ -941,7 +934,7 @@ from pathlib import Path
 source = Path("/project/input.txt").read_text()
 Path("/project/output.txt").write_text(source.upper())
   `,
-]).run({ check: true });
+]).run();
 ```
 
 For origin-private persistent storage:
@@ -1003,7 +996,7 @@ await using sandbox = await client.sandboxes.create({
 
 const output = await sandbox
   .command(formatter, ["main.txt"])
-  .run({ check: true });
+  .run();
 ```
 
 ### Rust
@@ -1105,7 +1098,7 @@ const jobs = inputs.map(async (input) => {
 
   const output = await sandbox
     .command("worker", ["input.json"])
-    .run({ check: true });
+    .run();
 
   return JSON.parse(output.text());
 });
@@ -1131,9 +1124,8 @@ let tasks = inputs.into_iter().map(|input| {
         let output = sandbox
             .command("worker")
             .arg("/workspace/input.json")
-            .output()
-            .await?
-            .check()?;
+            .run()
+            .await?;
 
         Result::<_>::Ok(serde_json::from_slice(output.stdout.as_bytes())?)
     })

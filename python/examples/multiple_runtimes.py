@@ -21,7 +21,7 @@ async def main() -> None:
     ]
 
     for executable, args in commands:
-        output = await sandbox.command(executable, args).run(check=True)
+        output = await sandbox.command(executable, args).run()
         print(output.text().strip())
 
 

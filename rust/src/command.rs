@@ -163,7 +163,24 @@ impl Command {
         self
     }
 
+    /// Run to completion, capture bounded output, and require success.
+    ///
+    /// Use [`Self::output`] when a non-zero exit, termination, or timeout is
+    /// expected and should be inspected as an [`Output`] instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessExitError`] when the process does not exit normally
+    /// with status zero. Resolution, startup, execution, and I/O failures are
+    /// returned unchanged.
+    pub async fn run(&mut self) -> Result<Output> {
+        self.output().await?.check()
+    }
+
     /// Run to completion and capture bounded stdout and stderr.
+    ///
+    /// Unlike [`Self::run`], this method returns unsuccessful process outcomes
+    /// as data so callers can inspect their status, reason, and diagnostics.
     ///
     /// # Errors
     ///

@@ -18,7 +18,7 @@ async def main() -> None:
     )
     output = await sandbox.command(
         "python", ["/workspace/hello.py"]
-    ).run(check=True)
+    ).run()
     print(output.text().strip())
 
 

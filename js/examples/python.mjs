@@ -15,7 +15,7 @@ const sandbox = await client.sandboxes.create({
 try {
   const output = await sandbox
     .command("python", ["/workspace/hello.py"])
-    .run({ check: true });
+    .run();
 
   console.log(output.text().trim());
 } finally {

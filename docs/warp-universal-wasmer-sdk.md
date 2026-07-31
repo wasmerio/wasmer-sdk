@@ -65,7 +65,7 @@ const sandbox = await client.sandboxes.create({
 
 const output = await sandbox
   .command("python", ["/workspace/main.py"])
-  .run({ check: true });
+  .run();
 
 console.log(output.text());
 ```
@@ -86,6 +86,8 @@ for await (const line of process.stdout.lines()) {
 
 await process.wait({ check: true });
 ```
+
+`Command.run()` treats success as its default contract and raises a typed `ProcessExitError` containing the completed output on non-zero exit, termination, or timeout. Callers opt out with `check: false` when failure is expected. `spawn()` and `Process.wait()` remain process-oriented and return every outcome as data unless explicitly checked.
 
 Captured byte decoding is synchronous because the bytes are already in memory. Live streams are async-iterable and expose a `lines()` helper. Output retention is bounded from process creation, so an unread or excessively noisy guest cannot grow host memory without limit.
 

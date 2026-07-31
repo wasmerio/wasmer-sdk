@@ -76,7 +76,7 @@ await using sandbox = await client.sandboxes.create({
 });
 const output = await sandbox
   .command("python", ["-c", "print('hello')"])
-  .run({ check: true });
+  .run();
 console.log(output.text());
 ```
 
@@ -90,7 +90,7 @@ await using sandbox = await client.sandboxes.create({
 await sandbox.fs.writeText("/workspace/main.py", "print('hello')");
 const output = await sandbox
   .command("python", ["main.py"])
-  .run({ check: true });
+  .run();
 ```
 
 Only users who need a live process should meet streams, process IDs,
@@ -205,7 +205,6 @@ const output = await sandbox.command(
   "python",
   ["-c", "print(sum(range(10)))"],
 ).run({
-  check: true,
   timeoutMs: 5_000,
 });
 ```
@@ -242,10 +241,8 @@ await sandbox.installPackage("wasmer/bash@1.0.25", {
 await sandbox.fs.writeText("/workspace/main.py", "print('persistent')");
 const first = await sandbox
   .command("python", ["main.py"])
-  .run({ check: true });
-const second = await sandbox.sh`ls -la /workspace`.run({
-  check: true,
-});
+  .run();
+const second = await sandbox.sh`ls -la /workspace`.run();
 ```
 
 The sandbox remains alive until `close()`. Closing it terminates remaining
@@ -271,21 +268,21 @@ templates can make interpolation safe:
 JavaScript:
 
 ```ts
-await sandbox.command("python", ["-c", userCode]).run({ check: true });
+await sandbox.command("python", ["-c", userCode]).run();
 await sandbox.command("python", ["-i"]).spawn({
   terminal: true,
 });
-await sandbox.sh`find /workspace -type f | sort`.run({ check: true });
+await sandbox.sh`find /workspace -type f | sort`.run();
 ```
 
 Rust:
 
 ```rust
-sandbox.command("python").args(["-c", user_code]).output().await?;
+sandbox.command("python").args(["-c", user_code]).run().await?;
 sandbox.command("python").arg("-i").terminal(true).spawn().await?;
 sandbox.command("bash")
     .args(["-lc", "find /workspace -type f | sort"])
-    .output()
+    .run()
     .await?;
 ```
 
@@ -301,7 +298,7 @@ Tagged interpolation is safe by default:
 
 ```ts
 const userQuery = "hello; rm -rf /";
-await sandbox.sh`grep -r ${userQuery} /workspace`.run({ check: true });
+await sandbox.sh`grep -r ${userQuery} /workspace`.run();
 ```
 
 The interpolated value becomes one shell argument; its punctuation cannot
@@ -329,7 +326,7 @@ await using sandbox = await client.sandboxes.create({
 
 await sandbox
   .command(toolbox.command("formatter"), ["src/main.c"])
-  .run({ check: true });
+  .run();
 ```
 
 Selecting a package without an entrypoint fails with
@@ -337,7 +334,7 @@ Selecting a package without an entrypoint fails with
 
 ```ts
 const edgejs = await client.packages.load("wasmer/edgejs-quickjs@0.0.3");
-await sandbox.command(edgejs, ["main.js"]).run({ check: true });
+await sandbox.command(edgejs, ["main.js"]).run();
 ```
 
 The package must already be installed in that sandbox. A resolved but
@@ -533,7 +530,7 @@ const output = await sandbox
     "-c",
     "print('installed after creation')",
   ])
-  .run({ check: true });
+  .run();
 ```
 
 Installation never runs an entrypoint or package-provided setup script.
@@ -553,15 +550,13 @@ await sandbox.installPackage("wasmer/bash@1.0.25", {
   asShell: "bash",
 });
 
-const output = await sandbox.sh`printf "%s\\n" ${userValue}`.run({
-  check: true,
-});
+const output = await sandbox.sh`printf "%s\\n" ${userValue}`.run();
 
 await sandbox.shell(`
   set -eu
   make build
   make test
-`).run({ check: true });
+`).run();
 ```
 
 The selected command must implement the documented POSIX-style `-c` contract.
@@ -593,6 +588,7 @@ export interface RunOptions {
   stdin?: string | Uint8Array;
   timeoutMs?: number;
   outputBytes?: number;
+  /** Defaults to true. */
   check?: boolean;
 }
 
@@ -639,7 +635,6 @@ const output = await sandbox.command(
   ["-c", "import sys; print(sys.stdin.read().upper())"],
 ).run({
   stdin: "hello\n",
-  check: true,
 });
 ```
 
@@ -647,11 +642,11 @@ For `spawn()`, stdin defaults to `"closed"` and stdout/stderr default to
 `"pipe"`. This prevents a child from waiting forever for input that the
 application never intended to provide. A discarded stream is explicit.
 
-`check()` returns the same output when successful and throws a
-`ProcessExitError` containing the output otherwise:
+`run()` is checked by default. It returns `Output` on success and throws a
+`ProcessExitError` containing the completed output otherwise:
 
 ```ts
-const output = await sandbox.command("tests").run({ check: true });
+const output = await sandbox.command("tests").run();
 console.log(output.text());
 ```
 
@@ -660,9 +655,10 @@ images, protocol frames, and invalid UTF-8 are legitimate output.
 `CapturedOutput.text()` is synchronous because capture is already complete.
 `Output.text()` is sugar for `output.check().stdout.text()`.
 
-`run({ check: true })` performs the same check before resolving. It changes
-error behavior, not the return type: successful calls still return `Output`,
-and the thrown `ProcessExitError` still contains the completed output.
+Pass `check: false` when an unsuccessful outcome is expected and should remain
+data. `Output.check()` performs the same check explicitly, while
+spawned-process `wait()` stays unchecked so callers can inspect every process
+outcome.
 
 `RunOptions.outputBytes` is applied to the internal process before it starts.
 For live processes, the equivalent bound is `SpawnOptions.outputBytes`.
@@ -1143,7 +1139,7 @@ let output = sandbox
     .command("python")
     .args(["-c", "print(sum(range(10)))"])
     .timeout(std::time::Duration::from_secs(5))
-    .output()
+    .run()
     .await?;
 ```
 
@@ -1153,9 +1149,16 @@ open `Sandbox`.
 
 ### 7.3 Commands
 
-Rust intentionally resembles `std::process::Command`:
+Rust provides a checked foreground convenience while retaining
+`std::process::Command`-style status inspection:
 
 ```rust
+let output = sandbox
+    .command("python")
+    .arg("/workspace/main.py")
+    .run()
+    .await?;
+
 let output = sandbox
     .command("python")
     .arg("/workspace/main.py")
@@ -1401,7 +1404,7 @@ The concepts line up while each language keeps its native shape:
 | Configure client | `Wasmer::new(config)` | `new Wasmer(options)` | `Wasmer(config)` / async open | `try await Wasmer(options:)` |
 | Create sandbox | `wasmer.sandboxes().create().await` | `client.sandboxes.create()` | `client.sandboxes.create()` | `client.sandboxes.create()` |
 | Install package | `sandbox.install_package(source)` | `sandbox.installPackage(source)` | `sandbox.install_package(source)` | `sandbox.installPackage(source:)` |
-| Captured command | `sandbox.command(cmd).output()` | `sandbox.command(cmd, args, options).run()` | `sandbox.command(cmd, args=[...]).run()` | `sandbox.command(cmd, args:, options:).run()` |
+| Checked command | `sandbox.command(cmd).run()` | `sandbox.command(cmd, args, options).run()` | `sandbox.command(cmd, args=[...]).run()` | `sandbox.command(cmd, args:, options:).run()` |
 | Live command | `sandbox.command(cmd).spawn()` | `sandbox.command(cmd, args, options).spawn()` | `sandbox.command(cmd, args=[...]).spawn()` | `sandbox.command(cmd, args:, options:).spawn()` |
 | Cleanup | `close().await`, RAII fallback | `close()`, `await using` | `async with` | `close()`, scoped helper |
 | Byte stream | async reader/writer | `AsyncIterable` + Web Stream adapter | async iterator/writer | `AsyncSequence`/writer |
@@ -1462,13 +1465,15 @@ TARGET_ERROR
 ```
 
 Guest exit status is intentionally absent. A command that ran and exited 127
-still returns `Output`; a command that could not be resolved returns
-`COMMAND_NOT_FOUND`.
+produces a `ProcessExitError` containing its `Output`; a command that could not
+be resolved returns `COMMAND_NOT_FOUND`. `run({ check: false })`,
+`Command::output()`, and spawned-process `wait()` preserve unsuccessful
+outcomes as data.
 
 `TIMEOUT`, `LIMIT_EXCEEDED`, `PROCESS_EXITED`, and `PROCESS_TERMINATED` are
-exposed by `ProcessExitError` when an application calls `Output.check()` or
-opts into `run({ check: true })`. By default, `run()` and `wait()` return bounded
-`Output`, including termination reason and diagnostics. `Output.ok` is true
+exposed by `ProcessExitError` from the checked `run()` path or an explicit
+`Output.check()`. Spawned-process `wait()` returns bounded `Output`, including
+termination reason and diagnostics, without checking it. `Output.ok` is true
 only for `reason === "exited"` with exit code zero.
 
 JavaScript:
@@ -1570,7 +1575,7 @@ await using sandbox = await client.sandboxes.create({
 });
 await sandbox
   .command("python", ["-c", "print('hello')"])
-  .run({ check: true });
+  .run();
 ```
 
 Running JavaScript through EdgeJS QuickJS is the same:
@@ -1587,7 +1592,7 @@ await using sandbox = await client.sandboxes.create({
 });
 await sandbox
   .command(edgejs, ["main.js"])
-  .run({ check: true });
+  .run();
 ```
 
 A later `recipes/python` helper may package defaults, decode a conventional
@@ -1673,7 +1678,7 @@ await using sandbox = await client.sandboxes.create({
 });
 const output = await sandbox
   .command("python", ["-c", "print(42)"])
-  .run({ check: true });
+  .run();
 ```
 
 For callers that need package inspection, the mapping remains direct:
@@ -1687,7 +1692,7 @@ await using sandbox = await client.sandboxes.create({
 });
 const output = await sandbox
   .command(command, ["main.txt"])
-  .run({ check: true });
+  .run();
 ```
 
 Current `Directory` and package command concepts survive. A current

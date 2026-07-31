@@ -22,7 +22,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_captured_command_and_filesystem(self) -> None:
         output = await self.sandbox.command(
             "python", ["/workspace/main.py"]
-        ).run(check=True, timeout=10)
+        ).run(timeout=10)
         self.assertEqual(output.text().strip(), "hello from python binding")
         self.assertEqual(output.reason, ExitReason.EXITED)
 
@@ -40,8 +40,8 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_iteration_and_reusable_command(self) -> None:
         command = self.sandbox.command("python", ["--version"])
-        self.assertRegex((await command.run(check=True)).text(), r"^Python 3\.")
-        self.assertRegex((await command.run(check=True)).text(), r"^Python 3\.")
+        self.assertRegex((await command.run()).text(), r"^Python 3\.")
+        self.assertRegex((await command.run()).text(), r"^Python 3\.")
 
         process = await command.spawn(stderr="discard")
         self.assertIsNotNone(process.stdout)
@@ -84,9 +84,13 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         with self.assertRaises(ProcessExitError) as raised:
-            await command.run(check=True)
+            await command.run()
         self.assertEqual(raised.exception.output.exit_code, 7)
         self.assertIn("intentional", str(raised.exception))
+
+        unchecked = await command.run(check=False)
+        self.assertEqual(unchecked.exit_code, 7)
+        self.assertEqual(unchecked.reason, ExitReason.EXITED)
 
         blocked = await self.sandbox.command("python").spawn(
             timeout=0.05,

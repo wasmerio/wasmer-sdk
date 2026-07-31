@@ -126,7 +126,7 @@ async function runBrowserAttempt(signal, attempt) {
             const output = await stage("captured-run", () =>
               sandbox
                 .command("python", ["/workspace/main.py"])
-                .run({ check: true }),
+                .run(),
             );
             const written = await stage("file-read", () =>
               sandbox.fs.readText("output.txt"),

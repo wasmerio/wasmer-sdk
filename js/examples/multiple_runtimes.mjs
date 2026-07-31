@@ -20,7 +20,7 @@ try {
   for (const [executable, args] of commands) {
     const output = await sandbox
       .command(executable, args)
-      .run({ check: true });
+      .run();
     console.log(output.text().trim());
   }
 } finally {

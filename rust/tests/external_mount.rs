@@ -2,7 +2,8 @@ use std::{path::Path, sync::Arc};
 
 use tempfile::TempDir;
 use wasmer_sdk::{
-    CacheConfig, Directory, FileSystem, MountMode, PackageSource, Result, Wasmer, WasmerConfig,
+    CacheConfig, Directory, Error, FileSystem, MountMode, PackageSource, Result, Wasmer,
+    WasmerConfig,
 };
 
 const MOUNT_COPY_WAT: &str = r#"
@@ -125,7 +126,7 @@ async fn guest_reads_and_writes_an_external_provider_mount() -> Result<()> {
         .mount("/external", provider, MountMode::ReadWrite)
         .await?;
 
-    sandbox.command("copy-mount").output().await?.check()?;
+    sandbox.command("copy-mount").run().await?;
     assert_eq!(external.read_text("output.txt").await?, "from provider");
     Ok(())
 }
@@ -151,8 +152,11 @@ async fn read_only_mount_rejects_guest_writes() -> Result<()> {
         .mount("/external", provider, MountMode::ReadOnly)
         .await?;
 
-    let output = sandbox.command("copy-mount").output().await?;
-    assert_eq!(output.status.code(), 94);
+    let error = sandbox.command("copy-mount").run().await.unwrap_err();
+    let Error::ProcessExit(error) = error else {
+        panic!("expected a process exit error");
+    };
+    assert_eq!(error.output().status.code(), 94);
     assert!(external.read_text("output.txt").await.is_err());
     Ok(())
 }

@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     let output = sandbox
         .command("python")
         .arg("/workspace/main.py")
-        .output()
+        .run()
         .await?;
 
     println!("{}", output.text()?);
@@ -50,6 +50,11 @@ async fn main() -> Result<()> {
 Package strings can be passed directly to the sandbox builder. Load through
 `wasmer.packages().load(...)` first when the application wants to inspect or
 reuse a `Package`.
+
+`Command::run()` returns `ProcessExitError` for a non-zero exit, termination,
+or timeout. Use `Command::output()` when an unsuccessful outcome is expected
+and should be inspected as an `Output`. Spawned-process `wait()` likewise
+returns the outcome without checking it.
 
 Live processes use Tokio I/O:
 

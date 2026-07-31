@@ -28,13 +28,17 @@ const sandbox = await client.sandboxes.create({
 
 const output = await sandbox
   .command("python", ["/workspace/main.py"])
-  .run({ check: true });
+  .run();
 
 console.log(output.text());
 ```
 
 `new Wasmer()` is synchronous. Package downloads, sandbox creation, commands,
 and shutdown are asynchronous.
+
+`run()` throws `ProcessExitError` for a non-zero exit, termination, or timeout
+by default. Pass `{ check: false }` when the outcome is expected and should be
+inspected as an `Output`.
 
 For live processes, use `spawn()` and iterate the SDK streams directly:
 
@@ -49,6 +53,8 @@ for await (const line of process.stdout.lines()) {
 
 const result = await process.wait({ check: true });
 ```
+
+Unlike `run()`, `process.wait()` is unchecked by default.
 
 Call `sandbox.close()` and `client.close()` when a long-lived application no
 longer needs them.
@@ -90,7 +96,7 @@ const sandbox = await client.sandboxes.create({
 });
 const output = await sandbox
   .command("python", ["-c", "print('Hello from the browser')"])
-  .run({ check: true });
+  .run();
 ```
 
 Worker-backed WASIX execution requires a cross-origin-isolated page so the

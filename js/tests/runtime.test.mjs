@@ -18,7 +18,7 @@ test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   });
   const output = await sandbox
     .command("python", ["-c", "print(sum(range(10)))"])
-    .run({ check: true });
+    .run();
   assert.equal(output.text(), "45\n");
   assert.equal(output.reason, "exited");
   assert.ok(output.ok);
@@ -76,8 +76,18 @@ test("reuses commands and preserves filesystem and stream semantics", async () =
     });
 
     const command = sandbox.command("python", ["--version"]);
-    assert.match((await command.run({ check: true })).text(), /^Python 3\./);
-    assert.match((await command.run({ check: true })).text(), /^Python 3\./);
+    assert.match((await command.run()).text(), /^Python 3\./);
+    assert.match((await command.run()).text(), /^Python 3\./);
+
+    const failing = sandbox.command("python", ["-c", "raise SystemExit(7)"]);
+    await assert.rejects(
+      failing.run(),
+      (error) =>
+        error?.name === "ProcessExitError" && error.output.exitCode === 7,
+    );
+    const unchecked = await failing.run({ check: false });
+    assert.equal(unchecked.exitCode, 7);
+    assert.equal(unchecked.reason, "exited");
 
     await sandbox.fs.writeText("nested/original.txt", "hello");
     await sandbox.fs.rename("nested/original.txt", "nested/renamed.txt");

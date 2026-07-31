@@ -27,7 +27,7 @@ async fn run(sandbox: &Sandbox, command: &str, args: &[&str]) -> Result<()> {
     let output = sandbox
         .command(command)
         .args(args.iter().copied())
-        .output()
+        .run()
         .await?;
     println!("{}", output.text()?.trim());
     Ok(())

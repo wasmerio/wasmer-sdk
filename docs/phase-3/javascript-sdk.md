@@ -87,13 +87,16 @@ const sandbox = await client.sandboxes.create({
 
 const output = await sandbox
   .command("python", ["/workspace/main.py"])
-  .run({ check: true });
+  .run();
 
 console.log(output.text());
 
 await sandbox.close();
 await client.close();
 ```
+
+`Command.run()` throws `ProcessExitError` for an unsuccessful completion by
+default. `{ check: false }` returns that outcome as `Output`.
 
 Live processes use the same command:
 
@@ -148,7 +151,7 @@ await using sandbox = await client.sandboxes.create({
   packages: [localPackage],
 });
 
-const output = await sandbox.command(localPackage).run({ check: true });
+const output = await sandbox.command(localPackage).run();
 ```
 
 ## Package caching

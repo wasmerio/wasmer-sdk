@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
     let output = sandbox
         .command("python")
         .arg("/workspace/hello.py")
-        .output()
+        .run()
         .await?;
 
     println!("{}", output.text()?.trim());

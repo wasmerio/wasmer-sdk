@@ -20,7 +20,7 @@ const sandbox = await client.sandboxes.create({
 
 const output = await sandbox
   .command("python", ["/workspace/hello.py"])
-  .run({ check: true });
+  .run();
 
 console.log(output.text());
 ```
@@ -58,7 +58,8 @@ mounts, and network access into an isolated workspace.
 
 Commands belong to a sandbox:
 
-- `command(...).run()` captures a finite command.
+- `command(...).run()` captures a finite command and fails on an unsuccessful
+  exit by default.
 - `command(...).spawn()` starts a live process with stdin, stdout, stderr,
   termination, and exit status.
 - `sandbox.fs` reads and writes the guest filesystem.
@@ -69,6 +70,10 @@ Commands belong to a sandbox:
 There is deliberately no client-level `run()` shortcut. Every execution has an
 explicit sandbox, which keeps package composition, files, capabilities, and
 process lifetime visible.
+
+JavaScript and Python callers can pass `check: false` or `check=False` when a
+non-zero status is expected. Spawned-process `wait()` remains unchecked so
+applications can inspect every exit reason directly.
 
 ## Pick your SDK
 

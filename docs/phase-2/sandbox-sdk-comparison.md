@@ -34,7 +34,7 @@ await using sandbox = await client.sandboxes.create({
 
 const output = await sandbox
   .command("python", ["-c", "print('hello')"])
-  .run({ check: true });
+  .run();
 ```
 
 This costs one explicit creation step, but it leaves packages, files, mounts,
@@ -517,7 +517,6 @@ await using sandbox = await client.sandboxes.create({
 });
 
 const output = await sandbox.command("python", ["main.py"]).run({
-  check: true,
   timeoutMs: 5_000,
   outputBytes: 1024 * 1024,
 });
@@ -541,7 +540,7 @@ await sandbox.installPackage("wasmer/bash@1.0.25", {
 });
 const output = await sandbox
   .sh`find /workspace -type f | sort`
-  .run({ check: true });
+  .run();
 ```
 
 ### 10.2 Rust
@@ -558,9 +557,8 @@ let output = sandbox
     .command("python")
     .arg("/workspace/main.py")
     .timeout(Duration::from_secs(5))
-    .output()
-    .await?
-    .check()?;
+    .run()
+    .await?;
 
 sandbox.close().await?;
 ```
@@ -674,7 +672,7 @@ the universal API can provide a safer operation:
 
 ```ts
 const pkg = await sandbox.installPackage("namespace/tool@1.2.3");
-await sandbox.command(pkg.command("tool"), args).run({ check: true });
+await sandbox.command(pkg.command("tool"), args).run();
 ```
 
 This is not shorthand for a shell command. It uses the trusted host resolver,
@@ -689,15 +687,16 @@ does not require an `args` property:
 ```ts
 const output = await sandbox
   .command("python", ["-c", code])
-  .run({ check: true });
+  .run();
 
 console.log(output.text());
 ```
 
-`run({ check: true })` preserves the `Output` return type while removing the
-recurring `(await run()).check()` shape. Captured text decoding is synchronous,
-and `Output.text()` means checked stdout. Relative file-seed keys and
-JavaScript filesystem paths resolve against `/workspace`.
+`run()` checks success by default while preserving `Output` as its successful
+return type. `check: false` opts into status-as-data for expected failures.
+Captured text decoding is synchronous, and `Output.text()` means checked
+stdout. Relative file-seed keys and JavaScript filesystem paths resolve
+against `/workspace`.
 
 A `Package` is also a command selector for its entrypoint, so single-command
 packages do not require non-null assertions or manual entrypoint extraction.
@@ -708,9 +707,7 @@ Bun and zx demonstrate the value of tagged shell templates whose interpolated
 values become escaped arguments. Wasmer adopts that safety property:
 
 ```ts
-await sandbox.sh`grep -r ${userQuery} /workspace`.run({
-  check: true,
-});
+await sandbox.sh`grep -r ${userQuery} /workspace`.run();
 ```
 
 Unlike Bun, the SDK does not implement a shell language itself. `sh` and

@@ -44,7 +44,7 @@ sandbox = await client.sandboxes.create(
 )
 output = await sandbox.command(
     "python", ["/workspace/main.py"]
-).run(check=True, timeout=10)
+).run(timeout=10)
 print(output.text())
 ```
 
@@ -78,9 +78,13 @@ Commands are reusable immutable descriptions:
 
 ```python
 command = sandbox.command("python", ["--version"])
-first = await command.run(check=True)
-second = await command.run(check=True)
+first = await command.run()
+second = await command.run()
 ```
+
+`Command.run()` raises `ProcessExitError` for an unsuccessful completion by
+default. `check=False` returns that outcome as `Output`. Spawned-process
+`wait()` remains unchecked.
 
 Captured text decoding is synchronous. `Output.text()` checks success before
 decoding stdout, while `output.stdout.text()` only decodes the retained bytes.

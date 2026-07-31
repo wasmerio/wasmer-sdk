@@ -32,7 +32,7 @@ async def main() -> None:
     )
     output = await sandbox.command(
         "python", ["/workspace/main.py"]
-    ).run(check=True)
+    ).run()
     print(output.text())
 
 
@@ -52,12 +52,17 @@ async def main() -> None:
         async with sandbox:
             output = await sandbox.command(
                 "python", ["--version"]
-            ).run(check=True)
+            ).run()
             print(output.text())
 
 
 asyncio.run(main())
 ```
+
+`run()` raises `ProcessExitError` for a non-zero exit, termination, or timeout
+by default. Pass `check=False` when the outcome is expected and should be
+inspected as an `Output`. Spawned-process `wait()` remains unchecked by
+default.
 
 Live processes expose asynchronous stdin, stdout, and stderr streams.
 `process.stdout.lines()` is an async iterator suitable for servers and agent

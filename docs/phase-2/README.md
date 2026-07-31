@@ -38,7 +38,7 @@ await using sandbox = await client.sandboxes.create({
 await sandbox.fs.writeText("main.py", "print(6 * 7)");
 const result = await sandbox
   .command("python", ["main.py"])
-  .run({ check: true });
+  .run();
 ```
 
 The equivalent Rust API follows Rust conventions rather than mechanically
@@ -58,7 +58,7 @@ sandbox
 let result = sandbox
     .command("python")
     .arg("/workspace/main.py")
-    .output()
+    .run()
     .await?;
 ```
 

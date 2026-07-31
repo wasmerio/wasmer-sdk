@@ -348,7 +348,7 @@ class Command:
         stdin: Optional[FileContents] = None,
         timeout: Optional[float] = None,
         output_bytes: Optional[int] = None,
-        check: bool = False,
+        check: bool = True,
     ) -> Output:
         core_output = await _async(
             self._core.run(

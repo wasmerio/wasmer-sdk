@@ -64,6 +64,7 @@ export interface RunOptions {
   stdin?: string | Uint8Array;
   timeoutMs?: number;
   outputBytes?: number;
+  /** Throw a ProcessExitError when the process is unsuccessful. Defaults to true. */
   check?: boolean;
 }
 
@@ -590,7 +591,9 @@ export class Command {
     if (outputBytes !== undefined) core.outputBytes(outputBytes);
     if (options.stdin !== undefined) core.input(encode(options.stdin));
     const output = Output.fromCore(await rethrow(core.run()));
-    if (options.check && !output.ok) throw new ProcessExitError(output);
+    if (options.check !== false && !output.ok) {
+      throw new ProcessExitError(output);
+    }
     return output;
   }
 
