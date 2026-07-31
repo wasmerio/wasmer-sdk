@@ -103,4 +103,4 @@ jobs:
             core.exportVariable("NPM_ID_TOKEN", token);
 
       - name: Publish with npm trusted publishing
-        run: npm publish npm-package/*.tgz --access public
+        run: npm publish ./npm-package/*.tgz --access public
