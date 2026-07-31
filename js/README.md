@@ -18,8 +18,8 @@ npm install @wasmer/sdk2
 ```javascript
 import { Wasmer } from "@wasmer/sdk2/node";
 
-const client = new Wasmer();
-const sandbox = await client.sandboxes.create({
+const wasmer = new Wasmer();
+const sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.13.5"],
   files: {
     "main.py": "print(sum(number * number for number in range(10)))",
@@ -56,7 +56,7 @@ const result = await process.wait({ check: true });
 
 Unlike `run()`, `process.wait()` is unchecked by default.
 
-Call `sandbox.close()` and `client.close()` when a long-lived application no
+Call `sandbox.close()` and `wasmer.close()` when a long-lived application no
 longer needs them.
 
 ## Node.js networking and caching
@@ -64,7 +64,7 @@ longer needs them.
 Use `network: { mode: "host" }` when a package needs TCP or DNS:
 
 ```javascript
-const sandbox = await client.sandboxes.create({
+const sandbox = await wasmer.sandboxes.create({
   packages: ["wasmer/edgejs-quickjs@0.1.0"],
   network: { mode: "host" },
 });
@@ -75,7 +75,7 @@ Node.js maps WASIX networking to `node:net` and `node:dns`. Its default
 Python SDKs:
 
 ```javascript
-const client = new Wasmer({
+const wasmer = new Wasmer({
   cache: { directory: ".cache/wasmer" },
 });
 ```
@@ -90,8 +90,8 @@ Import the browser entrypoint:
 ```javascript
 import { Wasmer } from "@wasmer/sdk2/browser";
 
-const client = new Wasmer();
-const sandbox = await client.sandboxes.create({
+const wasmer = new Wasmer();
+const sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.13.5"],
 });
 const output = await sandbox

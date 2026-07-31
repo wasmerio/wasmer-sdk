@@ -11,8 +11,8 @@ SOURCE = (
 
 
 async def main() -> None:
-    client = Wasmer()
-    sandbox = await client.sandboxes.create(
+    wasmer = Wasmer()
+    sandbox = await wasmer.sandboxes.create(
         packages=["python/python@3.13.5"],
         files={"hello.py": SOURCE.read_bytes()},
     )

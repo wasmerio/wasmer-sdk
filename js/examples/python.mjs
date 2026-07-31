@@ -6,8 +6,8 @@ const source = await readFile(
   new URL("../../fixtures/python/hello.py", import.meta.url),
 );
 
-const client = new Wasmer();
-const sandbox = await client.sandboxes.create({
+const wasmer = new Wasmer();
+const sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.13.5"],
   files: { "hello.py": source },
 });
@@ -20,5 +20,5 @@ try {
   console.log(output.text().trim());
 } finally {
   await sandbox.close();
-  await client.close();
+  await wasmer.close();
 }

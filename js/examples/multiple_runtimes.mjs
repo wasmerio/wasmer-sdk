@@ -1,7 +1,7 @@
 import { Wasmer } from "@wasmer/sdk2/node";
 
-const client = new Wasmer();
-const sandbox = await client.sandboxes.create({
+const wasmer = new Wasmer();
+const sandbox = await wasmer.sandboxes.create({
   packages: [
     "python/python",
     "wasmer/edgejs-quickjs",
@@ -25,5 +25,5 @@ try {
   }
 } finally {
   await sandbox.close();
-  await client.close();
+  await wasmer.close();
 }

@@ -48,13 +48,13 @@ The default native layout should be added to source control ignore rules:
 Zero configuration uses the target default:
 
 ```ts
-const client = new Wasmer();
+const wasmer = new Wasmer();
 ```
 
 An explicit project root and cache:
 
 ```ts
-const client = new Wasmer({
+const wasmer = new Wasmer({
   projectRoot: "/absolute/path/to/project",
   cache: {
     directory: ".wasmer",
@@ -152,7 +152,7 @@ The default configuration captures `std::env::current_dir()` once and uses
 ### Browser
 
 ```ts
-const client = new Wasmer({
+const wasmer = new Wasmer({
   cache: {
     namespace: "my-editor",
     packages: true,
@@ -444,7 +444,7 @@ Exact package references can resolve offline when all required package content
 is already cached:
 
 ```ts
-const client = new Wasmer({
+const wasmer = new Wasmer({
   registry: { mode: "offline" },
   cache: {
     directory: ".wasmer",

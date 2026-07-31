@@ -29,7 +29,7 @@ workers instead of parking the main agent.
 Workers instantiate the same compiled SDK module with the same
 `WebAssembly.Memory`. Scheduler messages structured-clone compiled guest
 modules and guest memories where needed, while boxed Rust callbacks are
-addressed through the shared linear memory. `client.close()` closes the
+addressed through the shared linear memory. `wasmer.close()` closes the
 scheduler and terminates both idle and busy workers, and dropping the last
 client reference closes them as a leak guard.
 
@@ -70,7 +70,7 @@ separate `node:dgram` adapter is implemented.
 
 Construction is synchronous. Runtime initialization starts on the first
 asynchronous operation and is shared by all operations on that client. Use
-`await client.ready()` when initialization errors should surface eagerly.
+`await wasmer.ready()` when initialization errors should surface eagerly.
 `await Wasmer.create(options)` remains as a compatibility factory.
 `await using` remains an optional cleanup convenience, not the canonical
 construction syntax.
@@ -78,9 +78,9 @@ construction syntax.
 ```ts
 import { Wasmer } from "@wasmer/sdk2/node";
 
-const client = new Wasmer();
-const python = await client.packages.load("python/python@3.12");
-const sandbox = await client.sandboxes.create({
+const wasmer = new Wasmer();
+const python = await wasmer.packages.load("python/python@3.12");
+const sandbox = await wasmer.sandboxes.create({
   packages: [python],
   files: { "main.py": "print('hello')" },
 });
@@ -92,7 +92,7 @@ const output = await sandbox
 console.log(output.text());
 
 await sandbox.close();
-await client.close();
+await wasmer.close();
 ```
 
 `Command.run()` throws `ProcessExitError` for an unsuccessful completion by
@@ -145,9 +145,9 @@ Local packages are passed as bytes because a browser has no ambient host path:
 
 ```ts
 const webc = new Uint8Array(await file.arrayBuffer());
-const localPackage = await client.packages.load(webc);
+const localPackage = await wasmer.packages.load(webc);
 
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: [localPackage],
 });
 
@@ -161,7 +161,7 @@ Node stores them under `.wasmer`; the directory can be changed or made
 read-only:
 
 ```ts
-const client = new Wasmer({
+const wasmer = new Wasmer({
   cache: {
     directory: "/var/cache/my-app/wasmer",
     readOnly: false,

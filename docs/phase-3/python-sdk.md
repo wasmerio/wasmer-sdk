@@ -35,9 +35,9 @@ Construction is synchronous; operations that can perform I/O are asynchronous:
 ```python
 from wasmer_sdk import Wasmer
 
-client = Wasmer(cache_root=".wasmer")
-python = await client.packages.load("python/python@3.12")
-sandbox = await client.sandboxes.create(
+wasmer = Wasmer(cache_root=".wasmer")
+python = await wasmer.packages.load("python/python@3.12")
+sandbox = await wasmer.sandboxes.create(
     packages=[python],
     files={"main.py": "print('hello')"},
     env={"APP_ENV": "test"},
@@ -50,7 +50,7 @@ print(output.text())
 
 There is no `await Wasmer(...)`. `async with Wasmer(...)` remains available as
 optional deterministic-cleanup sugar for long-lived applications and tests,
-but it does not make construction asynchronous. `await client.close()` is
+but it does not make construction asynchronous. `await wasmer.close()` is
 likewise optional when deterministic cleanup matters.
 
 Package sources have unambiguous Python types:
@@ -69,9 +69,9 @@ Local and in-memory packages use the same object model:
 ```python
 from pathlib import Path
 
-local = await client.packages.load(Path("./dist/tool.webc"))
-in_memory = await client.packages.load(webc_bytes)
-sandbox = await client.sandboxes.create(packages=[local, in_memory])
+local = await wasmer.packages.load(Path("./dist/tool.webc"))
+in_memory = await wasmer.packages.load(webc_bytes)
+sandbox = await wasmer.sandboxes.create(packages=[local, in_memory])
 ```
 
 Commands are reusable immutable descriptions:

@@ -16,7 +16,7 @@ pretend every registry package supports every target.
 On Node.js and native desktop hosts, this is enough:
 
 ```ts
-const client = new Wasmer();
+const wasmer = new Wasmer();
 ```
 
 It captures the current project root and uses `.wasmer` beneath it for
@@ -25,7 +25,7 @@ content-addressed packages and target-partitioned compiled artifacts.
 An explicit location is equally simple:
 
 ```ts
-const client = new Wasmer({
+const wasmer = new Wasmer({
   projectRoot: "/absolute/path/to/project",
   cache: {
     directory: ".wasmer",
@@ -39,7 +39,7 @@ const client = new Wasmer({
 Browser examples use the same logical cache with browser storage:
 
 ```ts
-const client = new Wasmer({
+const wasmer = new Wasmer({
   cache: {
     namespace: "sandbox-examples",
     packages: true,
@@ -62,9 +62,9 @@ longer workflow.
 ```ts
 import { Wasmer } from "@wasmer/sdk2";
 
-const client = new Wasmer();
+const wasmer = new Wasmer();
 
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.12"],
 });
 
@@ -117,11 +117,11 @@ filesystem setup calls.
 ### JavaScript host
 
 ```ts
-const edgejs = await client.packages.load(
+const edgejs = await wasmer.packages.load(
   "wasmer/edgejs-quickjs@0.0.3",
 );
 
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: [edgejs],
   files: {
     "main.js": `
@@ -179,7 +179,7 @@ application discovers the required tool after the sandbox already exists.
 ### JavaScript
 
 ```ts
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   env: {
     APP_ENV: "test",
   },
@@ -276,7 +276,7 @@ const input = new Uint8Array(await fetch("/photo.png").then((r) =>
   r.arrayBuffer()
 ));
 
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["namespace/image-tools@<tested-pin>"],
   files: {
     "input.png": input,
@@ -331,7 +331,7 @@ let artifact = sandbox
 ### JavaScript
 
 ```ts
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.12"],
   files: {
     "progress.py": `
@@ -385,7 +385,7 @@ the command exits. Start both output readers before writing input so a chatty
 guest cannot block on a full pipe.
 
 ```ts
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.12"],
   files: {
     "uppercase.py": `
@@ -480,7 +480,7 @@ stdin/stdout pipes.
 ### Browser JavaScript with xterm.js
 
 ```ts
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["wasmer/bash@1.0.25"],
 });
 
@@ -565,7 +565,7 @@ may additionally expose a loopback URL.
 ### JavaScript
 
 ```ts
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["namespace/http-app@<tested-pin>"],
 });
 
@@ -635,7 +635,7 @@ const check = await client.preflight({
 });
 check.requireCompatible();
 
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: [POSTGRES],
   mounts: [
     {
@@ -683,7 +683,7 @@ build, `preflight()` must say so directly.
 Guest network is denied unless the application grants it.
 
 ```ts
-await using offline = await client.sandboxes.create({
+await using offline = await wasmer.sandboxes.create({
   packages: ["namespace/app@<tested-pin>"],
   network: { mode: "disabled" },
 });
@@ -692,7 +692,7 @@ await using offline = await client.sandboxes.create({
 Unrestricted host networking is a conspicuous opt-in and may not be available:
 
 ```ts
-await using online = await client.sandboxes.create({
+await using online = await wasmer.sandboxes.create({
   packages: ["namespace/app@<tested-pin>"],
   network: { mode: "host" },
 });
@@ -716,7 +716,7 @@ const report = await client.preflight({
 
 report.requireCompatible();
 
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["namespace/app@<tested-pin>"],
   network: policy,
   minimumEnforcement: "hard",
@@ -734,7 +734,7 @@ Limits are part of creation or execution, not a separate policy language.
 ### JavaScript
 
 ```ts
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.12"],
   limits: {
     memoryBytes: 128 * 1024 * 1024,
@@ -822,7 +822,7 @@ const shared = await Directory.create({
   "input.json": JSON.stringify({ values: [1, 2, 3] }),
 });
 
-await using producer = await client.sandboxes.create({
+await using producer = await wasmer.sandboxes.create({
   packages: ["namespace/producer@<tested-pin>"],
   mounts: [
     { guest: "/shared", directory: shared, mode: "read-write" },
@@ -833,7 +833,7 @@ await producer
   .command("produce", ["/shared/input.json", "/shared/output.bin"])
   .run();
 
-await using consumer = await client.sandboxes.create({
+await using consumer = await wasmer.sandboxes.create({
   packages: ["namespace/consumer@<tested-pin>"],
   mounts: [
     { guest: "/shared", directory: shared, mode: "read-only" },
@@ -856,7 +856,7 @@ read-only by default and unavailable in browser builds.
 ### Node.js
 
 ```ts
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["namespace/compiler@<tested-pin>"],
   mounts: [
     {
@@ -898,7 +898,7 @@ import {
   Wasmer,
 } from "@wasmer/sdk2/browser";
 
-const client = new Wasmer();
+const wasmer = new Wasmer();
 
 const handle = await window.showDirectoryPicker({
   mode: "readwrite",
@@ -918,7 +918,7 @@ const report = await client.preflight({
 });
 report.requireCompatible();
 
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.12"],
   mounts: [{
     guest: "/project",
@@ -945,7 +945,7 @@ const volume = await BrowserFileSystem.fromDirectoryHandle(opfsRoot, {
   access: "read-write",
 });
 
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["namespace/database@<tested-pin>"],
   mounts: [{
     guest: "/data",
@@ -976,7 +976,7 @@ export the same name.
 ### JavaScript
 
 ```ts
-const tools = await client.packages.load("namespace/toolbox@1.2.3");
+const tools = await wasmer.packages.load("namespace/toolbox@1.2.3");
 
 console.table(
   tools.manifest.commands.map((command) => ({
@@ -987,7 +987,7 @@ console.table(
 
 const formatter = tools.command("format");
 
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: [tools],
   files: {
     "main.txt": "unformatted",
@@ -1085,7 +1085,7 @@ more privileged operation.
 
 ```ts
 const jobs = inputs.map(async (input) => {
-  await using sandbox = await client.sandboxes.create({
+  await using sandbox = await wasmer.sandboxes.create({
     packages: ["namespace/worker@<tested-pin>"],
     files: {
       "input.json": JSON.stringify(input),

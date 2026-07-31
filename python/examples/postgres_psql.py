@@ -61,8 +61,8 @@ async def main() -> None:
     if not args.psql:
         raise SystemExit("psql was not found; install it or pass --psql")
 
-    async with Wasmer(output_bytes=256 * 1024) as client:
-        sandbox = await client.sandboxes.create(
+    async with Wasmer(output_bytes=256 * 1024) as wasmer:
+        sandbox = await wasmer.sandboxes.create(
             packages=["wasmer/pglite@0.1.0"],
             network="host",
         )

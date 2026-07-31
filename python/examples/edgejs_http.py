@@ -38,8 +38,8 @@ def reserve_port() -> int:
 async def main() -> None:
     port = reserve_port()
 
-    async with Wasmer(output_bytes=256 * 1024) as client:
-        sandbox = await client.sandboxes.create(
+    async with Wasmer(output_bytes=256 * 1024) as wasmer:
+        sandbox = await wasmer.sandboxes.create(
             packages=["wasmer/edgejs-quickjs@0.1.0"],
             files={"server.js": SERVER_SOURCE.read_bytes()},
             env={"PORT": str(port)},

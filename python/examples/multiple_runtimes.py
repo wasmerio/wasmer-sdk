@@ -4,8 +4,8 @@ from wasmer_sdk import Wasmer
 
 
 async def main() -> None:
-    client = Wasmer()
-    sandbox = await client.sandboxes.create(
+    wasmer = Wasmer()
+    sandbox = await wasmer.sandboxes.create(
         packages=[
             "python/python",
             "wasmer/edgejs-quickjs",

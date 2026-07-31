@@ -12,8 +12,8 @@ const query = fileURLToPath(
   new URL("../../fixtures/postgres/query.sql", import.meta.url),
 );
 
-const client = new Wasmer({ outputBytes: 256 * 1024 });
-const sandbox = await client.sandboxes.create({
+const wasmer = new Wasmer({ outputBytes: 256 * 1024 });
+const sandbox = await wasmer.sandboxes.create({
   packages: ["wasmer/pglite@0.1.0"],
   network: { mode: "host" },
 });
@@ -46,7 +46,7 @@ try {
   throw new Error(`${error}\nPostgreSQL stderr:\n${output.stderr.text()}`);
 } finally {
   await sandbox.close();
-  await client.close();
+  await wasmer.close();
 }
 
 async function waitForLine(lines, marker, timeoutMs) {

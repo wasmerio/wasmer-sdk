@@ -56,9 +56,9 @@ There is no client-level `run()`. Execution belongs to a sandbox because even a 
 `run()` and `spawn()` instead live on `Command`:
 
 ```ts
-const client = new Wasmer();
-const python = await client.packages.load("python/python@3.12");
-const sandbox = await client.sandboxes.create({
+const wasmer = new Wasmer();
+const python = await wasmer.packages.load("python/python@3.12");
+const sandbox = await wasmer.sandboxes.create({
   packages: [python],
   files: { "main.py": "print('hello')" },
 });

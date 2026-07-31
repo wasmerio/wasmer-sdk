@@ -8,8 +8,8 @@ const serverSource = await readFile(
   new URL("../../fixtures/edgejs/server.js", import.meta.url),
 );
 const port = await reservePort();
-const client = new Wasmer();
-const sandbox = await client.sandboxes.create({
+const wasmer = new Wasmer();
+const sandbox = await wasmer.sandboxes.create({
   packages: ["wasmer/edgejs-quickjs@0.1.0"],
   files: { "server.js": serverSource },
   env: { PORT: String(port) },
@@ -32,7 +32,7 @@ try {
   await guest.terminate({ gracePeriodMs: 2_000 });
   await guest.wait();
   await sandbox.close();
-  await client.close();
+  await wasmer.close();
 }
 
 async function waitForLine(lines, marker, timeoutMs) {

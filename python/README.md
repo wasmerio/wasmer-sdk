@@ -23,8 +23,8 @@ from wasmer_sdk import Wasmer
 
 
 async def main() -> None:
-    client = Wasmer()
-    sandbox = await client.sandboxes.create(
+    wasmer = Wasmer()
+    sandbox = await wasmer.sandboxes.create(
         packages=["python/python@3.13.5"],
         files={
             "main.py": "print(sum(n * n for n in range(10)))",
@@ -45,8 +45,8 @@ deterministic cleanup:
 
 ```python
 async def main() -> None:
-    async with Wasmer() as client:
-        sandbox = await client.sandboxes.create(
+    async with Wasmer() as wasmer:
+        sandbox = await wasmer.sandboxes.create(
             packages=["python/python@3.13.5"],
         )
         async with sandbox:
@@ -73,7 +73,7 @@ loops.
 Network access is an explicit sandbox capability:
 
 ```python
-sandbox = await client.sandboxes.create(
+sandbox = await wasmer.sandboxes.create(
     packages=["wasmer/edgejs-quickjs@0.1.0"],
     network="host",
 )
@@ -82,7 +82,7 @@ sandbox = await client.sandboxes.create(
 Packages and native compiled artifacts are cached in `.wasmer` by default:
 
 ```python
-client = Wasmer(cache_root=".cache/wasmer")
+wasmer = Wasmer(cache_root=".cache/wasmer")
 ```
 
 The registry and downloaded package layout is shared with Node.js and Rust.

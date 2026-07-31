@@ -28,7 +28,7 @@ The conclusion is:
 The short path remains short:
 
 ```ts
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.12"],
 });
 
@@ -450,8 +450,8 @@ Adding a `CommandRef` overload blurs the distinction further.
 With the revised proposal:
 
 ```ts
-client.packages.load(source);
-client.sandboxes.create(options);
+wasmer.packages.load(source);
+wasmer.sandboxes.create(options);
 sandbox.command(command, args, options).run();
 ```
 
@@ -493,7 +493,7 @@ The explicit line communicates that execution creates an isolated environment
 with a lifecycle:
 
 ```ts
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.12"],
 });
 ```
@@ -506,9 +506,9 @@ belong.
 ### 10.1 JavaScript
 
 ```ts
-const client = new Wasmer();
+const wasmer = new Wasmer();
 
-await using sandbox = await client.sandboxes.create({
+await using sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.12"],
   files: {
     "main.py": "print(sum(range(10)))",

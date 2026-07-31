@@ -12,8 +12,8 @@ long-lived processes under your control.
 ```javascript
 import { Wasmer } from "@wasmer/sdk2/node";
 
-const client = new Wasmer();
-const sandbox = await client.sandboxes.create({
+const wasmer = new Wasmer();
+const sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.13.5"],
   files: { "hello.py": "print('Hello from Wasmer')" },
 });
@@ -52,8 +52,8 @@ runs the same Edge.js server, Python program, and PostgreSQL query.
 ## One small, composable API
 
 A `Wasmer` client owns package resolution, workers, networking, and the local
-cache. `client.packages` resolves reusable packages.
-`client.sandboxes.create()` composes packages, files, environment variables,
+cache. `wasmer.packages` resolves reusable packages.
+`wasmer.sandboxes.create()` composes packages, files, environment variables,
 mounts, and network access into an isolated workspace.
 
 Commands belong to a sandbox:
