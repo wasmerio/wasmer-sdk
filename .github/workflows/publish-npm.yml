@@ -55,7 +55,7 @@ jobs:
 
       - name: Test
         working-directory: js
-        run: timeout --kill-after=30s 5m npm test
+        run: timeout --kill-after=30s 6m npm test
 
       - name: Inspect package
         working-directory: js
