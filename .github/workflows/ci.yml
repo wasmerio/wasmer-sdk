@@ -29,7 +29,7 @@ jobs:
 
       - uses: ./.github/actions/cache-sdk
         with:
-          cargo-profile: native-1.94
+          cargo-profile: native-1.94-debug
 
       - name: Install Rust
         run: rustup toolchain install 1.94.0 --profile minimal --no-self-update
@@ -61,7 +61,7 @@ jobs:
 
       - uses: ./.github/actions/cache-sdk
         with:
-          cargo-profile: js-nightly
+          cargo-profile: js-nightly-release
           cache-compiled-artifacts: "false"
 
       - name: Install Rust and wasm-bindgen
@@ -152,7 +152,7 @@ jobs:
 
       - uses: ./.github/actions/cache-sdk
         with:
-          cargo-profile: native-1.94
+          cargo-profile: native-1.94-release
 
       - name: Check release metadata
         run: python .github/scripts/check-release-version.py

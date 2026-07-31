@@ -83,7 +83,7 @@ jobs:
 
       - uses: ./.github/actions/cache-sdk
         with:
-          cargo-profile: native-1.94
+          cargo-profile: native-1.94-release
 
       - name: Install Rust
         shell: bash

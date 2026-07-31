@@ -3,7 +3,7 @@ description: Cache Cargo outputs and Wasmer package/runtime data.
 
 inputs:
   cargo-profile:
-    description: Cache namespace for the Rust target and feature set.
+    description: Cache namespace for the Rust target, feature set, and build mode.
     required: true
   cache-compiled-artifacts:
     description: Cache native Wasmer compiled modules for this target.
