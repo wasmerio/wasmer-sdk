@@ -44,7 +44,18 @@ try {
   assert.equal(await page.evaluate(() => globalThis.crossOriginIsolated), true);
   assert.match(
     await page.locator("#package-name").textContent(),
-    /^sharrattj\/bash@/,
+    /^wasmer\/bash@/,
+  );
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
+      "echo $((6 * 7)) > bash-result.txt\ncat bash-result.txt\n",
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("42"),
+    undefined,
+    { timeout: 30_000 },
   );
 
   await page.evaluate(async () => {

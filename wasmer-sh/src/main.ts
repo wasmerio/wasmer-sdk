@@ -12,15 +12,14 @@ import {
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 
-const DEFAULT_PACKAGE = "sharrattj/bash";
+const DEFAULT_PACKAGE = "wasmer/bash";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "python/python",
-  "wasmer/edgejs-quickjs",
+  "wasmer/edgejs-quickjs@0.1.1",
   "php/php-32",
 ];
 const TRANSCRIPT_LIMIT = 128 * 1024;
-const PROMPT_USER = "\x1b[38;5;141mwasmer\x1b[0m@\x1b[38;5;81mweb\x1b[0m";
 
 interface ShellConfig {
   packageName: string;
@@ -31,7 +30,6 @@ interface ShellConfig {
 
 interface ActiveSession {
   sandbox: Sandbox;
-  mainPackage: Package;
   process?: Process;
   stdin?: WritableBytes;
 }
@@ -105,12 +103,9 @@ const fit = new FitAddon();
 let activeSession: ActiveSession | undefined;
 let generation = 0;
 let inputQueue = Promise.resolve();
-let currentDirectory = "/workspace";
-let lineBuffer = "";
 let processInputBuffer = "";
 let pendingProcessInput = "";
 let transcript = "";
-let acceptingCommands = false;
 
 terminal.loadAddon(fit);
 terminal.open(elements.terminal);
@@ -159,11 +154,8 @@ async function start(): Promise<void> {
   try {
     await closeActiveSession();
     transcript = "";
-    lineBuffer = "";
     processInputBuffer = "";
     pendingProcessInput = "";
-    currentDirectory = "/workspace";
-    acceptingCommands = false;
     terminal.reset();
     fitTerminal();
 
@@ -202,15 +194,12 @@ async function start(): Promise<void> {
       return;
     }
 
-    activeSession = { sandbox, mainPackage };
-    setState("running", "Ready");
+    activeSession = { sandbox };
     setBusy(false);
     terminal.focus();
 
     if (isManagedShell(config)) {
-      acceptingCommands = true;
-      writeWelcome();
-      writePrompt();
+      await runInteractiveShell(currentGeneration, sandbox, mainPackage);
     } else {
       await runPassthrough(currentGeneration, sandbox, mainPackage);
     }
@@ -229,104 +218,74 @@ async function handleTerminalData(data: string): Promise<void> {
     await handleProcessInput(data, session.process, session.stdin);
     return;
   }
-  if (!acceptingCommands) {
-    pendingProcessInput += data;
-    return;
-  }
-
-  for (const character of data) {
-    if (character === "\r" || character === "\n") {
-      writeTerminal("\r\n");
-      const commandLine = lineBuffer;
-      lineBuffer = "";
-      acceptingCommands = false;
-      pendingProcessInput = "";
-      void executeCommandLine(commandLine);
-      return;
-    }
-    if (character === "\x7f" || character === "\b") {
-      if (lineBuffer.length > 0) {
-        lineBuffer = lineBuffer.slice(0, -1);
-        writeTerminal("\b \b");
-      }
-      continue;
-    }
-    if (character === "\x03") {
-      lineBuffer = "";
-      writeTerminal("^C\r\n");
-      writePrompt();
-      continue;
-    }
-    if (character === "\x0c") {
-      terminal.clear();
-      writePrompt();
-      continue;
-    }
-    if (character === "\x1b" || character < " ") continue;
-    lineBuffer += character;
-    writeTerminal(character);
-  }
+  pendingProcessInput += data;
 }
 
-async function executeCommandLine(commandLine: string): Promise<void> {
+async function runInteractiveShell(
+  processGeneration: number,
+  sandbox: Sandbox,
+  mainPackage: Package,
+): Promise<void> {
   const session = activeSession;
   if (!session) return;
 
+  writeWelcome();
+  setState("running", "Starting Bash");
+  const process = await sandbox
+    .command(
+      mainPackage,
+      ["--noprofile", "--rcfile", "/workspace/.bashrc", "-i"],
+      { cwd: "/workspace" },
+    )
+    .spawn({
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      outputBytes: 1024 * 1024,
+    });
+  if (!process.stdin || !process.stdout || !process.stderr) {
+    await process.kill();
+    throw new Error("Bash did not expose its requested streams.");
+  }
+
+  session.process = process;
+  session.stdin = process.stdin;
+  processInputBuffer = "";
+  const streams = Promise.allSettled([
+    pumpOutput(process.stdout),
+    pumpOutput(process.stderr),
+  ]);
+  if (pendingProcessInput) {
+    const pending = pendingProcessInput;
+    pendingProcessInput = "";
+    await handleProcessInput(pending, process, process.stdin);
+  }
+  setState("running", "Ready");
+  terminal.focus();
+  void monitorInteractiveShell(processGeneration, session, process, streams);
+}
+
+async function monitorInteractiveShell(
+  processGeneration: number,
+  session: ActiveSession,
+  process: Process,
+  streams: Promise<PromiseSettledResult<void>[]>,
+): Promise<void> {
   try {
-    const words = parseCommandLine(commandLine);
-    if (words.length === 0) return;
-    const [commandName, ...args] = words;
-
-    if (await runBuiltin(commandName!, args, session.sandbox)) return;
-
-    setState("running", `Running · ${commandName}`);
-    const selector = session.mainPackage.commands.includes(commandName!)
-      ? session.mainPackage.command(commandName!)
-      : commandName!;
-    const processArgs = interactiveArguments(commandName!, args);
-    const process = await session.sandbox
-      .command(selector, processArgs, { cwd: currentDirectory })
-      .spawn({
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        outputBytes: 1024 * 1024,
-      });
-    if (!process.stdin || !process.stdout || !process.stderr) {
-      await process.kill();
-      throw new Error("The process did not expose its requested streams.");
-    }
-
-    session.process = process;
-    session.stdin = process.stdin;
-    processInputBuffer = "";
-    if (pendingProcessInput) {
-      const pending = pendingProcessInput;
-      pendingProcessInput = "";
-      await handleProcessInput(pending, process, process.stdin);
-    }
-    const streams = Promise.allSettled([
-      pumpOutput(process.stdout),
-      pumpOutput(process.stderr),
-    ]);
     const output = await process.wait();
     await streams;
+    if (processGeneration !== generation || activeSession !== session) return;
     session.process = undefined;
     session.stdin = undefined;
     processInputBuffer = "";
-
-    if (!output.ok) {
-      writeTerminal(
-        `\r\n\x1b[38;5;203m[${output.reason} · status ${output.exitCode}]\x1b[0m`,
-      );
-    }
+    setState("exited", `Bash exited · ${output.exitCode}`);
+    writeTerminal(
+      `\r\n\x1b[38;5;244m[Bash ${output.reason} with status ${output.exitCode}]\x1b[0m\r\n`,
+    );
   } catch (error) {
-    writeTerminal(`\x1b[38;5;203mwasmer.sh: ${describeError(error)}\x1b[0m`);
-  } finally {
-    if (activeSession === session) {
-      setState("running", "Ready");
-      acceptingCommands = true;
-      writePrompt();
+    if (processGeneration === generation && activeSession === session) {
+      setState("error", "Bash failed");
+      showTerminalError(error);
     }
   }
 }
@@ -367,57 +326,6 @@ async function handleProcessInput(
     if (character === "\x1b" || character < " ") continue;
     processInputBuffer += character;
     writeTerminal(character);
-  }
-}
-
-async function runBuiltin(
-  command: string,
-  args: string[],
-  sandbox: Sandbox,
-): Promise<boolean> {
-  switch (command) {
-    case "clear":
-      terminal.clear();
-      return true;
-    case "pwd":
-      writeTerminal(`${currentDirectory}\r\n`);
-      return true;
-    case "help":
-      writeTerminal(
-        [
-          "\x1b[38;5;141mwasmer.sh commands\x1b[0m",
-          "  Run any command exported by the installed Wasmer packages.",
-          "  Built-ins: cd, clear, help, packages, pwd",
-          "",
-          "Try:",
-          "  ls -lah",
-          "  python -c \"print('hello from Python')\"",
-          "  edge -e \"console.log('hello from Edge.js')\"",
-          "  php -r \"echo 'hello from PHP';\"",
-          "",
-        ].join("\r\n"),
-      );
-      return true;
-    case "packages":
-      writeTerminal(
-        `${[config.packageName, ...config.uses].join("\r\n")}\r\n`,
-      );
-      return true;
-    case "cd": {
-      if (args.length > 1) throw new Error("cd expects at most one path");
-      const destination = resolveGuestPath(
-        currentDirectory,
-        args[0] ?? "/workspace",
-      );
-      const stat = await sandbox.fs.stat(destination);
-      if (stat.kind !== "directory") {
-        throw new Error(`${destination}: not a directory`);
-      }
-      currentDirectory = destination;
-      return true;
-    }
-    default:
-      return false;
   }
 }
 
@@ -507,97 +415,10 @@ function writeWelcome(): void {
   );
 }
 
-function writePrompt(): void {
-  const displayDirectory =
-    currentDirectory === "/workspace"
-      ? "~"
-      : currentDirectory.startsWith("/workspace/")
-        ? `~${currentDirectory.slice("/workspace".length)}`
-        : currentDirectory;
-  writeTerminal(
-    `${PROMPT_USER}:\x1b[38;5;117m${displayDirectory}\x1b[0m$ `,
-  );
-  terminal.focus();
-}
-
 function writeTerminal(value: string): void {
   if (!value) return;
   appendTranscript(value);
   terminal.write(value);
-}
-
-function parseCommandLine(input: string): string[] {
-  const words: string[] = [];
-  let word = "";
-  let quote: "'" | '"' | undefined;
-  let escaped = false;
-  let started = false;
-
-  for (const character of input) {
-    if (escaped) {
-      word += character;
-      escaped = false;
-      started = true;
-      continue;
-    }
-    if (character === "\\" && quote !== "'") {
-      escaped = true;
-      started = true;
-      continue;
-    }
-    if (quote) {
-      if (character === quote) quote = undefined;
-      else word += character;
-      started = true;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      started = true;
-      continue;
-    }
-    if (/\s/.test(character)) {
-      if (started) {
-        words.push(word);
-        word = "";
-        started = false;
-      }
-      continue;
-    }
-    word += character;
-    started = true;
-  }
-
-  if (escaped) word += "\\";
-  if (quote) throw new Error(`unterminated ${quote} quote`);
-  if (started) words.push(word);
-  return words;
-}
-
-function resolveGuestPath(cwd: string, requested: string): string {
-  const segments = (requested.startsWith("/") ? requested : `${cwd}/${requested}`)
-    .split("/")
-    .filter(Boolean);
-  const resolved: string[] = [];
-  for (const segment of segments) {
-    if (segment === ".") continue;
-    if (segment === "..") resolved.pop();
-    else resolved.push(segment);
-  }
-  return `/${resolved.join("/")}`;
-}
-
-function interactiveArguments(command: string, args: string[]): string[] {
-  if (args.length > 0) return args;
-  switch (command) {
-    case "python":
-    case "edge":
-      return ["-i"];
-    case "php":
-      return ["-a"];
-    default:
-      return args;
-  }
 }
 
 function selectCommand(mainPackage: Package): CommandSelector {
@@ -632,6 +453,23 @@ function readConfig(params: URLSearchParams): ShellConfig {
 
 function workspaceFiles(): Record<string, string> {
   return {
+    ".bashrc": `# wasmer.sh is a real Bash session. Keep runtime conveniences here
+# so Bash—not the browser—owns command parsing and process execution.
+PS1='\\[\\033[38;5;141m\\]wasmer\\[\\033[0m\\]@\\[\\033[38;5;81m\\]web\\[\\033[0m\\]:\\[\\033[38;5;117m\\]\\w\\[\\033[0m\\]$ '
+HISTFILE=/workspace/.bash_history
+
+# These runtimes need an explicit interactive flag because SDK stdin is a
+# stream rather than a host pseudo-terminal. Arguments keep their normal form.
+python() {
+  if [ "$#" -eq 0 ]; then command python -i; else command python "$@"; fi
+}
+edge() {
+  if [ "$#" -eq 0 ]; then command edge -i; else command edge "$@"; fi
+}
+php() {
+  if [ "$#" -eq 0 ]; then command php -a; else command php "$@"; fi
+}
+`,
     "README.txt": `wasmer.sh
 =========
 

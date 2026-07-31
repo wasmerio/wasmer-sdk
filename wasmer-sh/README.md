@@ -3,11 +3,12 @@
 A fast, browser-native command shell powered by Wasmer, WASIX, and the new
 [`@wasmer/sdk2`](../js) sandbox API.
 
-The application loads `sharrattj/bash` as a package of Unix commands, creates
-one persistent sandbox and launches each command as a real WASIX process. The
-prompt, working directory and line editing live in the browser, while command
-execution and the filesystem stay inside the sandbox. This keeps the terminal
-responsive and makes process ownership explicit:
+The application loads `wasmer/bash`, creates one persistent sandbox, and
+connects xterm to one long-lived interactive Bash process. Bash owns the
+prompt, quoting, expansion, working directory, redirection, pipes, built-ins,
+and child processes; the browser only transports terminal input and output.
+Commands therefore have normal shell semantics instead of being parsed or
+emulated by the UI:
 
 ```ts
 const wasmer = new Wasmer();
@@ -17,28 +18,32 @@ const sandbox = await wasmer.sandboxes.create({
     unix,
     "wasmer/neatvi",
     "python/python",
-    "wasmer/edgejs-quickjs",
+    "wasmer/edgejs-quickjs@0.1.1",
     "php/php-32",
   ],
-  files: { "hello.txt": "Hello from Wasmer.\n" },
+  files: { ".bashrc": "PS1='wasmer@web:\\w$ '" },
 });
 
-const output = await sandbox.command("cat", ["hello.txt"]).run();
-console.log(output.text());
+const bash = await sandbox.command(
+  unix,
+  ["--rcfile", "/workspace/.bashrc", "-i"],
+).spawn({ stdin: "pipe", stdout: "pipe", stderr: "pipe" });
 ```
 
 The default shell therefore exposes Unix utilities alongside `python`, `edge`
 and `php`:
 
 ```console
+echo "hello" > hello.txt && cat hello.txt
+find /workspace -type f | sort | head
 python -c "print('hello from Python')"
 edge -e "console.log('hello from Edge.js')"
 php -r "echo 'hello from PHP';"
 ```
 
 Running `python`, `edge`, or `php` without arguments automatically selects
-that runtime's interactive mode. Input is line-buffered by the browser shell,
-with local echo, backspace, Ctrl-C termination, and Ctrl-D EOF handling.
+that runtime's interactive mode. Those programs inherit the same Bash stdin
+stream, so their REPLs return naturally to the shell when they exit.
 
 Package data is persisted in the browser cache under the `wasmer.sh`
 namespace, so subsequent sessions avoid downloading the same packages again.
@@ -77,8 +82,8 @@ npx playwright install chromium
 npm test
 ```
 
-The test verifies cross-origin isolation, waits for the sandbox, submits a
-`printf` command and checks its generated output rather than terminal echo.
+The test verifies cross-origin isolation, checks real Bash arithmetic and file
+redirection, and exercises the Python and Edge.js REPLs through Bash stdin.
 
 ## URL parameters
 
