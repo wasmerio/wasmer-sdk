@@ -87,6 +87,34 @@ pub(crate) struct PipeReader {
     eof: bool,
 }
 
+impl PipeReader {
+    fn poll_read_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
+        if let Some(pending) = &self.pending {
+            return Poll::Ready(Ok(pending.len().saturating_sub(self.offset)));
+        }
+        if self.eof {
+            return Poll::Ready(Ok(0));
+        }
+
+        loop {
+            match self.receiver.poll_recv(cx) {
+                Poll::Ready(Some(PipeMessage::Data(bytes))) if bytes.is_empty() => continue,
+                Poll::Ready(Some(PipeMessage::Data(bytes))) => {
+                    let available = bytes.len();
+                    self.pending = Some(bytes);
+                    self.offset = 0;
+                    return Poll::Ready(Ok(available));
+                }
+                Poll::Ready(Some(PipeMessage::Close) | None) => {
+                    self.eof = true;
+                    return Poll::Ready(Ok(0));
+                }
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
 impl AsyncRead for PipeReader {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -345,8 +373,11 @@ impl VirtualFile for PipeVirtualFile {
         Ok(())
     }
 
-    fn poll_read_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
-        Poll::Ready(Ok(8192))
+    fn poll_read_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
+        let Some(reader) = self.reader.as_mut() else {
+            return Poll::Ready(Ok(0));
+        };
+        Pin::new(reader).poll_read_ready(cx)
     }
 
     fn poll_write_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
@@ -453,6 +484,12 @@ impl VirtualFile for RetainedOutput {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    use futures::task::noop_waker_ref;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::bounded_pipe;
@@ -487,5 +524,30 @@ mod tests {
             writer.write_all(b"y").await.unwrap_err().kind(),
             std::io::ErrorKind::BrokenPipe
         );
+    }
+
+    #[tokio::test]
+    async fn read_readiness_waits_for_data_and_reports_eof() {
+        let (mut reader, mut writer, _closer) = bounded_pipe(4);
+        let mut cx = Context::from_waker(noop_waker_ref());
+
+        assert!(matches!(
+            Pin::new(&mut reader).poll_read_ready(&mut cx),
+            Poll::Pending
+        ));
+
+        writer.write_all(b"x").await.unwrap();
+        assert!(matches!(
+            Pin::new(&mut reader).poll_read_ready(&mut cx),
+            Poll::Ready(Ok(1))
+        ));
+
+        let mut byte = [0];
+        reader.read_exact(&mut byte).await.unwrap();
+        writer.shutdown().await.unwrap();
+        assert!(matches!(
+            Pin::new(&mut reader).poll_read_ready(&mut cx),
+            Poll::Ready(Ok(0))
+        ));
     }
 }

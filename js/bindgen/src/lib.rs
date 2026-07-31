@@ -34,7 +34,7 @@ use wasmer_sdk::{
     ProcessStdin, ProcessStdout, Sandbox, SandboxBuilder, Stdio, Wasmer, WasmerConfig,
 };
 use wasmer_wasix::PluggableRuntime;
-use wasmer_wasix::runtime::{package_loader::PackageCache, resolver::QueryCache};
+use wasmer_wasix::runtime::{DefaultTty, package_loader::PackageCache, resolver::QueryCache};
 
 pub use tasks::ThreadPoolWorker;
 
@@ -95,6 +95,7 @@ impl JsWasmer {
         };
         let tasks = Arc::new(tasks::ThreadPool::new());
         let mut runtime = PluggableRuntime::new(Arc::clone(&tasks) as Arc<_>);
+        runtime.set_tty(Arc::new(DefaultTty::default()));
         if let Some(bridge) = node_network {
             runtime.set_networking_implementation(NodeNetworking::new(bridge));
         }

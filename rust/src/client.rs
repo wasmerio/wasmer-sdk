@@ -17,6 +17,8 @@ use wasmer_wasix::runtime::{
 };
 #[cfg(feature = "js")]
 use wasmer_wasix::runtime::{package_loader::PackageCache, resolver::QueryCache};
+#[cfg(feature = "sys")]
+use wasmer_wasix::runtime::DefaultTty;
 use wasmer_wasix::{
     PluggableRuntime,
     bin_factory::BinaryPackage,
@@ -177,6 +179,7 @@ impl Wasmer {
         );
         let mut runtime = PluggableRuntime::new(Arc::clone(&tasks) as Arc<_>);
         runtime
+            .set_tty(Arc::new(DefaultTty::default()))
             .set_module_cache(module_cache)
             .set_source(source)
             .set_package_loader(

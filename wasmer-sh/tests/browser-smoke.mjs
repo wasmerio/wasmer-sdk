@@ -79,8 +79,15 @@ try {
   );
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send("python\n");
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes(">>> "),
+    undefined,
+    { timeout: 120_000 },
+  );
+  await page.evaluate(async () => {
     await globalThis.__wasmerShell.send(
-      "print('PYTHON_' + 'STDIN_OK')\n",
+      "import os, sys; sys.stderr.write('PYTHON_' + 'STDIN_OK write=' + str(os.write(1, b'RAW_' + b'STDOUT')) + '\\n')\n",
     );
   });
   await page.waitForFunction(
@@ -88,19 +95,27 @@ try {
     undefined,
     { timeout: 120_000 },
   );
+  console.log(await page.evaluate(() => globalThis.__wasmerShell.snapshot()));
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send("exit()\n");
   });
   await page.waitForFunction(
-    () => document.querySelector("#session-status")?.textContent === "Ready",
+    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
     undefined,
     { timeout: 30_000 },
   );
 
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send("edge\n");
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().endsWith("> "),
+    undefined,
+    { timeout: 120_000 },
+  );
+  await page.evaluate(async () => {
     await globalThis.__wasmerShell.send(
-      "console.log('EDGE_' + 'STDIN_OK')\n",
+      "console.error('EDGE_' + 'STDIN_OK')\n",
     );
   });
   await page.waitForFunction(
@@ -112,7 +127,7 @@ try {
     await globalThis.__wasmerShell.send(".exit\n");
   });
   await page.waitForFunction(
-    () => document.querySelector("#session-status")?.textContent === "Ready",
+    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
     undefined,
     { timeout: 30_000 },
   );
