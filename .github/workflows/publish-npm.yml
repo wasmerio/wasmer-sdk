@@ -34,7 +34,9 @@ jobs:
       - name: Install Rust and wasm-bindgen
         run: |
           rustup toolchain install nightly --profile minimal --component rust-src --target wasm32-unknown-unknown --no-self-update
-          cargo +nightly install wasm-bindgen-cli --version 0.2.126 --locked
+          if ! wasm-bindgen --version 2>/dev/null | grep -qx "wasm-bindgen 0.2.126"; then
+            cargo +nightly install wasm-bindgen-cli --version 0.2.126 --locked --force
+          fi
 
       - name: Install JavaScript dependencies
         working-directory: js
