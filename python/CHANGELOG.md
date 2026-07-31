@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.1...v0.1.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* **python:** check command failures by default ([fbe71f9](https://github.com/wasmerio/wasmer-sdk/commit/fbe71f95ee1a259a5b8ef7bd0306077defb0b78f))
+
 ## [0.1.1](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.0...v0.1.1) (2026-07-30)
 
 
