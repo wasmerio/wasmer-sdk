@@ -25,6 +25,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
 
 jobs:
@@ -79,6 +80,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: native-1.94
 
       - name: Install Rust
         shell: bash

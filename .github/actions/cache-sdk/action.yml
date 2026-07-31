@@ -1,0 +1,49 @@
+name: Cache Wasmer SDK builds
+description: Cache Cargo outputs and Wasmer package/runtime data.
+
+inputs:
+  cargo-profile:
+    description: Cache namespace for the Rust target and feature set.
+    required: true
+  cache-compiled-artifacts:
+    description: Cache native Wasmer compiled modules for this target.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Restore Cargo build cache
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          ~/.cargo/bin/wasm-bindgen
+          ~/.cargo/bin/wasm-bindgen-test-runner
+          ~/.cargo/bin/wasm2es6js
+          target
+        key: cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cargo-profile }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+        restore-keys: |
+          cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cargo-profile }}-
+
+    - name: Restore Wasmer registry and package cache
+      uses: actions/cache@v6
+      with:
+        path: |
+          .wasmer/cache-v1/registry
+          .wasmer/cache-v1/packages
+          !.wasmer/cache-v1/packages/__temp__
+        key: wasmer-packages-v1-${{ hashFiles('rust/examples/**', 'rust/tests/**', 'js/tests/**', 'python/examples/**', 'python/tests/**') }}
+        restore-keys: |
+          wasmer-packages-v1-
+
+    - name: Restore native Wasmer compiled artifacts
+      if: inputs.cache-compiled-artifacts == 'true'
+      uses: actions/cache@v6
+      with:
+        path: .wasmer/cache-v1/compiled
+        key: wasmer-compiled-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          wasmer-compiled-v1-${{ runner.os }}-${{ runner.arch }}-

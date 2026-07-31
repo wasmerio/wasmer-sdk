@@ -7,6 +7,9 @@ concurrency:
   group: publish-npm
   cancel-in-progress: false
 
+env:
+  CARGO_INCREMENTAL: 0
+
 jobs:
   publish:
     name: Publish @wasmer/sdk2
@@ -24,6 +27,11 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: js-nightly
+          cache-compiled-artifacts: "false"
 
       - name: Install an OIDC-capable npm CLI
         run: npm install --global npm@11.12.1

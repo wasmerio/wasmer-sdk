@@ -16,6 +16,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
 
 jobs:
@@ -25,6 +26,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: native-1.94
 
       - name: Install Rust
         run: rustup toolchain install 1.94.0 --profile minimal --no-self-update
@@ -53,6 +58,11 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: js/package-lock.json
+
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: js-nightly
+          cache-compiled-artifacts: "false"
 
       - name: Install Rust and wasm-bindgen
         run: |
@@ -137,6 +147,10 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: python/pyproject.toml
+
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: native-1.94
 
       - name: Check release metadata
         run: python .github/scripts/check-release-version.py
