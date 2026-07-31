@@ -21,11 +21,11 @@ The repository root pins the required Wasmer revisions in its
 ## Run Python inside Wasmer
 
 ```rust
-use wasmer_sdk::{Result, Wasmer, WasmerConfig};
+use wasmer_sdk::{Result, Wasmer};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let wasmer = Wasmer::new(WasmerConfig::default())?;
+    let wasmer = Wasmer::new()?;
     let sandbox = wasmer
         .sandboxes()
         .create()
@@ -95,10 +95,10 @@ let sandbox = wasmer
     .await?;
 ```
 
-`WasmerConfig::default()` stores registry metadata, packages, and compiled
-artifacts in `.wasmer`. Use `CacheConfig` to select another root. Registry and
-package data can be shared with Python and Node.js, while compiled artifacts
-are partitioned by native target.
+`Wasmer::new()` stores registry metadata, packages, and compiled artifacts in
+`.wasmer`. Use `Wasmer::with_config(...)` and `CacheConfig` to select another
+root. Registry and package data can be shared with Python and Node.js, while
+compiled artifacts are partitioned by native target.
 
 ## Examples
 

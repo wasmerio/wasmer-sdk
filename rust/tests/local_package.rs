@@ -60,7 +60,7 @@ async fn runs_a_local_package_with_finite_stdio_and_a_persistent_workspace() -> 
     write_echo_package(fixture.path());
 
     let state = TempDir::new().expect("create SDK state directory");
-    let client = Wasmer::new(WasmerConfig {
+    let client = Wasmer::with_config(WasmerConfig {
         cache: CacheConfig {
             root: state.path().join(".wasmer"),
         },
@@ -97,7 +97,7 @@ async fn runs_a_local_package_with_finite_stdio_and_a_persistent_workspace() -> 
     drop(client);
 
     std::thread::sleep(std::time::Duration::from_millis(25));
-    let client = Wasmer::new(WasmerConfig {
+    let client = Wasmer::with_config(WasmerConfig {
         cache: CacheConfig {
             root: state.path().join(".wasmer"),
         },
@@ -124,7 +124,7 @@ async fn installs_after_creation_and_selects_a_package_entrypoint() -> Result<()
     let fixture = TempDir::new().expect("create fixture directory");
     write_echo_package(fixture.path());
     let state = TempDir::new().expect("create SDK state directory");
-    let client = Wasmer::new(WasmerConfig {
+    let client = Wasmer::with_config(WasmerConfig {
         cache: CacheConfig {
             root: state.path().join(".wasmer"),
         },
@@ -160,7 +160,7 @@ async fn command_environment_overrides_the_sandbox_environment() -> Result<()> {
     let fixture = TempDir::new().expect("create fixture directory");
     write_echo_package(fixture.path());
     let state = TempDir::new().expect("create SDK state directory");
-    let client = Wasmer::new(WasmerConfig {
+    let client = Wasmer::with_config(WasmerConfig {
         cache: CacheConfig {
             root: state.path().join(".wasmer"),
         },

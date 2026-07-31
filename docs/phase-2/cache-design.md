@@ -143,7 +143,7 @@ let wasmer = Wasmer::builder()
 Defaults remain concise:
 
 ```rust
-let wasmer = Wasmer::new(WasmerConfig::default())?;
+let wasmer = Wasmer::new()?;
 ```
 
 The default configuration captures `std::env::current_dir()` once and uses

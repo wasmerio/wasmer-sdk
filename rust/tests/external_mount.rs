@@ -110,7 +110,7 @@ async fn guest_reads_and_writes_an_external_provider_mount() -> Result<()> {
     let fixture = TempDir::new().expect("create fixture directory");
     write_package(fixture.path());
     let state = TempDir::new().expect("create SDK state directory");
-    let client = Wasmer::new(WasmerConfig {
+    let client = Wasmer::with_config(WasmerConfig {
         cache: CacheConfig {
             root: state.path().join(".wasmer"),
         },
@@ -136,7 +136,7 @@ async fn read_only_mount_rejects_guest_writes() -> Result<()> {
     let fixture = TempDir::new().expect("create fixture directory");
     write_package(fixture.path());
     let state = TempDir::new().expect("create SDK state directory");
-    let client = Wasmer::new(WasmerConfig {
+    let client = Wasmer::with_config(WasmerConfig {
         cache: CacheConfig {
             root: state.path().join(".wasmer"),
         },

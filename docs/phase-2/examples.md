@@ -82,11 +82,11 @@ console.log(output.text().trim()); // 285
 
 ```rust
 use std::time::Duration;
-use wasmer_sdk::{Result, Wasmer, WasmerConfig};
+use wasmer_sdk::{Result, Wasmer};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let wasmer = Wasmer::new(WasmerConfig::default())?;
+    let wasmer = Wasmer::new()?;
 
     let sandbox = wasmer
         .sandboxes().create()

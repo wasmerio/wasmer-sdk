@@ -3,7 +3,7 @@ mod support;
 use std::{env, ffi::OsString, path::PathBuf, process::Command as HostCommand, time::Duration};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
-use wasmer_sdk::{Error, NetworkPolicy, Result, Stdio, Wasmer, WasmerConfig};
+use wasmer_sdk::{Error, NetworkPolicy, Result, Stdio, Wasmer};
 
 const PORT: u16 = 5432;
 
@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| OsString::from("psql"));
     let query = support::fixture("postgres/query.sql");
 
-    let wasmer = Wasmer::new(WasmerConfig::default())?;
+    let wasmer = Wasmer::new()?;
     let sandbox = wasmer
         .sandboxes()
         .create()

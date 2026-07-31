@@ -1076,9 +1076,9 @@ target runtime.
 ### 7.1 Client
 
 ```rust
-use wasmer_sdk::{Result, Wasmer, WasmerConfig};
+use wasmer_sdk::{Result, Wasmer};
 
-let wasmer = Wasmer::new(WasmerConfig::default())?;
+let wasmer = Wasmer::new()?;
 
 let package = wasmer
     .packages()
@@ -1099,7 +1099,8 @@ Proposed core shape:
 pub struct Wasmer { /* shared internals */ }
 
 impl Wasmer {
-    pub fn new(config: WasmerConfig) -> Result<Self>;
+    pub fn new() -> Result<Self>;
+    pub fn with_config(config: WasmerConfig) -> Result<Self>;
     pub fn capabilities(&self) -> &Capabilities;
     pub fn packages(&self) -> Packages;
     pub fn sandboxes(&self) -> Sandboxes;
@@ -1401,7 +1402,7 @@ The concepts line up while each language keeps its native shape:
 
 | Concept | Rust | JavaScript | Python veneer | Swift veneer |
 | --- | --- | --- | --- | --- |
-| Configure client | `Wasmer::new(config)` | `new Wasmer(options)` | `Wasmer(config)` / async open | `try await Wasmer(options:)` |
+| Configure client | `Wasmer::new()` / `Wasmer::with_config(config)` | `new Wasmer(options)` | `Wasmer(config)` / async open | `try await Wasmer(options:)` |
 | Create sandbox | `wasmer.sandboxes().create().await` | `wasmer.sandboxes.create()` | `wasmer.sandboxes.create()` | `wasmer.sandboxes.create()` |
 | Install package | `sandbox.install_package(source)` | `sandbox.installPackage(source)` | `sandbox.install_package(source)` | `sandbox.installPackage(source:)` |
 | Checked command | `sandbox.command(cmd).run()` | `sandbox.command(cmd, args, options).run()` | `sandbox.command(cmd, args=[...]).run()` | `sandbox.command(cmd, args:, options:).run()` |

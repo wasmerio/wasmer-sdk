@@ -119,7 +119,7 @@ impl WasmerCore {
         }
         let inner = {
             let _guard = context.enter();
-            Wasmer::new(config).map_err(SdkError::from)?
+            Wasmer::with_config(config).map_err(SdkError::from)?
         };
         Ok(Arc::new(Self { context, inner }))
     }

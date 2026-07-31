@@ -104,7 +104,7 @@ async fn local_package_root_is_copy_on_write_and_child_mounts_are_visible() -> R
     let fixture = TempDir::new().expect("create fixture directory");
     write_package(fixture.path());
     let state = TempDir::new().expect("create SDK state directory");
-    let client = Wasmer::new(WasmerConfig {
+    let client = Wasmer::with_config(WasmerConfig {
         cache: CacheConfig {
             root: state.path().join(".wasmer"),
         },

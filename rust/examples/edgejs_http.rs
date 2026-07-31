@@ -7,7 +7,7 @@ use std::{
 };
 
 use tokio::io::{AsyncBufReadExt, BufReader};
-use wasmer_sdk::{Error, NetworkPolicy, Result, Stdio, Wasmer, WasmerConfig};
+use wasmer_sdk::{Error, NetworkPolicy, Result, Stdio, Wasmer};
 
 const RESPONSE_MARKER: &str = "<h1>Hello from Edge.js!</h1>";
 
@@ -15,7 +15,7 @@ const RESPONSE_MARKER: &str = "<h1>Hello from Edge.js!</h1>";
 async fn main() -> Result<()> {
     let port = reserve_loopback_port()?;
     let server_js = std::fs::read(support::fixture("edgejs/server.js"))?;
-    let wasmer = Wasmer::new(WasmerConfig::default())?;
+    let wasmer = Wasmer::new()?;
     let sandbox = wasmer
         .sandboxes()
         .create()

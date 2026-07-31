@@ -225,7 +225,7 @@ async fn closing_a_sandbox_preserves_a_natural_unwaited_exit() -> Result<()> {
 }
 
 fn client(state: &TempDir) -> Result<Wasmer> {
-    Wasmer::new(WasmerConfig {
+    Wasmer::with_config(WasmerConfig {
         cache: CacheConfig {
             root: state.path().join(".wasmer"),
         },

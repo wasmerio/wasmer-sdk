@@ -100,14 +100,25 @@ impl std::fmt::Debug for Wasmer {
 }
 
 impl Wasmer {
-    /// Create a client and initialize its package and compiled-artifact caches.
+    /// Create a client with the default configuration.
     ///
     /// # Errors
     ///
     /// Returns an error when the cache directories, async runtime, or target
     /// HTTP client cannot be initialized.
     #[cfg(feature = "sys")]
-    pub fn new(config: WasmerConfig) -> Result<Self> {
+    pub fn new() -> Result<Self> {
+        Self::with_config(WasmerConfig::default())
+    }
+
+    /// Create a client with explicit configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the cache directories, async runtime, or target
+    /// HTTP client cannot be initialized.
+    #[cfg(feature = "sys")]
+    pub fn with_config(config: WasmerConfig) -> Result<Self> {
         let http_client: Arc<dyn HttpClient + Send + Sync> =
             Arc::new(wasmer_wasix::http::default_http_client().ok_or_else(|| {
                 Error::Initialization {

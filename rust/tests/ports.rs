@@ -14,7 +14,7 @@ async fn port_wait_uses_one_wall_clock_timeout() -> Result<()> {
     drop(listener);
 
     let state = TempDir::new().expect("create SDK state directory");
-    let client = Wasmer::new(WasmerConfig {
+    let client = Wasmer::with_config(WasmerConfig {
         cache: CacheConfig {
             root: state.path().join(".wasmer"),
         },
@@ -54,7 +54,7 @@ async fn successful_port_wait_opens_and_closes_a_real_connection() -> Result<()>
     });
 
     let state = TempDir::new().expect("create SDK state directory");
-    let client = Wasmer::new(WasmerConfig {
+    let client = Wasmer::with_config(WasmerConfig {
         cache: CacheConfig {
             root: state.path().join(".wasmer"),
         },

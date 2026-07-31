@@ -1,8 +1,8 @@
-use wasmer_sdk::{Result, Sandbox, Wasmer, WasmerConfig};
+use wasmer_sdk::{Result, Sandbox, Wasmer};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let wasmer = Wasmer::new(WasmerConfig::default())?;
+    let wasmer = Wasmer::new()?;
     let sandbox = wasmer
         .sandboxes()
         .create()
