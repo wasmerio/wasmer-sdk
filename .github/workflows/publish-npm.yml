@@ -28,7 +28,7 @@ jobs:
 
       - uses: ./.github/actions/cache-sdk
         with:
-          cargo-profile: js-nightly-release
+          cargo-profile: js-nightly
           cache-compiled-artifacts: "false"
 
       - name: Install Rust and wasm-bindgen
