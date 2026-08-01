@@ -39,7 +39,20 @@ find /workspace -type f | sort | head
 python -c "print('hello from Python')"
 edge -e "console.log('hello from Edge.js')"
 php -r "echo 'hello from PHP';"
+php -S 0.0.0.0:8000 -t /workspace
+node server.js
+python server.py
 ```
+
+When a command opens an HTTP listener, wasmer.sh detects the port and opens a
+live preview beside the terminal. The preview stays attached to the guest, so
+absolute URLs and subresources are routed back to the same WASIX server.
+The workspace includes `server.js`, a small Node-compatible HTTP server backed
+by `wasmer/edgejs-quickjs`; run it with `node server.js` and stop it with
+Ctrl-C. Closing the listener closes its preview automatically.
+`server.py` provides the same example with Python's standard-library
+`HTTPServer`; run it with `python server.py` or choose a port with
+`PORT=3000 python server.py`.
 
 Running `python`, `edge`, or `php` without arguments lets each runtime detect
 the inherited terminal and select its interactive mode. Their REPLs return

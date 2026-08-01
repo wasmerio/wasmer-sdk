@@ -69,6 +69,17 @@ impl BrowserHttpRequestHandler {
         state.listeners.keys().any(|address| address.port() == port)
     }
 
+    pub(crate) fn listening_ports(&self) -> Vec<u16> {
+        let mut state = self.state.lock().expect("browser HTTP network poisoned");
+        state
+            .listeners
+            .retain(|_, listener| listener.strong_count() > 0);
+        let mut ports: Vec<_> = state.listeners.keys().map(SocketAddr::port).collect();
+        ports.sort_unstable();
+        ports.dedup();
+        ports
+    }
+
     pub(crate) async fn handle(
         &self,
         request: Request<Bytes>,

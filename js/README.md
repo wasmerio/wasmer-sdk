@@ -161,6 +161,19 @@ const server = await sandbox.ports.expose(8080, { serviceWorker });
 document.body.append(server.createIframe({ title: "PHP preview" }));
 ```
 
+Shell-style applications can discover ports instead of knowing them in
+advance:
+
+```javascript
+const stopWatching = sandbox.ports.onListen((port) => {
+  void sandbox.ports
+    .expose(port, { serviceWorker })
+    .then((server) => document.body.append(server.createIframe()));
+}, {
+  onClose: (port) => console.log(`server on ${port} closed`),
+});
+```
+
 `server.url` is also available for custom UI. The service worker follows the
 iframe's browser client, so absolute links and subresource requests continue
 to reach the same guest listener. Closing the server unregisters its route;

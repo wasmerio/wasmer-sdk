@@ -107,6 +107,13 @@ export interface ExposePortOptions {
   timeoutMs?: number;
 }
 
+export interface PortListenerOptions {
+  /** Listener discovery interval. Defaults to 50 milliseconds. */
+  intervalMs?: number;
+  /** Called when a previously observed listener closes. */
+  onClose?: (port: number) => void;
+}
+
 export interface BrowserIframeOptions {
   title?: string;
   className?: string;
@@ -579,6 +586,7 @@ export class Sandbox {
 export class Ports {
   readonly #core: SandboxCore;
   readonly #servers = new Set<BrowserServer>();
+  readonly #watchers = new Set<() => void>();
 
   constructor(core: SandboxCore) {
     this.#core = core;
@@ -677,8 +685,65 @@ export class Ports {
     }
   }
 
+  /**
+   * Observe HTTP listeners opened by browser guests.
+   *
+   * Existing listeners are delivered immediately. A port is delivered again
+   * if its listener closes and a later process binds it again.
+   */
+  onListen(
+    listener: (port: number) => void,
+    options: PortListenerOptions = {},
+  ): () => void {
+    const intervalMs = validateInteger(
+      "intervalMs",
+      options.intervalMs ?? 50,
+      10,
+      60_000,
+    );
+    // Validate the network mode synchronously instead of failing later inside
+    // an interval callback.
+    rethrowSync(() => this.#core.httpListeningPorts());
+    const observed = new Set<number>();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let active = true;
+    const poll = () => {
+      if (!active) return;
+      try {
+        const current = new Set<number>(this.#core.httpListeningPorts());
+        for (const port of current) {
+          if (!observed.has(port)) listener(port);
+        }
+        for (const port of observed) {
+          if (!current.has(port)) {
+            observed.delete(port);
+            options.onClose?.(port);
+          }
+        }
+        for (const port of current) observed.add(port);
+      } catch (error) {
+        stop();
+        queueMicrotask(() => {
+          throw toWasmerError(error);
+        });
+        return;
+      }
+      timer = setTimeout(poll, intervalMs);
+    };
+    const stop = () => {
+      if (!active) return;
+      active = false;
+      if (timer !== undefined) clearTimeout(timer);
+      this.#watchers.delete(stop);
+    };
+    this.#watchers.add(stop);
+    poll();
+    return stop;
+  }
+
   /** Close every browser HTTP route owned by this sandbox. */
   async close(): Promise<void> {
+    for (const stop of [...this.#watchers]) stop();
     await Promise.all([...this.#servers].map((server) => server.close()));
   }
 }

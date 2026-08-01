@@ -458,6 +458,18 @@ impl JsSandbox {
         Ok(handler.has_listener(port))
     }
 
+    /// Browser HTTP ingress ports currently owned by guest listeners.
+    #[wasm_bindgen(js_name = httpListeningPorts)]
+    pub fn http_listening_ports(&self) -> Result<Vec<u16>, JsValue> {
+        let handler = self.browser_http.as_ref().ok_or_else(|| {
+            custom_error(
+                "CAPABILITY_UNAVAILABLE",
+                "the sandbox was not created with browser HTTP networking",
+            )
+        })?;
+        Ok(handler.listening_ports())
+    }
+
     /// Forward one structured HTTP request into a guest TCP listener.
     #[wasm_bindgen(js_name = handleHttpRequest)]
     pub async fn handle_http_request(

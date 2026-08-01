@@ -134,6 +134,85 @@ try {
     { timeout: 30_000 },
   );
 
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
+      "printf '<h1 id=php-preview>PHP_PREVIEW_OK</h1>' > index.php\rphp -S 0.0.0.0:8000 -t /workspace\r",
+    );
+  });
+  await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
+  const preview = page.frameLocator("#preview-panel iframe");
+  await preview.locator("#php-preview").waitFor({ timeout: 60_000 });
+  assert.equal(
+    await preview.locator("#php-preview").textContent(),
+    "PHP_PREVIEW_OK",
+  );
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send("\x03");
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.locator("#preview-panel").waitFor({
+    state: "hidden",
+    timeout: 30_000,
+  });
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send("node server.js\r");
+  });
+  await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
+  const nodePreview = page.frameLocator("#preview-panel iframe");
+  await nodePreview.locator("#node-preview").waitFor({ timeout: 60_000 });
+  assert.equal(
+    await nodePreview.locator("#node-preview").textContent(),
+    "Hello from Node.js!",
+  );
+  await nodePreview
+    .locator("#node-health")
+    .filter({ hasText: "/health is ready" })
+    .waitFor({ timeout: 30_000 });
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send("\x03");
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.locator("#preview-panel").waitFor({
+    state: "hidden",
+    timeout: 30_000,
+  });
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send("python server.py\r");
+  });
+  await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
+  const pythonPreview = page.frameLocator("#preview-panel iframe");
+  await pythonPreview.locator("#python-preview").waitFor({ timeout: 60_000 });
+  assert.equal(
+    await pythonPreview.locator("#python-preview").textContent(),
+    "Hello from Python!",
+  );
+  await pythonPreview
+    .locator("#python-health")
+    .filter({ hasText: "/health is ready" })
+    .waitFor({ timeout: 30_000 });
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send("\x03");
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.locator("#preview-panel").waitFor({
+    state: "hidden",
+    timeout: 30_000,
+  });
+
   console.log("wasmer.sh browser smoke test passed");
 } catch (error) {
   console.error(error);

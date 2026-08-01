@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vite";
@@ -6,6 +7,7 @@ const crossOriginIsolationHeaders = {
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Embedder-Policy": "require-corp",
 };
+const root = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   server: {
@@ -32,6 +34,18 @@ export default defineConfig({
     target: "es2022",
     modulePreload: {
       polyfill: false,
+    },
+    rollupOptions: {
+      input: {
+        app: resolve(root, "index.html"),
+        "wasmer-service-worker": resolve(root, "wasmer-service-worker.ts"),
+      },
+      output: {
+        entryFileNames: (chunk) =>
+          chunk.name === "wasmer-service-worker"
+            ? "wasmer-service-worker.js"
+            : "assets/[name]-[hash].js",
+      },
     },
   },
 });

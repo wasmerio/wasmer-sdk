@@ -1,6 +1,7 @@
 import "./styles.css";
 
 import {
+  type BrowserServer,
   type CommandSelector,
   type Package,
   type Process,
@@ -32,6 +33,9 @@ interface ActiveSession {
   sandbox: Sandbox;
   process?: Process;
   stdin?: WritableBytes;
+  stopWatchingPorts?: () => void;
+  preview?: { port: number; server: BrowserServer };
+  pendingPreviewPorts: Set<number>;
 }
 
 interface DevelopmentShellApi {
@@ -47,6 +51,7 @@ declare global {
 }
 
 const elements = {
+  stage: document.querySelector<HTMLElement>(".shell-stage")!,
   terminal: requiredElement<HTMLDivElement>("terminal"),
   status: requiredElement<HTMLSpanElement>("session-status"),
   packageName: requiredElement<HTMLSpanElement>("package-name"),
@@ -55,6 +60,11 @@ const elements = {
   clear: requiredElement<HTMLButtonElement>("clear-button"),
   restart: requiredElement<HTMLButtonElement>("restart-button"),
   retry: requiredElement<HTMLButtonElement>("retry-button"),
+  previewPanel: requiredElement<HTMLElement>("preview-panel"),
+  previewContent: requiredElement<HTMLDivElement>("preview-content"),
+  previewTitle: requiredElement<HTMLSpanElement>("preview-title"),
+  previewOpen: requiredElement<HTMLAnchorElement>("preview-open"),
+  previewClose: requiredElement<HTMLButtonElement>("preview-close"),
 };
 
 const config = readConfig(new URLSearchParams(window.location.search));
@@ -105,6 +115,7 @@ let generation = 0;
 let inputQueue = Promise.resolve();
 let pendingProcessInput = "";
 let transcript = "";
+let serviceWorkerRegistration: Promise<ServiceWorkerRegistration> | undefined;
 
 terminal.loadAddon(fit);
 terminal.open(elements.terminal);
@@ -127,6 +138,10 @@ elements.clear.addEventListener("click", () => {
 });
 elements.restart.addEventListener("click", () => void start());
 elements.retry.addEventListener("click", () => void start());
+elements.previewClose.addEventListener("click", () => {
+  const session = activeSession;
+  if (session) void closePreview(session);
+});
 window.addEventListener("pagehide", () => void dispose());
 
 if (import.meta.env.DEV) {
@@ -181,6 +196,7 @@ async function start(): Promise<void> {
     const sandbox = await wasmer.sandboxes.create({
       packages: [mainPackage, ...uses],
       files: workspaceFiles(),
+      network: { mode: "http" },
       env: {
         HOME: "/workspace",
         USER: "wasmer",
@@ -195,7 +211,21 @@ async function start(): Promise<void> {
       return;
     }
 
-    activeSession = { sandbox };
+    const session: ActiveSession = {
+      sandbox,
+      pendingPreviewPorts: new Set(),
+    };
+    activeSession = session;
+    session.stopWatchingPorts = sandbox.ports.onListen(
+      (port) => {
+        void openPreview(session, port).catch(showTerminalError);
+      },
+      {
+        onClose: (port) => {
+          if (session.preview?.port === port) void closePreview(session);
+        },
+      },
+    );
     setBusy(false);
     terminal.focus();
 
@@ -349,6 +379,9 @@ async function closeActiveSession(): Promise<void> {
   inputQueue = Promise.resolve();
   if (!session) return;
 
+  session.stopWatchingPorts?.();
+  await closePreview(session);
+
   if (session.process) {
     try {
       await session.process.kill();
@@ -358,6 +391,69 @@ async function closeActiveSession(): Promise<void> {
     }
   }
   await session.sandbox.close();
+}
+
+async function openPreview(session: ActiveSession, port: number): Promise<void> {
+  if (
+    activeSession !== session ||
+    session.preview?.port === port ||
+    session.pendingPreviewPorts.has(port)
+  ) {
+    return;
+  }
+  session.pendingPreviewPorts.add(port);
+  try {
+    const registration = await getServiceWorkerRegistration();
+    const server = await session.sandbox.ports.expose(port, {
+      serviceWorker: registration,
+    });
+    if (activeSession !== session) {
+      await server.close();
+      return;
+    }
+    await closePreview(session);
+    session.preview = { port, server };
+    elements.previewContent.replaceChildren(
+      server.createIframe({ title: `localhost:${port}` }),
+    );
+    elements.previewTitle.textContent = `localhost:${port}`;
+    elements.previewOpen.href = server.url.href;
+    elements.previewPanel.hidden = false;
+    elements.stage.classList.add("has-preview");
+    fitTerminal();
+    writeTerminal(
+      `\r\n\x1b[38;5;81m[web server listening on port ${port} · preview opened]\x1b[0m\r\n`,
+    );
+  } finally {
+    session.pendingPreviewPorts.delete(port);
+  }
+}
+
+async function closePreview(session: ActiveSession): Promise<void> {
+  const preview = session.preview;
+  session.preview = undefined;
+  if (preview) await preview.server.close();
+  if (activeSession === session || activeSession === undefined) {
+    elements.previewContent.replaceChildren();
+    elements.previewPanel.hidden = true;
+    elements.stage.classList.remove("has-preview");
+    fitTerminal();
+  }
+}
+
+function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration> {
+  serviceWorkerRegistration ??= navigator.serviceWorker
+    .register(
+      import.meta.env.DEV
+        ? "/wasmer-service-worker.ts"
+        : "/wasmer-service-worker.js",
+      { scope: "/", type: "module" },
+    )
+    .catch((error: unknown) => {
+      serviceWorkerRegistration = undefined;
+      throw error;
+    });
+  return serviceWorkerRegistration;
 }
 
 async function dispose(): Promise<void> {
@@ -437,6 +533,9 @@ Things to try:
   python -c "print('hello from Python')"
   edge -e "console.log('hello from Edge.js')"
   php -r "echo 'hello from PHP';"
+  php -S 0.0.0.0:8000 -t /workspace
+  node server.js
+  python server.py
 
 Package data is cached by the browser for faster future starts.
 `,
@@ -446,6 +545,114 @@ int main(void) {
     printf("Hello World from WebAssembly!\\n");
     return 0;
 }
+`,
+    "server.js": `const http = require("node:http");
+
+const host = "0.0.0.0";
+const port = Number(process.env.PORT || 8000);
+
+const server = http.createServer((request, response) => {
+  const body = request.url === "/health"
+    ? JSON.stringify({ ok: true })
+    : \`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Node.js on Wasmer</title>
+    <style>
+      body { font: 18px system-ui; max-width: 680px; margin: 12vh auto; padding: 0 24px; color: #20172b; }
+      code { color: #7040a0; }
+    </style>
+  </head>
+  <body>
+    <h1 id="node-preview">Hello from Node.js!</h1>
+    <p><code>\${request.method} \${request.url}</code>, served by Edge.js inside WASIX.</p>
+    <p><a href="/health">Open the absolute <code>/health</code> route</a></p>
+    <p id="node-health">Checking /health…</p>
+    <script>
+      fetch("/health")
+        .then((response) => response.json())
+        .then((health) => {
+          document.querySelector("#node-health").textContent = health.ok
+            ? "/health is ready"
+            : "/health failed";
+        });
+    </script>
+  </body>
+</html>\`;
+
+  response.writeHead(200, {
+    "content-type": request.url === "/health"
+      ? "application/json; charset=utf-8"
+      : "text/html; charset=utf-8",
+    "content-length": Buffer.byteLength(body),
+  });
+  response.end(body);
+});
+
+server.listen(port, host, () => {
+  console.log(\`Node.js listening on http://localhost:\${port}\`);
+});
+`,
+    "server.py": `import json
+import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            body = json.dumps({"ok": True}).encode()
+            content_type = "application/json; charset=utf-8"
+        else:
+            body = b"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Python on Wasmer</title>
+    <style>
+      body { font: 18px system-ui; max-width: 680px; margin: 12vh auto; padding: 0 24px; color: #20172b; }
+      code { color: #7040a0; }
+    </style>
+  </head>
+  <body>
+    <h1 id="python-preview">Hello from Python!</h1>
+    <p>Served by <code>http.server</code> inside WASIX.</p>
+    <p id="python-health">Checking /health...</p>
+    <script>
+      fetch("/health")
+        .then((response) => response.json())
+        .then((health) => {
+          document.querySelector("#python-health").textContent = health.ok
+            ? "/health is ready"
+            : "/health failed";
+        });
+    </script>
+  </body>
+</html>"""
+            content_type = "text/html; charset=utf-8"
+
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        print(f"{self.address_string()} - {format % args}", flush=True)
+
+
+port = int(os.environ.get("PORT", "8000"))
+server = HTTPServer(("0.0.0.0", port), Handler)
+print(f"Python listening on http://localhost:{port}", flush=True)
+try:
+    server.serve_forever()
+except KeyboardInterrupt:
+    pass
+finally:
+    server.server_close()
 `,
     "hello.txt": "Hello from a Wasmer sandbox.\\n",
   };
