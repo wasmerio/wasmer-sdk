@@ -17,6 +17,7 @@ export default defineConfig({
       allow: [
         fileURLToPath(new URL(".", import.meta.url)),
         fileURLToPath(new URL("../js", import.meta.url)),
+        fileURLToPath(new URL("../fixtures", import.meta.url)),
       ],
     },
   },

@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
 use bytes::Bytes;
 use tokio::io::AsyncWriteExt;
@@ -366,6 +371,10 @@ impl Command {
         if let Some(bridge) = &terminal_bridge {
             builder.set_tty(bridge.clone());
         }
+        // Package annotations provide defaults and SDK options are applied
+        // afterwards. WASI exposes an array rather than a map, so collapse
+        // overridden names before libc materializes `environ`.
+        deduplicate_environment(builder.get_env_mut());
         let environment = builder.build().map_err(|error| Error::Execution {
             message: format!("unable to build the WASI environment: {error}"),
         })?;
@@ -493,6 +502,13 @@ impl Command {
         };
         Ok((selected.0, selected.1, packages))
     }
+}
+
+fn deduplicate_environment(environment: &mut Vec<(String, Vec<u8>)>) {
+    let mut seen = HashSet::with_capacity(environment.len());
+    environment.reverse();
+    environment.retain(|(key, _)| seen.insert(key.clone()));
+    environment.reverse();
 }
 
 /// Browsers may reject large synchronous compilations on the window thread.
@@ -779,7 +795,26 @@ impl Output {
 
 #[cfg(test)]
 mod tests {
-    use super::{CapturedOutput, ExitReason, ExitStatus, Output};
+    use super::{CapturedOutput, ExitReason, ExitStatus, Output, deduplicate_environment};
+
+    #[test]
+    fn environment_overrides_are_unique_and_last_one_wins() {
+        let mut environment = vec![
+            ("HOME".to_owned(), b"/package".to_vec()),
+            ("PATH".to_owned(), b"/bin".to_vec()),
+            ("HOME".to_owned(), b"/workspace".to_vec()),
+        ];
+
+        deduplicate_environment(&mut environment);
+
+        assert_eq!(
+            environment,
+            vec![
+                ("PATH".to_owned(), b"/bin".to_vec()),
+                ("HOME".to_owned(), b"/workspace".to_vec()),
+            ]
+        );
+    }
 
     #[test]
     fn text_is_synchronous_and_checked() {

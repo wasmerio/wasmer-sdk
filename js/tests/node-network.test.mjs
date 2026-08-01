@@ -215,18 +215,18 @@ test("global Node network hooks route colliding descriptors by bridge ID", async
 
   const firstReady = bridgeEvent(first, "writable");
   const secondReady = bridgeEvent(second, "writable");
-  const firstListener = globalThis.__wasmerNodeListenTcp(
+  const firstListener = globalThis.__wasmerHostListenTcp(
     first.id,
     `127.0.0.1:${firstPort}`,
   );
-  const secondListener = globalThis.__wasmerNodeListenTcp(
+  const secondListener = globalThis.__wasmerHostListenTcp(
     second.id,
     `127.0.0.1:${secondPort}`,
   );
   assert.equal(firstListener.id, secondListener.id);
   await Promise.all([firstReady, secondReady]);
 
-  globalThis.__wasmerNodeListenerClose(first.id, firstListener.id);
+  globalThis.__wasmerHostListenerClose(first.id, firstListener.id);
   const rebound = net.createServer();
   await new Promise((resolve, reject) => {
     rebound.once("error", reject);

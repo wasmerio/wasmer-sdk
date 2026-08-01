@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
+import { lookup } from "node:dns/promises";
+import http from "node:http";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { server as wisp } from "@mercuryworkshop/wisp-js/server";
 import { chromium } from "playwright";
 import { createServer } from "vite";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const pnpmTimeout = Number(process.env.WASMER_PNPM_TIMEOUT ?? 120_000);
+const edgejsWebc = process.env.WASMER_EDGEJS_WEBC;
+const testPnpm = process.env.WASMER_TEST_PNPM === "1" || Boolean(edgejsWebc);
+if (edgejsWebc && !process.env.VITE_EDGEJS_WEBC_URL) {
+  process.env.VITE_EDGEJS_WEBC_URL = `/@fs/${edgejsWebc}`;
+}
 const server = await createServer({
   root,
   configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
@@ -12,13 +22,32 @@ const server = await createServer({
   server: {
     host: "127.0.0.1",
     port: 0,
+    fs: edgejsWebc
+      ? { allow: [root, dirname(edgejsWebc)] }
+      : undefined,
   },
+});
+const externalWispUrl = process.env.WASMER_WISP_URL;
+const proxy = externalWispUrl
+  ? undefined
+  : http.createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("wasmer.sh test WISP proxy");
+    });
+proxy?.on("upgrade", (request, socket, head) => {
+  wisp.routeRequest(request, socket, head);
 });
 
 let browser;
 let page;
 const diagnostics = [];
 try {
+  if (proxy) {
+    await new Promise((resolve, reject) => {
+      proxy.once("error", reject);
+      proxy.listen(0, "127.0.0.1", resolve);
+    });
+  }
   await server.listen();
   const address = server.httpServer?.address();
   assert(address && typeof address !== "string");
@@ -32,9 +61,18 @@ try {
     diagnostics.push(`pageerror: ${error.stack ?? error.message}`),
   );
 
-  await page.goto(`http://127.0.0.1:${address.port}/`, {
-    waitUntil: "load",
-  });
+  const proxyAddress = proxy?.address();
+  assert(
+    externalWispUrl || (proxyAddress && typeof proxyAddress !== "string"),
+  );
+  const wispUrl =
+    externalWispUrl ?? `ws://127.0.0.1:${proxyAddress.port}/`;
+  await page.goto(
+    `http://127.0.0.1:${address.port}/?wisp=${encodeURIComponent(wispUrl)}`,
+    {
+      waitUntil: "load",
+    },
+  );
   await page.waitForFunction(
     () => document.documentElement.dataset.state === "running",
     undefined,
@@ -51,6 +89,62 @@ try {
     undefined,
     { timeout: 120_000 },
   );
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
+      "node -e \"require('dns').lookup('registry.npmjs.org', (error, address) => console.log('__EDGE_DNS_RESULT__', error && error.code, address))\"\r",
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("\n__EDGE_DNS_RESULT__"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  if (testPnpm) {
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send(
+        "pnpm add react --ignore-scripts && node -e \"console.log('__PNPM_OK__', require('react').version)\"\r",
+      );
+    });
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().includes("\n__PNPM_OK__"),
+      undefined,
+      { timeout: pnpmTimeout },
+    );
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+      undefined,
+      { timeout: 30_000 },
+    );
+  }
+
+  if (process.env.WASMER_TEST_WISP_EGRESS === "1") {
+    const { address: exampleAddress } = await lookup("example.com", {
+      family: 4,
+    });
+    await page.evaluate(
+      async (command) => {
+        await globalThis.__wasmerShell.send(command);
+      },
+      `exec 3<>/dev/tcp/${exampleAddress}/80 && printf 'GET / HTTP/1.0\\r\\nHost: example.com\\r\\n\\r\\n' >&3 && IFS= read -r line <&3 && printf '__WISP_%s__ %s\\n' OK "$line"; exec 3<&-; exec 3>&-\r`,
+    );
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().includes("__WISP_OK__ HTTP/1."),
+      undefined,
+      { timeout: 30_000 },
+    );
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+      undefined,
+      { timeout: 30_000 },
+    );
+  }
 
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send(
@@ -235,4 +329,5 @@ try {
 } finally {
   await browser?.close();
   await server.close();
+  if (proxy) await new Promise((resolve) => proxy.close(resolve));
 }

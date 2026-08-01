@@ -13,11 +13,13 @@ import {
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 
+import expressServerSource from "../../fixtures/edgejs/express-server.js?raw";
+
 const DEFAULT_PACKAGE = "wasmer/bash";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "python/python",
-  "wasmer/edgejs-quickjs@0.1.1",
+  "wasmer/edgejs-quickjs@0.1.2",
   "php/php-32",
 ];
 const TRANSCRIPT_LIMIT = 128 * 1024;
@@ -27,6 +29,7 @@ interface ShellConfig {
   commandName?: string;
   uses: string[];
   args: string[];
+  wispUrl?: string;
 }
 
 interface ActiveSession {
@@ -182,8 +185,20 @@ async function start(): Promise<void> {
     const packageNames = [config.packageName, ...config.uses];
     setState("loading", "Loading packages");
     setBootMessage("Loading the shell", describePackageLoad(packageNames));
+    const edgejsDevelopmentPackage = import.meta.env.DEV
+      ? import.meta.env.VITE_EDGEJS_WEBC_URL?.trim()
+      : undefined;
     const [mainPackage, ...uses] = await Promise.all(
-      packageNames.map((name) => wasmer.packages.load(name)),
+      packageNames.map(async (name) => {
+        if (name !== "wasmer/edgejs-quickjs@0.1.1" || !edgejsDevelopmentPackage) {
+          return wasmer.packages.load(name);
+        }
+        const response = await fetch(edgejsDevelopmentPackage);
+        if (!response.ok) {
+          throw new Error(`Unable to load the development Edge.js package (${response.status})`);
+        }
+        return wasmer.packages.load(new Uint8Array(await response.arrayBuffer()));
+      }),
     );
     ensureCurrent(currentGeneration);
     elements.packageName.textContent = mainPackage.id;
@@ -196,7 +211,9 @@ async function start(): Promise<void> {
     const sandbox = await wasmer.sandboxes.create({
       packages: [mainPackage, ...uses],
       files: workspaceFiles(),
-      network: { mode: "http" },
+      network: config.wispUrl
+        ? { mode: "wisp", url: config.wispUrl }
+        : { mode: "http" },
       env: {
         HOME: "/workspace",
         USER: "wasmer",
@@ -509,6 +526,10 @@ function readConfig(params: URLSearchParams): ShellConfig {
     commandName,
     uses,
     args: params.getAll("arg"),
+    wispUrl:
+      params.get("wisp")?.trim() ||
+      import.meta.env.VITE_WISP_URL?.trim() ||
+      undefined,
   };
 }
 
@@ -535,7 +556,9 @@ Things to try:
   php -r "echo 'hello from PHP';"
   php -S 0.0.0.0:8000 -t /workspace
   node server.js
+  pnpm i express && node express-server.js
   python server.py
+  pnpm install <package>  # requires a configured WISP proxy
 
 Package data is cached by the browser for faster future starts.
 `,
@@ -546,6 +569,16 @@ int main(void) {
     return 0;
 }
 `,
+    "package.json": `${JSON.stringify(
+      {
+        name: "wasmer-sh-workspace",
+        private: true,
+        scripts: { express: "node express-server.js" },
+      },
+      null,
+      2,
+    )}\n`,
+    "express-server.js": expressServerSource,
     "server.js": `const http = require("node:http");
 
 const host = "0.0.0.0";

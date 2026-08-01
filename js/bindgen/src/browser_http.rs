@@ -20,6 +20,8 @@ use virtual_net::{
     VirtualSocket, VirtualTcpBoundSocket, VirtualTcpListener, VirtualTcpSocket,
 };
 
+use crate::node_network::NodeNetworking;
+
 type NetworkResult<T> = virtual_net::Result<T>;
 
 #[derive(Debug)]
@@ -40,6 +42,7 @@ struct NetworkState {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct BrowserHttpNetworking {
     state: Arc<Mutex<NetworkState>>,
+    egress: Option<NodeNetworking>,
 }
 
 /// Main-thread handle used by the service-worker transport.
@@ -56,6 +59,13 @@ impl BrowserHttpNetworking {
     pub(crate) fn request_handler(&self) -> BrowserHttpRequestHandler {
         BrowserHttpRequestHandler {
             state: Arc::clone(&self.state),
+        }
+    }
+
+    pub(crate) fn with_egress(egress: NodeNetworking) -> Self {
+        Self {
+            state: Arc::default(),
+            egress: Some(egress),
         }
     }
 }
@@ -219,6 +229,25 @@ impl VirtualNetworking for BrowserHttpNetworking {
             reserved: true,
             ttl: 64,
         }))
+    }
+
+    async fn connect_tcp(
+        &self,
+        local: SocketAddr,
+        peer: SocketAddr,
+    ) -> NetworkResult<Box<dyn VirtualTcpSocket + Sync>> {
+        let egress = self.egress.as_ref().ok_or(NetworkError::Unsupported)?;
+        egress.connect_tcp(local, peer).await
+    }
+
+    async fn resolve(
+        &self,
+        host: &str,
+        port: Option<u16>,
+        dns_server: Option<IpAddr>,
+    ) -> NetworkResult<Vec<IpAddr>> {
+        let egress = self.egress.as_ref().ok_or(NetworkError::Unsupported)?;
+        egress.resolve(host, port, dns_server).await
     }
 }
 

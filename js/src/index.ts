@@ -1,5 +1,6 @@
 import init, {
   setSDKUrl,
+  setWorkerUrl,
   WasmerCore,
   type CommandCore,
   type PackageCore,
@@ -34,7 +35,9 @@ export type NetworkPolicy =
   | { mode: "disabled" }
   | { mode: "host" }
   /** Browser-only HTTP ingress, exposed through `sandbox.ports.expose()`. */
-  | { mode: "http" };
+  | { mode: "http" }
+  /** Browser TCP/DNS egress over WISP, plus browser HTTP ingress. */
+  | { mode: "wisp"; url: string; dnsUrl?: string };
 
 export interface SandboxOptions {
   packages?: readonly PackageSource[];
@@ -298,6 +301,7 @@ export class Wasmer {
       });
     await browserInitialization;
     setSDKUrl(new URL("../pkg/wasmer_sdk_js.js", import.meta.url).href);
+    setWorkerUrl(new URL("./browser-worker.js", import.meta.url).href);
     return WasmerCore.create({
       outputBytes: options.outputBytes,
       cache: browserCacheOptions(options.cache),
@@ -350,9 +354,33 @@ export class Wasmer {
     for (const [key, value] of Object.entries(options.env ?? {})) {
       builder.env(key, value);
     }
-    builder.network((options.network ?? { mode: "disabled" }).mode);
-    const core = await rethrow(builder.start());
-    return new Sandbox(this, core, options.shell);
+    const network = options.network ?? { mode: "disabled" };
+    let networkBridge: { close(): void } | undefined;
+    if (network.mode === "wisp") {
+      if (typeof window === "undefined") {
+        throw new WasmerError(
+          "WISP networking is only available from the browser entrypoint",
+          "CAPABILITY_UNAVAILABLE",
+        );
+      }
+      const wisp = await import("./wisp-network.js");
+      wisp.installWispNetworkGlobals();
+      const bridge = new wisp.WispNetworkBridge(
+        network.url,
+        network.dnsUrl,
+      );
+      networkBridge = bridge;
+      builder.networkWisp(bridge);
+    } else {
+      builder.network(network.mode);
+    }
+    try {
+      const core = await rethrow(builder.start());
+      return new Sandbox(this, core, options.shell, networkBridge);
+    } catch (error) {
+      networkBridge?.close();
+      throw error;
+    }
   }
 
   /** Close the client and release its workers and runtime resources. */
@@ -475,17 +503,20 @@ export class Sandbox {
   readonly fs: SandboxFileSystem;
   readonly ports: Ports;
   readonly #core: SandboxCore;
+  readonly #networkBridge: { close(): void } | undefined;
   #shell: CommandSelector | undefined;
 
   constructor(
     readonly wasmer: Wasmer,
     core: SandboxCore,
     shell?: CommandSelector,
+    networkBridge?: { close(): void },
   ) {
     this.#core = core;
     this.fs = new SandboxFileSystem(core);
     this.ports = new Ports(core);
     this.#shell = shell;
+    this.#networkBridge = networkBridge;
   }
 
   command(
@@ -561,8 +592,12 @@ export class Sandbox {
   }
 
   async close(): Promise<void> {
-    await this.ports.close();
-    await rethrow(this.#core.close());
+    try {
+      await this.ports.close();
+      await rethrow(this.#core.close());
+    } finally {
+      this.#networkBridge?.close();
+    }
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

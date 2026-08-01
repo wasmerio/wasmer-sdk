@@ -41,6 +41,7 @@ edge -e "console.log('hello from Edge.js')"
 php -r "echo 'hello from PHP';"
 php -S 0.0.0.0:8000 -t /workspace
 node server.js
+pnpm i express && node express-server.js
 python server.py
 ```
 
@@ -54,6 +55,25 @@ Ctrl-C. Closing the listener closes its preview automatically.
 `HTTPServer`; run it with `python server.py` or choose a port with
 `PORT=3000 python server.py`.
 
+For an Express application, install the dependency inside the browser sandbox
+and start the included server:
+
+```console
+pnpm i express
+node express-server.js
+```
+
+The server exposes `/`, `/api/hello`, and `/health`. Starting it opens the live
+preview automatically; press Ctrl-C to stop the server and close the preview.
+
+wasmer.sh can also attach the sandbox to a WISP proxy. This gives WASIX tools
+real outbound TCP and DNS from the browser, multiplexed over one WebSocket. A
+WASI-compatible Edge.js build can then run `pnpm` against the npm registry:
+
+```console
+pnpm add is-number
+```
+
 Running `python`, `edge`, or `php` without arguments lets each runtime detect
 the inherited terminal and select its interactive mode. Their REPLs return
 naturally to Bash when they exit.
@@ -63,11 +83,19 @@ namespace, so subsequent sessions avoid downloading the same packages again.
 
 ## Run locally
 
-From this directory:
+Build and start the WASIX Epoxy sidecar in one terminal:
+
+```console
+cd ../wisp-proxy
+./build.sh
+wasmer run . --net
+```
+
+Then start wasmer.sh in another terminal:
 
 ```console
 npm install
-npm run dev
+VITE_WISP_URL=ws://127.0.0.1:4000/ npm run dev
 ```
 
 Vite serves the COOP and COEP headers required for `SharedArrayBuffer` and the
@@ -95,8 +123,25 @@ npx playwright install chromium
 npm test
 ```
 
-The test verifies cross-origin isolation, checks real Bash arithmetic and file
-redirection, and exercises the Python and Edge.js REPLs through Bash stdin.
+The test verifies cross-origin isolation and WISP DNS, checks real Bash
+arithmetic and file redirection, and exercises the Python and Edge.js REPLs
+through Bash stdin. It starts an in-process WISP proxy by default. To exercise
+the compiled WASIX sidecar instead, start it and run:
+
+```console
+WASMER_WISP_URL=ws://127.0.0.1:4000/ npm test
+```
+
+The published `wasmer/edgejs-quickjs@0.1.1` predates the WASI
+`AI_ADDRCONFIG` compatibility fix needed by pnpm. Until the corrected Edge.js
+package is published, point the regression test at a locally built package;
+the test then additionally installs and loads React through the proxy:
+
+```console
+WASMER_EDGEJS_WEBC=/absolute/path/to/edgejs-quickjs.webc \
+WASMER_WISP_URL=ws://127.0.0.1:4000/ \
+npm test
+```
 
 ## URL parameters
 
@@ -109,6 +154,7 @@ package entrypoint directly without rebuilding the site:
 | `command` | Optional named command from the main package |
 | `use` | Supporting package; repeat it to install several |
 | `arg` | Process argument; repeat it to pass several |
+| `wisp` | WISP WebSocket URL for outbound TCP and DNS |
 
 For example:
 

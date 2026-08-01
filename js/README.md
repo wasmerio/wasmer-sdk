@@ -125,6 +125,30 @@ browser can use `SharedArrayBuffer`. Serve the page with
 Browser package data is persisted with browser storage rather than the Node
 filesystem cache.
 
+### Outbound networking through WISP
+
+Browsers cannot open TCP sockets directly. Give a browser sandbox a WISP
+endpoint to multiplex its WASIX TCP and DNS traffic over one WebSocket:
+
+```javascript
+import { Wasmer } from "@wasmer/sdk2/browser";
+
+const wasmer = new Wasmer();
+const sandbox = await wasmer.sandboxes.create({
+  packages: ["wasmer/edgejs-quickjs@0.1.1"],
+  network: { mode: "wisp", url: "wss://proxy.example/wisp/" },
+});
+
+const output = await sandbox
+  .command("pnpm", ["add", "is-number@7.0.0", "--ignore-scripts"])
+  .run();
+console.log(output.text());
+```
+
+The SDK owns one WISP connection per sandbox and routes networking from every
+WASIX worker through it. Use a trusted, access-controlled proxy: it can observe
+connection metadata and decide which destinations and ports are allowed.
+
 ### Run a web server in an iframe
 
 Browser sandboxes can expose an HTTP listener through a service worker. First,
@@ -178,6 +202,9 @@ const stopWatching = sandbox.ports.onListen((port) => {
 iframe's browser client, so absolute links and subresource requests continue
 to reach the same guest listener. Closing the server unregisters its route;
 closing the sandbox closes all routes it owns.
+
+`network: { mode: "wisp", ... }` includes this HTTP-listener support, so one
+sandbox can serve a browser preview while making outbound connections.
 
 The worker needs scope `/` to route absolute guest URLs. Guest documents share
 the registration's origin, so serve untrusted HTML from a dedicated preview

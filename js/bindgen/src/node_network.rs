@@ -30,59 +30,59 @@ extern "C" {
     #[wasm_bindgen(method, js_name = setWakeCallback)]
     fn set_wake_callback(this: &NodeNetworkBridge, callback: &Function);
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeResolve)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostResolve)]
     fn node_resolve(bridge_id: u32, host: String) -> Result<js_sys::Promise, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeConnectTcp)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostConnectTcp)]
     fn node_connect_tcp(
         bridge_id: u32,
         local: String,
         peer: String,
     ) -> Result<js_sys::Promise, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenTcp)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostListenTcp)]
     fn node_listen_tcp(bridge_id: u32, addr: String) -> Result<JsValue, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerAccept)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostListenerAccept)]
     fn node_listener_accept(bridge_id: u32, id: u32) -> Result<JsValue, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerRefresh)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostListenerRefresh)]
     fn node_listener_refresh(bridge_id: u32, id: u32) -> Result<(), JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerReadable)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostListenerReadable)]
     fn node_listener_readable(bridge_id: u32, id: u32) -> Result<bool, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeListenerClose)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostListenerClose)]
     fn node_listener_close(bridge_id: u32, id: u32) -> Result<(), JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketRead)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostSocketRead)]
     fn node_socket_read(bridge_id: u32, id: u32, length: usize) -> Result<JsValue, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketWrite)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostSocketWrite)]
     fn node_socket_write(bridge_id: u32, id: u32, data: &[u8]) -> Result<i32, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketFlush)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostSocketFlush)]
     fn node_socket_flush(bridge_id: u32, id: u32) -> Result<bool, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketClose)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostSocketClose)]
     fn node_socket_close(bridge_id: u32, id: u32) -> Result<(), JsValue>;
 
     // `catch` is required on every hook: on worker threads these calls proxy
     // through the RPC channel, and a JavaScript throw through a non-`catch`
     // import would abort the wasm instance.
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketReadable)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostSocketReadable)]
     fn node_socket_readable(bridge_id: u32, id: u32) -> Result<i32, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketWritable)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostSocketWritable)]
     fn node_socket_writable(bridge_id: u32, id: u32) -> Result<i32, JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketSetNoDelay)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostSocketSetNoDelay)]
     fn node_socket_set_nodelay(bridge_id: u32, id: u32, enabled: bool) -> Result<(), JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketSetKeepAlive)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostSocketSetKeepAlive)]
     fn node_socket_set_keepalive(bridge_id: u32, id: u32, enabled: bool) -> Result<(), JsValue>;
 
-    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerNodeSocketRefresh)]
+    #[wasm_bindgen(js_namespace = globalThis, catch, js_name = __wasmerHostSocketRefresh)]
     fn node_socket_refresh(bridge_id: u32, id: u32) -> Result<(), JsValue>;
 
 }
@@ -295,11 +295,23 @@ impl VirtualNetworking for NodeNetworking {
         addr: SocketAddr,
         peer: SocketAddr,
     ) -> virtual_net::Result<Box<dyn VirtualTcpSocket + Sync>> {
-        let promise = node_connect_tcp(self.bridge_id, addr.to_string(), peer.to_string())
-            .map_err(js_error)?;
-        let descriptor = JsSendFuture(JsFuture::from(promise))
-            .await
-            .map_err(js_error)?;
+        let descriptor = if has_global_function("__wasmerHostConnectTcpSync") {
+            call_global_sync(
+                "__wasmerHostConnectTcpSync",
+                &[
+                    JsValue::from(self.bridge_id),
+                    JsValue::from(addr.to_string()),
+                    JsValue::from(peer.to_string()),
+                ],
+            )
+            .map_err(js_error)?
+        } else {
+            let promise = node_connect_tcp(self.bridge_id, addr.to_string(), peer.to_string())
+                .map_err(js_error)?;
+            JsSendFuture(JsFuture::from(promise))
+                .await
+                .map_err(js_error)?
+        };
         Ok(Box::new(NodeTcpSocket::from_descriptor(
             descriptor,
             self.bridge_id,
@@ -313,10 +325,18 @@ impl VirtualNetworking for NodeNetworking {
         _port: Option<u16>,
         _dns_server: Option<IpAddr>,
     ) -> virtual_net::Result<Vec<IpAddr>> {
-        let promise = node_resolve(self.bridge_id, host.to_owned()).map_err(js_error)?;
-        let values = JsSendFuture(JsFuture::from(promise))
-            .await
-            .map_err(js_error)?;
+        let values = if has_global_function("__wasmerHostResolveSync") {
+            call_global_sync(
+                "__wasmerHostResolveSync",
+                &[JsValue::from(self.bridge_id), JsValue::from(host)],
+            )
+            .map_err(js_error)?
+        } else {
+            let promise = node_resolve(self.bridge_id, host.to_owned()).map_err(js_error)?;
+            JsSendFuture(JsFuture::from(promise))
+                .await
+                .map_err(js_error)?
+        };
         Array::from(&values)
             .iter()
             .map(|value| {
@@ -328,6 +348,22 @@ impl VirtualNetworking for NodeNetworking {
             })
             .collect()
     }
+}
+
+fn has_global_function(name: &str) -> bool {
+    let global = js_sys::global();
+    Reflect::get(&global, &JsValue::from_str(name))
+        .is_ok_and(|value| value.is_function())
+}
+
+fn call_global_sync(name: &str, args: &[JsValue]) -> Result<JsValue, JsValue> {
+    let global = js_sys::global();
+    let function = Reflect::get(&global, &JsValue::from_str(name))?.dyn_into::<Function>()?;
+    let arguments = Array::new();
+    for argument in args {
+        arguments.push(argument);
+    }
+    function.apply(&global, &arguments)
 }
 
 struct NodeTcpBoundSocket {

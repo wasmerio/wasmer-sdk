@@ -57,5 +57,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@mercuryworkshop/wisp-js": "^0.4.1"
   }
 }

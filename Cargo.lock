@@ -4654,7 +4654,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "virtual-fs"
 version = "0.702.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4684,7 +4684,7 @@ dependencies = [
 [[package]]
 name = "virtual-mio"
 version = "0.702.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4700,7 +4700,7 @@ dependencies = [
 [[package]]
 name = "virtual-net"
 version = "0.702.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4966,7 +4966,7 @@ dependencies = [
 [[package]]
 name = "wasmer"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "bindgen",
  "bytes",
@@ -5005,7 +5005,7 @@ dependencies = [
 [[package]]
 name = "wasmer-c-api-imports"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "wasmer",
@@ -5015,7 +5015,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "addr2line 0.27.0",
  "backtrace",
@@ -5054,7 +5054,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler-cranelift"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
@@ -5075,7 +5075,7 @@ dependencies = [
 [[package]]
 name = "wasmer-config"
 version = "0.702.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "bytesize",
@@ -5097,7 +5097,7 @@ dependencies = [
 [[package]]
 name = "wasmer-derive"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "proc-macro-error2",
  "proc-macro2",
@@ -5108,7 +5108,7 @@ dependencies = [
 [[package]]
 name = "wasmer-journal"
 version = "0.702.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5135,7 +5135,7 @@ dependencies = [
 [[package]]
 name = "wasmer-linker-layout"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "postcard",
@@ -5145,7 +5145,7 @@ dependencies = [
 [[package]]
 name = "wasmer-linker-trace"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "postcard",
@@ -5155,7 +5155,7 @@ dependencies = [
 [[package]]
 name = "wasmer-linker-utils"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -5167,7 +5167,7 @@ dependencies = [
 [[package]]
 name = "wasmer-package"
 version = "0.702.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "bytes",
@@ -5276,7 +5276,7 @@ dependencies = [
 [[package]]
 name = "wasmer-types"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "bytecheck",
  "crc32fast",
@@ -5298,7 +5298,7 @@ dependencies = [
 [[package]]
 name = "wasmer-vm"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "backtrace",
  "bytesize",
@@ -5328,7 +5328,7 @@ dependencies = [
 [[package]]
 name = "wasmer-wasix"
 version = "0.702.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5411,7 +5411,7 @@ dependencies = [
 [[package]]
 name = "wasmer-wasix-types"
 version = "0.702.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -5434,7 +5434,7 @@ dependencies = [
 [[package]]
 name = "wasmer-wild"
 version = "7.2.1"
-source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#909650811f928ec17d76a397489d80c2498f9fdd"
+source = "git+https://github.com/wasmerio/wasmer.git?branch=sdk#e8d722ffd31ddbf0ea4ae012c82867e225ed5e4a"
 dependencies = [
  "anyhow",
  "atomic-take",

@@ -103,52 +103,52 @@ function callCache(
 
 function installNetworkProxy(): void {
   const scope = globalThis as Record<string, unknown>;
-  scope.__wasmerNodeResolve = (bridgeId: number, host: string) =>
-    Promise.resolve(callNetwork(bridgeId, "resolve", [host]));
-  scope.__wasmerNodeConnectTcp = (
+  scope.__wasmerHostResolveSync = (bridgeId: number, host: string) =>
+    callNetwork(bridgeId, "resolve", [host]);
+  scope.__wasmerHostConnectTcpSync = (
     bridgeId: number,
     local: string,
     peer: string,
-  ) => Promise.resolve(callNetwork(bridgeId, "connectTcp", [local, peer]));
-  scope.__wasmerNodeListenTcp = (bridgeId: number, address: string) =>
+  ) => callNetwork(bridgeId, "connectTcp", [local, peer]);
+  scope.__wasmerHostListenTcp = (bridgeId: number, address: string) =>
     callNetwork(bridgeId, "listenTcp", [address]);
-  scope.__wasmerNodeListenerAccept = (bridgeId: number, id: number) =>
+  scope.__wasmerHostListenerAccept = (bridgeId: number, id: number) =>
     callNetwork(bridgeId, "listenerAccept", [id]);
-  scope.__wasmerNodeListenerRefresh = (bridgeId: number, id: number) =>
+  scope.__wasmerHostListenerRefresh = (bridgeId: number, id: number) =>
     callNetwork(bridgeId, "listenerRefresh", [id]);
-  scope.__wasmerNodeListenerReadable = (bridgeId: number, id: number) =>
+  scope.__wasmerHostListenerReadable = (bridgeId: number, id: number) =>
     callNetwork(bridgeId, "listenerReadable", [id]);
-  scope.__wasmerNodeListenerClose = (bridgeId: number, id: number) =>
+  scope.__wasmerHostListenerClose = (bridgeId: number, id: number) =>
     callNetwork(bridgeId, "listenerClose", [id]);
-  scope.__wasmerNodeSocketRead = (
+  scope.__wasmerHostSocketRead = (
     bridgeId: number,
     id: number,
     maximum: number,
   ) => callNetwork(bridgeId, "socketRead", [id, maximum]);
-  scope.__wasmerNodeSocketWrite = (
+  scope.__wasmerHostSocketWrite = (
     bridgeId: number,
     id: number,
     bytes: Uint8Array,
   ) => callNetwork(bridgeId, "socketWrite", [id, bytes]);
-  scope.__wasmerNodeSocketFlush = (bridgeId: number, id: number) =>
+  scope.__wasmerHostSocketFlush = (bridgeId: number, id: number) =>
     callNetwork(bridgeId, "socketFlush", [id]);
-  scope.__wasmerNodeSocketClose = (bridgeId: number, id: number) =>
+  scope.__wasmerHostSocketClose = (bridgeId: number, id: number) =>
     callNetwork(bridgeId, "socketClose", [id]);
-  scope.__wasmerNodeSocketReadable = (bridgeId: number, id: number) =>
+  scope.__wasmerHostSocketReadable = (bridgeId: number, id: number) =>
     callNetwork(bridgeId, "socketReadable", [id]);
-  scope.__wasmerNodeSocketWritable = (bridgeId: number, id: number) =>
+  scope.__wasmerHostSocketWritable = (bridgeId: number, id: number) =>
     callNetwork(bridgeId, "socketWritable", [id]);
-  scope.__wasmerNodeSocketSetNoDelay = (
+  scope.__wasmerHostSocketSetNoDelay = (
     bridgeId: number,
     id: number,
     enabled: boolean,
   ) => callNetwork(bridgeId, "socketSetNoDelay", [id, enabled]);
-  scope.__wasmerNodeSocketSetKeepAlive = (
+  scope.__wasmerHostSocketSetKeepAlive = (
     bridgeId: number,
     id: number,
     enabled: boolean,
   ) => callNetwork(bridgeId, "socketSetKeepAlive", [id, enabled]);
-  scope.__wasmerNodeSocketRefresh = (bridgeId: number, id: number) =>
+  scope.__wasmerHostSocketRefresh = (bridgeId: number, id: number) =>
     callNetwork(bridgeId, "socketRefresh", [id]);
 }
 
@@ -183,7 +183,7 @@ function callNetwork(
   );
   switch (kind) {
     case 1:
-      return JSON.parse(new TextDecoder().decode(payload));
+      return JSON.parse(decodeShared(payload));
     case 2:
       return payload.slice();
     case 3:
@@ -191,8 +191,12 @@ function callNetwork(
     case 4:
       return null;
     case 5:
-      throw new Error(new TextDecoder().decode(payload));
+      throw new Error(decodeShared(payload));
     default:
       throw new Error(`invalid Node network bridge response kind ${kind}`);
   }
+}
+
+function decodeShared(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes.slice());
 }

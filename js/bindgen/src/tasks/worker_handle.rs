@@ -85,6 +85,10 @@ fn on_error(msg: web_sys::ErrorEvent, worker_id: u32) {
 
 #[tracing::instrument(level = "trace", skip_all, fields(worker.id=worker_id))]
 fn on_message(msg: web_sys::MessageEvent, sender: &Scheduler, worker_id: u32) {
+    if handle_host_rpc(&msg.data()) {
+        return;
+    }
+
     // Safety: The only way we can receive this message is if it was from the
     // worker, because we are the ones that spawned the worker, we can trust
     // the messages it emits.
@@ -119,6 +123,25 @@ fn on_message(msg: web_sys::MessageEvent, sender: &Scheduler, worker_id: u32) {
             "Unable to handle a message from the worker",
         );
     }
+}
+
+/// Give the JavaScript facade first refusal for host-service RPC messages.
+/// Browser networking uses this to keep the WISP connection on the main
+/// thread while a WASIX process blocks inside a worker.
+fn handle_host_rpc(data: &JsValue) -> bool {
+    let global = js_sys::global();
+    let Ok(handler) = js_sys::Reflect::get(&global, &JsValue::from_str("__wasmerHandleNetworkRpc"))
+    else {
+        return false;
+    };
+    let Some(handler) = handler.dyn_ref::<js_sys::Function>() else {
+        return false;
+    };
+    handler
+        .call1(&global, data)
+        .ok()
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
 }
 
 impl Drop for WorkerHandle {

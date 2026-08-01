@@ -270,6 +270,16 @@ impl JsSandboxBuilder {
         Ok(())
     }
 
+    /// Configure browser HTTP ingress and WISP-backed TCP/DNS egress.
+    #[wasm_bindgen(js_name = networkWisp)]
+    pub fn network_wisp(&mut self, bridge: NodeNetworkBridge) -> Result<(), JsValue> {
+        let builder = self.take()?;
+        let networking = BrowserHttpNetworking::with_egress(NodeNetworking::new(bridge));
+        self.browser_http = Some(networking.request_handler());
+        self.inner = Some(builder.network_provider(Arc::new(networking)));
+        Ok(())
+    }
+
     pub async fn start(mut self) -> Result<JsSandbox, JsValue> {
         let builder = self.take()?;
         builder

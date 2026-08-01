@@ -1,0 +1,4 @@
+allowBuilds:
+  # wisp-js only uses bufferutil from its Node WebSocket implementation. The
+  # browser client is pure JavaScript, so the native addon is unnecessary.
+  bufferutil: false
