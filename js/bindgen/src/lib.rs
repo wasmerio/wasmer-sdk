@@ -8,6 +8,7 @@
     clippy::type_complexity
 )]
 
+mod browser_http;
 mod node_network;
 mod package_cache;
 mod task_manager;
@@ -19,6 +20,9 @@ use std::{
     time::Duration,
 };
 
+use browser_http::{BrowserHttpNetworking, BrowserHttpRequestHandler};
+use bytes::Bytes;
+use http::{Request as HttpRequest, header::HOST};
 use js_sys::Uint8Array;
 use node_network::{NodeNetworkBridge, NodeNetworking};
 use once_cell::sync::Lazy;
@@ -172,6 +176,7 @@ impl JsWasmer {
     pub fn sandbox(&self) -> JsSandboxBuilder {
         JsSandboxBuilder {
             inner: Some(self.inner.sandboxes().create()),
+            browser_http: None,
         }
     }
 
@@ -214,6 +219,7 @@ impl JsPackage {
 #[wasm_bindgen(js_name = SandboxBuilderCore)]
 pub struct JsSandboxBuilder {
     inner: Option<SandboxBuilder>,
+    browser_http: Option<BrowserHttpRequestHandler>,
 }
 
 #[wasm_bindgen(js_class = SandboxBuilderCore)]
@@ -238,9 +244,21 @@ impl JsSandboxBuilder {
 
     /// Configure guest networking from a stable mode string.
     pub fn network(&mut self, mode: String) -> Result<(), JsValue> {
-        let policy = match mode.as_str() {
-            "disabled" => NetworkPolicy::Disabled,
-            "host" => NetworkPolicy::Host,
+        let builder = self.take()?;
+        let builder = match mode.as_str() {
+            "disabled" => {
+                self.browser_http = None;
+                builder.network(NetworkPolicy::Disabled)
+            }
+            "host" => {
+                self.browser_http = None;
+                builder.network(NetworkPolicy::Host)
+            }
+            "http" => {
+                let networking = BrowserHttpNetworking::new();
+                self.browser_http = Some(networking.request_handler());
+                builder.network_provider(Arc::new(networking))
+            }
             other => {
                 return Err(custom_error(
                     "CAPABILITY_UNAVAILABLE",
@@ -248,7 +266,6 @@ impl JsSandboxBuilder {
                 ));
             }
         };
-        let builder = self.take()?.network(policy);
         self.inner = Some(builder);
         Ok(())
     }
@@ -257,7 +274,10 @@ impl JsSandboxBuilder {
         let builder = self.take()?;
         builder
             .await
-            .map(|inner| JsSandbox { inner })
+            .map(|inner| JsSandbox {
+                inner,
+                browser_http: self.browser_http,
+            })
             .map_err(sdk_error)
     }
 }
@@ -297,6 +317,7 @@ fn stat_parts(metadata: &wasmer_sdk::FileMetadata) -> (&'static str, f64) {
 #[wasm_bindgen(js_name = SandboxCore)]
 pub struct JsSandbox {
     inner: Sandbox,
+    browser_http: Option<BrowserHttpRequestHandler>,
 }
 
 #[wasm_bindgen(js_class = SandboxCore)]
@@ -424,8 +445,134 @@ impl JsSandbox {
             .map_err(sdk_error)
     }
 
+    /// Whether a browser HTTP ingress listener exists on `port`.
+    #[wasm_bindgen(js_name = isHttpPortListening)]
+    pub fn is_http_port_listening(&self, port: f64) -> Result<bool, JsValue> {
+        let port = validate_integer("port", port, 1, u64::from(u16::MAX))? as u16;
+        let handler = self.browser_http.as_ref().ok_or_else(|| {
+            custom_error(
+                "CAPABILITY_UNAVAILABLE",
+                "the sandbox was not created with browser HTTP networking",
+            )
+        })?;
+        Ok(handler.has_listener(port))
+    }
+
+    /// Forward one structured HTTP request into a guest TCP listener.
+    #[wasm_bindgen(js_name = handleHttpRequest)]
+    pub async fn handle_http_request(
+        &self,
+        port: f64,
+        method: String,
+        path: String,
+        headers: JsValue,
+        body: Uint8Array,
+    ) -> Result<JsHttpResponse, JsValue> {
+        let port = validate_integer("port", port, 1, u64::from(u16::MAX))? as u16;
+        let handler = self.browser_http.as_ref().ok_or_else(|| {
+            custom_error(
+                "CAPABILITY_UNAVAILABLE",
+                "the sandbox was not created with browser HTTP networking",
+            )
+        })?;
+        let headers: Vec<(String, String)> =
+            serde_wasm_bindgen::from_value(headers).map_err(js_error)?;
+        let mut request = HttpRequest::builder()
+            .method(method.as_str())
+            .uri(path.as_str());
+        let request_headers = request
+            .headers_mut()
+            .ok_or_else(|| custom_error("INVALID_ARGUMENT", "failed to construct HTTP request"))?;
+        for (name, value) in headers {
+            let name = http::HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
+                custom_error("INVALID_ARGUMENT", &format!("invalid HTTP header `{name}`"))
+            })?;
+            let value = http::HeaderValue::from_str(&value).map_err(|_| {
+                custom_error(
+                    "INVALID_ARGUMENT",
+                    &format!("invalid value for HTTP header `{name}`"),
+                )
+            })?;
+            request_headers.append(name, value);
+        }
+        if !request_headers.contains_key(HOST) {
+            request_headers.insert(HOST, http::HeaderValue::from_static("localhost"));
+        }
+        let response = handler
+            .handle(
+                request
+                    .body(Bytes::from(body.to_vec()))
+                    .map_err(|error| custom_error("INVALID_ARGUMENT", &error.to_string()))?,
+                port,
+            )
+            .await
+            .map_err(|error| {
+                custom_error(
+                    "EXECUTION_ERROR",
+                    &format!("guest HTTP request failed: {error}"),
+                )
+            })?;
+        Ok(JsHttpResponse::new(response))
+    }
+
     pub async fn close(&self) -> Result<(), JsValue> {
         self.inner.close().await.map_err(sdk_error)
+    }
+}
+
+#[wasm_bindgen(js_name = HttpResponseCore)]
+pub struct JsHttpResponse {
+    status: u16,
+    status_text: String,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+impl JsHttpResponse {
+    fn new(response: http::Response<Bytes>) -> Self {
+        let (parts, body) = response.into_parts();
+        Self {
+            status: parts.status.as_u16(),
+            status_text: parts
+                .status
+                .canonical_reason()
+                .unwrap_or_default()
+                .to_owned(),
+            headers: parts
+                .headers
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (name.as_str().to_owned(), value.to_owned()))
+                })
+                .collect(),
+            body: body.to_vec(),
+        }
+    }
+}
+
+#[wasm_bindgen(js_class = HttpResponseCore)]
+impl JsHttpResponse {
+    #[wasm_bindgen(getter)]
+    pub fn status(&self) -> u16 {
+        self.status
+    }
+
+    #[wasm_bindgen(getter, js_name = statusText)]
+    pub fn status_text(&self) -> String {
+        self.status_text.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn headers(&self) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.headers).map_err(js_error)
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn body(&self) -> Uint8Array {
+        Uint8Array::from(self.body.as_slice())
     }
 }
 

@@ -30,7 +30,11 @@ export type PackageSource = string | Uint8Array | Package;
 export type CommandSelector = string | Package | CommandRef;
 export type FileContents = string | Uint8Array;
 
-export type NetworkPolicy = { mode: "disabled" } | { mode: "host" };
+export type NetworkPolicy =
+  | { mode: "disabled" }
+  | { mode: "host" }
+  /** Browser-only HTTP ingress, exposed through `sandbox.ports.expose()`. */
+  | { mode: "http" };
 
 export interface SandboxOptions {
   packages?: readonly PackageSource[];
@@ -94,6 +98,24 @@ export interface FileStat {
 
 export interface DirectoryEntry extends FileStat {
   name: string;
+}
+
+export interface ExposePortOptions {
+  /** An active registration running `@wasmer/sdk2/service-worker`. */
+  serviceWorker: ServiceWorkerRegistration;
+  /** Time allowed for the guest to begin listening. Defaults to 30 seconds. */
+  timeoutMs?: number;
+}
+
+export interface BrowserIframeOptions {
+  title?: string;
+  className?: string;
+  /**
+   * Sandbox capabilities granted to guest content. Browser service workers
+   * require `allow-same-origin`; use a dedicated preview origin when running
+   * untrusted HTML with scripts.
+   */
+  sandbox?: readonly string[] | false;
 }
 
 export type WasmerErrorCode =
@@ -532,6 +554,7 @@ export class Sandbox {
   }
 
   async close(): Promise<void> {
+    await this.ports.close();
     await rethrow(this.#core.close());
   }
 
@@ -555,6 +578,7 @@ export class Sandbox {
 /** Guest port facilities for one sandbox. */
 export class Ports {
   readonly #core: SandboxCore;
+  readonly #servers = new Set<BrowserServer>();
 
   constructor(core: SandboxCore) {
     this.#core = core;
@@ -578,6 +602,291 @@ export class Ports {
     const validPort = validateInteger("port", port, 1, 65_535);
     const timeoutMs = validateTimeoutMs(options.timeoutMs ?? 30_000);
     await rethrow(this.#core.waitForPort(validPort, timeoutMs));
+  }
+
+  /**
+   * Expose a guest HTTP listener through a same-origin service-worker URL.
+   *
+   * The sandbox must use `network: { mode: "http" }`. The returned URL can be
+   * assigned directly to an iframe; requests made by that iframe, including
+   * absolute paths, remain routed to the same guest listener.
+   */
+  async expose(
+    port: number,
+    options: ExposePortOptions,
+  ): Promise<BrowserServer> {
+    if (typeof window === "undefined" || typeof MessageChannel === "undefined") {
+      throw new WasmerError(
+        "ports.expose() is only available in a browser window",
+        "CAPABILITY_UNAVAILABLE",
+      );
+    }
+    if (!options?.serviceWorker) {
+      throw new WasmerError(
+        "ports.expose() requires an active service worker registration",
+        "INVALID_ARGUMENT",
+      );
+    }
+    const validPort = validateInteger("port", port, 1, 65_535);
+    const timeoutMs = validateTimeoutMs(options.timeoutMs ?? 30_000);
+    const worker = await activeServiceWorker(options.serviceWorker, timeoutMs);
+    await waitForHttpListener(this.#core, validPort, timeoutMs);
+
+    const id = createBrowserServerId();
+    const path = `/.wasmer/sdk/${id}/`;
+    const channel = new MessageChannel();
+    let server: BrowserServer;
+    const ready = deferred<void>();
+    channel.port1.addEventListener("message", (event: MessageEvent<unknown>) => {
+      const message = asBridgeMessage(event.data);
+      if (!message) return;
+      if (message.type === "wasmer-sdk:http-ready" && message.serverId === id) {
+        ready.resolve();
+        return;
+      }
+      if (message.type !== "wasmer-sdk:http-request") return;
+      void forwardHttpRequest(this.#core, validPort, channel.port1, message);
+    });
+    channel.port1.start();
+    worker.postMessage(
+      {
+        type: "wasmer-sdk:http-register",
+        serverId: id,
+        path,
+      },
+      [channel.port2],
+    );
+
+    try {
+      await withTimeout(
+        ready.promise,
+        timeoutMs,
+        "the Wasmer service worker did not accept the HTTP route",
+      );
+      server = new BrowserServer(
+        new URL(path, window.location.origin),
+        id,
+        channel.port1,
+        () => this.#servers.delete(server),
+      );
+      this.#servers.add(server);
+      return server;
+    } catch (error) {
+      channel.port1.close();
+      throw error;
+    }
+  }
+
+  /** Close every browser HTTP route owned by this sandbox. */
+  async close(): Promise<void> {
+    await Promise.all([...this.#servers].map((server) => server.close()));
+  }
+}
+
+/** A service-worker route to one HTTP listener inside a browser sandbox. */
+export class BrowserServer {
+  #closed = false;
+
+  constructor(
+    readonly url: URL,
+    private readonly id: string,
+    private readonly channel: MessagePort,
+    private readonly onClose: () => void,
+  ) {}
+
+  /** Create an iframe pointed at this server. */
+  createIframe(options: BrowserIframeOptions = {}): HTMLIFrameElement {
+    if (typeof document === "undefined") {
+      throw new WasmerError(
+        "createIframe() is only available in a browser document",
+        "CAPABILITY_UNAVAILABLE",
+      );
+    }
+    const iframe = document.createElement("iframe");
+    iframe.src = this.url.href;
+    iframe.title = options.title ?? "Wasmer sandbox web server";
+    if (options.className !== undefined) iframe.className = options.className;
+    const capabilities =
+      options.sandbox === undefined
+        ? [
+            "allow-downloads",
+            "allow-forms",
+            "allow-modals",
+            "allow-popups",
+            "allow-same-origin",
+            "allow-scripts",
+          ]
+        : options.sandbox;
+    if (capabilities !== false) {
+      for (const capability of capabilities) iframe.sandbox.add(capability);
+    }
+    return iframe;
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.channel.postMessage({
+      type: "wasmer-sdk:http-close",
+      serverId: this.id,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    this.channel.close();
+    this.onClose();
+  }
+
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
+  }
+}
+
+interface HttpRequestMessage {
+  type: "wasmer-sdk:http-request";
+  serverId: string;
+  requestId: string;
+  method: string;
+  path: string;
+  headers: [string, string][];
+  body: Uint8Array;
+}
+
+interface HttpReadyMessage {
+  type: "wasmer-sdk:http-ready";
+  serverId: string;
+}
+
+function asBridgeMessage(value: unknown): HttpRequestMessage | HttpReadyMessage | undefined {
+  if (typeof value !== "object" || value === null || !("type" in value)) return undefined;
+  const type = (value as { type?: unknown }).type;
+  if (type !== "wasmer-sdk:http-request" && type !== "wasmer-sdk:http-ready") return undefined;
+  return value as HttpRequestMessage | HttpReadyMessage;
+}
+
+async function forwardHttpRequest(
+  core: SandboxCore,
+  port: number,
+  channel: MessagePort,
+  request: HttpRequestMessage,
+): Promise<void> {
+  try {
+    const response = await rethrow(
+      core.handleHttpRequest(
+        port,
+        request.method,
+        request.path,
+        request.headers,
+        request.body,
+      ),
+    );
+    const body = Uint8Array.from(response.body);
+    channel.postMessage(
+      {
+        type: "wasmer-sdk:http-response",
+        serverId: request.serverId,
+        requestId: request.requestId,
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        body,
+      },
+      [body.buffer],
+    );
+  } catch (error) {
+    channel.postMessage({
+      type: "wasmer-sdk:http-response",
+      serverId: request.serverId,
+      requestId: request.requestId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function activeServiceWorker(
+  registration: ServiceWorkerRegistration,
+  timeoutMs: number,
+): Promise<ServiceWorker> {
+  const worker = registration.active ?? registration.installing ?? registration.waiting;
+  if (!worker) {
+    throw new WasmerError(
+      "the service worker registration has no installing, waiting, or active worker",
+      "INVALID_ARGUMENT",
+    );
+  }
+  if (worker.state !== "activated") {
+    await withTimeout(
+      new Promise<void>((resolve, reject) => {
+      const onStateChange = () => {
+        if (worker.state === "activated") resolve();
+        if (worker.state === "redundant") {
+          reject(new Error("the service worker became redundant"));
+        }
+      };
+      worker.addEventListener("statechange", onStateChange);
+      onStateChange();
+      }),
+      timeoutMs,
+      "the Wasmer service worker did not activate",
+    );
+  }
+  if (!registration.active) {
+    throw new WasmerError(
+      "the service worker did not become active",
+      "INITIALIZATION_ERROR",
+    );
+  }
+  return registration.active;
+}
+
+async function waitForHttpListener(
+  core: SandboxCore,
+  port: number,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (!rethrowSync(() => core.isHttpPortListening(port))) {
+    if (performance.now() >= deadline) {
+      throw new WasmerError(
+        `timed out waiting for the guest HTTP listener on port ${port}`,
+        "TIMEOUT",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+function createBrowserServerId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new WasmerError(message, "TIMEOUT")),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

@@ -26,6 +26,10 @@
     "./browser": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./service-worker": {
+      "types": "./dist/service-worker.d.ts",
+      "default": "./dist/service-worker.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -41,7 +45,8 @@
     "test": "npm run build:ts && node scripts/test-node.mjs",
     "test:runtime": "npm run build:ts && node scripts/test-node.mjs runtime",
     "test:workers": "npm run build:ts && node --test --test-timeout=30000 tests/multi-worker.test.mjs",
-    "test:browser": "npm run build:ts && node --test --test-timeout=300000 tests/browser-python.test.mjs",
+    "test:browser": "npm run build:ts && node --test --test-timeout=300000 tests/browser-python.test.mjs && node --test --test-timeout=240000 tests/browser-service-worker.test.mjs",
+    "test:browser-http": "npm run build:ts && node --test --test-timeout=240000 tests/browser-service-worker.test.mjs",
     "test:edgejs": "npm run build:ts && node --test --test-timeout=30000 tests/edgejs-http.test.mjs",
     "test:postgres": "npm run build:ts && node --test --test-timeout=90000 tests/postgres-psql.test.mjs"
   },

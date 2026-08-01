@@ -5236,6 +5236,8 @@ dependencies = [
  "console_error_panic_hook",
  "derivative",
  "futures",
+ "http",
+ "httparse",
  "instant",
  "js-sys",
  "once_cell",

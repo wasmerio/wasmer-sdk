@@ -39,6 +39,7 @@ pub struct SandboxBuilder {
     env: BTreeMap<String, String>,
     mounts: Vec<MountSpec>,
     network: NetworkPolicy,
+    network_provider: Option<DynVirtualNetworking>,
 }
 
 /// A value that can be mounted into a sandbox as an external filesystem.
@@ -73,6 +74,7 @@ impl SandboxBuilder {
             env: BTreeMap::new(),
             mounts: Vec::new(),
             network: NetworkPolicy::Disabled,
+            network_provider: None,
         }
     }
 
@@ -141,6 +143,18 @@ impl SandboxBuilder {
     #[must_use]
     pub fn network(mut self, policy: NetworkPolicy) -> Self {
         self.network = policy;
+        self.network_provider = None;
+        self
+    }
+
+    /// Install a target-specific virtual network provider.
+    ///
+    /// Most applications should use [`SandboxBuilder::network`]. This escape
+    /// hatch is intended for SDK facades and embedders that bridge sockets to
+    /// a platform facility, such as a browser service worker.
+    #[must_use]
+    pub fn network_provider(mut self, provider: DynVirtualNetworking) -> Self {
+        self.network_provider = Some(provider);
         self
     }
 
@@ -189,12 +203,12 @@ impl SandboxBuilder {
             mounts.push(mount);
         }
 
-        let networking = match self.network {
+        let networking = self.network_provider.unwrap_or_else(|| match self.network {
             NetworkPolicy::Disabled => {
                 Arc::new(UnsupportedVirtualNetworking::default()) as DynVirtualNetworking
             }
             NetworkPolicy::Host => host_networking(&self.client),
-        };
+        });
         let runtime = build_sandbox_runtime(&self.client, Arc::clone(&networking));
 
         Ok(Sandbox {

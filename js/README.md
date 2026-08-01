@@ -125,6 +125,54 @@ browser can use `SharedArrayBuffer`. Serve the page with
 Browser package data is persisted with browser storage rather than the Node
 filesystem cache.
 
+### Run a web server in an iframe
+
+Browser sandboxes can expose an HTTP listener through a service worker. First,
+make the SDK's worker available at the root of your origin. For example, copy
+`node_modules/@wasmer/sdk2/dist/service-worker.js` to
+`public/wasmer-service-worker.js`, or bundle this worker entry:
+
+```javascript
+import "@wasmer/sdk2/service-worker";
+```
+
+Register it with root scope, start the guest server, then expose its port:
+
+```javascript
+import { Wasmer } from "@wasmer/sdk2/browser";
+
+const serviceWorker = await navigator.serviceWorker.register(
+  "/wasmer-service-worker.js",
+  { scope: "/", type: "module" },
+);
+
+const wasmer = new Wasmer();
+const sandbox = await wasmer.sandboxes.create({
+  packages: ["php/php-32@8.3.2102"],
+  network: { mode: "http" },
+  files: { "index.php": "<h1><?php echo 'Hello from PHP'; ?></h1>" },
+});
+
+const php = await sandbox
+  .command("php", ["-S", "0.0.0.0:8080", "-t", "/workspace"])
+  .spawn({ stdout: "capture", stderr: "capture" });
+
+const server = await sandbox.ports.expose(8080, { serviceWorker });
+document.body.append(server.createIframe({ title: "PHP preview" }));
+```
+
+`server.url` is also available for custom UI. The service worker follows the
+iframe's browser client, so absolute links and subresource requests continue
+to reach the same guest listener. Closing the server unregisters its route;
+closing the sandbox closes all routes it owns.
+
+The worker needs scope `/` to route absolute guest URLs. Guest documents share
+the registration's origin, so serve untrusted HTML from a dedicated preview
+origin rather than the origin containing privileged application state. The
+SDK-generated iframe uses the capabilities required for scripts and service
+worker control, but an iframe sandbox is not an origin boundary when both
+`allow-scripts` and `allow-same-origin` are enabled.
+
 ## Examples
 
 Run these from the repository root after `npm run build` in `js/`:
@@ -135,6 +183,9 @@ node js/examples/multiple_runtimes.mjs
 node js/examples/edgejs_http.mjs
 node js/examples/postgres_psql.mjs
 ```
+
+The complete browser PHP preview is in
+[`examples/browser_php`](examples/browser_php).
 
 The PostgreSQL example requires `psql` on `PATH`; set `PSQL` or pass its path as
 the first argument otherwise. All examples reuse the programs in
@@ -165,6 +216,7 @@ npm run test:edgejs
 npm run test:postgres
 npx playwright install chromium
 npm run test:browser
+npm run test:browser-http
 ```
 
 `npm run check` type-checks the handwritten TypeScript API without rebuilding
