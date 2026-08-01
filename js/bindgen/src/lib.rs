@@ -31,7 +31,8 @@ use tokio::{
 use wasm_bindgen::prelude::*;
 use wasmer_sdk::{
     Command, NetworkPolicy, Output, Package, PackageSource, Process, ProcessHandle, ProcessStderr,
-    ProcessStdin, ProcessStdout, Sandbox, SandboxBuilder, Stdio, Wasmer, WasmerConfig,
+    ProcessStdin, ProcessStdout, Sandbox, SandboxBuilder, Stdio, TerminalOptions, Wasmer,
+    WasmerConfig,
 };
 use wasmer_wasix::PluggableRuntime;
 use wasmer_wasix::runtime::{DefaultTty, package_loader::PackageCache, resolver::QueryCache};
@@ -470,6 +471,15 @@ impl JsCommand {
         Ok(())
     }
 
+    /// Attach an interactive terminal with the given character dimensions.
+    pub fn terminal(&mut self, columns: f64, rows: f64) -> Result<(), JsValue> {
+        let columns = validate_integer("terminal.columns", columns, 1, u64::from(u32::MAX))?;
+        let rows = validate_integer("terminal.rows", rows, 1, u64::from(u32::MAX))?;
+        self.inner_mut()?
+            .terminal(TerminalOptions::new(columns as u32, rows as u32));
+        Ok(())
+    }
+
     /// Live stdin mode for `spawn()`: `"pipe"` or `"closed"`.
     #[wasm_bindgen(js_name = stdinMode)]
     pub fn stdin_mode(&mut self, mode: String) -> Result<(), JsValue> {
@@ -663,6 +673,15 @@ impl JsProcess {
 
     pub fn kill(&self) {
         self.handle.kill();
+    }
+
+    #[wasm_bindgen(js_name = resizeTerminal)]
+    pub fn resize_terminal(&self, columns: f64, rows: f64) -> Result<(), JsValue> {
+        let columns = validate_integer("terminal.columns", columns, 1, u64::from(u32::MAX))?;
+        let rows = validate_integer("terminal.rows", rows, 1, u64::from(u32::MAX))?;
+        self.handle
+            .resize_terminal(columns as u32, rows as u32)
+            .map_err(sdk_error)
     }
 }
 

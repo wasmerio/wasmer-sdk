@@ -76,6 +76,13 @@ export interface SpawnOptions {
   stdin?: "pipe" | "closed";
   stdout?: OutputMode;
   stderr?: OutputMode;
+  /** Attach a process-tree terminal. This implies piped stdin/stdout/stderr. */
+  terminal?: boolean | TerminalOptions;
+}
+
+export interface TerminalOptions {
+  columns?: number;
+  rows?: number;
 }
 
 export type ExitReason = "exited" | "terminated" | "timeout";
@@ -177,6 +184,14 @@ function describeExit(output: Output): string {
 async function rethrow<T>(work: Promise<T> | T): Promise<T> {
   try {
     return await work;
+  } catch (error) {
+    throw toWasmerError(error);
+  }
+}
+
+function rethrowSync<T>(work: () => T): T {
+  try {
+    return work();
   } catch (error) {
     throw toWasmerError(error);
   }
@@ -606,12 +621,17 @@ export class Command {
       options.outputBytes === undefined
         ? undefined
         : validateOutputBytes(options.outputBytes);
+    const terminal = options.terminal;
+    const stdin = terminal ? "pipe" : (options.stdin ?? "closed");
+    const stdout = terminal ? "pipe" : (options.stdout ?? "pipe");
+    const stderr = terminal ? "pipe" : (options.stderr ?? "pipe");
+    const terminalDimensions = validateTerminalOptions(terminal);
     const core = this.#build();
     if (timeoutMs !== undefined) core.timeoutMs(timeoutMs);
     if (outputBytes !== undefined) core.outputBytes(outputBytes);
-    const stdin = options.stdin ?? "closed";
-    const stdout = options.stdout ?? "pipe";
-    const stderr = options.stderr ?? "pipe";
+    if (terminalDimensions) {
+      core.terminal(terminalDimensions.columns, terminalDimensions.rows);
+    }
     core.stdinMode(stdin);
     core.stdoutMode(stdout);
     core.stderrMode(stderr);
@@ -718,6 +738,16 @@ export class Process {
   /** Immediate forced termination. */
   async kill(): Promise<void> {
     this.#core.kill();
+  }
+
+  /** Resize the attached terminal. */
+  resizeTerminal(columns: number, rows: number): void {
+    rethrowSync(() =>
+      this.#core.resizeTerminal(
+        validateInteger("terminal.columns", columns, 1, 0xffff_ffff),
+        validateInteger("terminal.rows", rows, 1, 0xffff_ffff),
+      ),
+    );
   }
 }
 
@@ -853,6 +883,27 @@ function validateTimeoutMs(value: number, name = "timeoutMs"): number {
 
 function validateOutputBytes(value: number): number {
   return validateInteger("outputBytes", value, 0, MAX_WASM32_SIZE);
+}
+
+function validateTerminalOptions(
+  terminal: SpawnOptions["terminal"],
+): Required<TerminalOptions> | undefined {
+  if (!terminal) return undefined;
+  const dimensions = typeof terminal === "object" ? terminal : {};
+  return {
+    columns: validateInteger(
+      "terminal.columns",
+      dimensions.columns ?? 80,
+      1,
+      0xffff_ffff,
+    ),
+    rows: validateInteger(
+      "terminal.rows",
+      dimensions.rows ?? 24,
+      1,
+      0xffff_ffff,
+    ),
+  };
 }
 
 function validateInteger(

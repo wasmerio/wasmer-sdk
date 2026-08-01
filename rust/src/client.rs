@@ -11,14 +11,14 @@ use std::{
 
 use wasmer_config::package::PackageSource as WasmerPackageSource;
 #[cfg(feature = "sys")]
+use wasmer_wasix::runtime::DefaultTty;
+#[cfg(feature = "sys")]
 use wasmer_wasix::runtime::{
     module_cache::{FileSystemCache, ModuleCache, SharedCache},
     task_manager::tokio::TokioTaskManager,
 };
 #[cfg(feature = "js")]
 use wasmer_wasix::runtime::{package_loader::PackageCache, resolver::QueryCache};
-#[cfg(feature = "sys")]
-use wasmer_wasix::runtime::DefaultTty;
 use wasmer_wasix::{
     PluggableRuntime,
     bin_factory::BinaryPackage,

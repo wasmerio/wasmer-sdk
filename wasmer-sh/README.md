@@ -12,10 +12,10 @@ emulated by the UI:
 
 ```ts
 const wasmer = new Wasmer();
-const unix = await wasmer.packages.load("sharrattj/bash");
+const bashPackage = await wasmer.packages.load("wasmer/bash");
 const sandbox = await wasmer.sandboxes.create({
   packages: [
-    unix,
+    bashPackage,
     "wasmer/neatvi",
     "python/python",
     "wasmer/edgejs-quickjs@0.1.1",
@@ -25,9 +25,9 @@ const sandbox = await wasmer.sandboxes.create({
 });
 
 const bash = await sandbox.command(
-  unix,
+  bashPackage,
   ["--rcfile", "/workspace/.bashrc", "-i"],
-).spawn({ stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+).spawn({ terminal: { columns: 100, rows: 30 } });
 ```
 
 The default shell therefore exposes Unix utilities alongside `python`, `edge`
@@ -41,9 +41,9 @@ edge -e "console.log('hello from Edge.js')"
 php -r "echo 'hello from PHP';"
 ```
 
-Running `python`, `edge`, or `php` without arguments automatically selects
-that runtime's interactive mode. Those programs inherit the same Bash stdin
-stream, so their REPLs return naturally to the shell when they exit.
+Running `python`, `edge`, or `php` without arguments lets each runtime detect
+the inherited terminal and select its interactive mode. Their REPLs return
+naturally to Bash when they exit.
 
 Package data is persisted in the browser cache under the `wasmer.sh`
 namespace, so subsequent sessions avoid downloading the same packages again.
@@ -92,7 +92,7 @@ package entrypoint directly without rebuilding the site:
 
 | Parameter | Meaning |
 | --- | --- |
-| `package` | Main registry package; defaults to `sharrattj/bash` |
+| `package` | Main registry package; defaults to `wasmer/bash` |
 | `command` | Optional named command from the main package |
 | `use` | Supporting package; repeat it to install several |
 | `arg` | Process argument; repeat it to pass several |

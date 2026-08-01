@@ -103,7 +103,6 @@ const fit = new FitAddon();
 let activeSession: ActiveSession | undefined;
 let generation = 0;
 let inputQueue = Promise.resolve();
-let processInputBuffer = "";
 let pendingProcessInput = "";
 let transcript = "";
 
@@ -117,6 +116,9 @@ terminal.onData((data) => {
   inputQueue = inputQueue
     .then(() => handleTerminalData(data))
     .catch((error: unknown) => showTerminalError(error));
+});
+terminal.onResize(({ cols, rows }) => {
+  activeSession?.process?.resizeTerminal(cols, rows);
 });
 
 elements.clear.addEventListener("click", () => {
@@ -154,7 +156,6 @@ async function start(): Promise<void> {
   try {
     await closeActiveSession();
     transcript = "";
-    processInputBuffer = "";
     pendingProcessInput = "";
     terminal.reset();
     fitTerminal();
@@ -215,7 +216,7 @@ async function handleTerminalData(data: string): Promise<void> {
   if (!session) return;
 
   if (session.process && session.stdin) {
-    await handleProcessInput(data, session.process, session.stdin);
+    await handleProcessInput(data, session.stdin);
     return;
   }
   pendingProcessInput += data;
@@ -238,9 +239,7 @@ async function runInteractiveShell(
       { cwd: "/workspace" },
     )
     .spawn({
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
+      terminal: { columns: terminal.cols, rows: terminal.rows },
       outputBytes: 1024 * 1024,
     });
   if (!process.stdin || !process.stdout || !process.stderr) {
@@ -250,7 +249,6 @@ async function runInteractiveShell(
 
   session.process = process;
   session.stdin = process.stdin;
-  processInputBuffer = "";
   const streams = Promise.allSettled([
     pumpOutput(process.stdout),
     pumpOutput(process.stderr),
@@ -258,7 +256,7 @@ async function runInteractiveShell(
   if (pendingProcessInput) {
     const pending = pendingProcessInput;
     pendingProcessInput = "";
-    await handleProcessInput(pending, process, process.stdin);
+    await handleProcessInput(pending, process.stdin);
   }
   setState("running", "Ready");
   terminal.focus();
@@ -277,7 +275,6 @@ async function monitorInteractiveShell(
     if (processGeneration !== generation || activeSession !== session) return;
     session.process = undefined;
     session.stdin = undefined;
-    processInputBuffer = "";
     setState("exited", `Bash exited · ${output.exitCode}`);
     writeTerminal(
       `\r\n\x1b[38;5;244m[Bash ${output.reason} with status ${output.exitCode}]\x1b[0m\r\n`,
@@ -292,41 +289,9 @@ async function monitorInteractiveShell(
 
 async function handleProcessInput(
   data: string,
-  process: Process,
   stdin: WritableBytes,
 ): Promise<void> {
-  for (const character of data) {
-    if (character === "\x03") {
-      processInputBuffer = "";
-      writeTerminal("^C\r\n");
-      await process.terminate({ gracePeriodMs: 250 });
-      return;
-    }
-    if (character === "\x04") {
-      if (processInputBuffer) {
-        await stdin.write(processInputBuffer);
-        processInputBuffer = "";
-      }
-      await stdin.close();
-      return;
-    }
-    if (character === "\x7f" || character === "\b") {
-      if (processInputBuffer.length > 0) {
-        processInputBuffer = processInputBuffer.slice(0, -1);
-        writeTerminal("\b \b");
-      }
-      continue;
-    }
-    if (character === "\r" || character === "\n") {
-      writeTerminal("\r\n");
-      await stdin.write(`${processInputBuffer}\n`);
-      processInputBuffer = "";
-      continue;
-    }
-    if (character === "\x1b" || character < " ") continue;
-    processInputBuffer += character;
-    writeTerminal(character);
-  }
+  await stdin.write(data);
 }
 
 async function runPassthrough(
@@ -457,18 +422,6 @@ function workspaceFiles(): Record<string, string> {
 # so Bash—not the browser—owns command parsing and process execution.
 PS1='\\[\\033[38;5;141m\\]wasmer\\[\\033[0m\\]@\\[\\033[38;5;81m\\]web\\[\\033[0m\\]:\\[\\033[38;5;117m\\]\\w\\[\\033[0m\\]$ '
 HISTFILE=/workspace/.bash_history
-
-# These runtimes need an explicit interactive flag because SDK stdin is a
-# stream rather than a host pseudo-terminal. Arguments keep their normal form.
-python() {
-  if [ "$#" -eq 0 ]; then command python -i; else command python "$@"; fi
-}
-edge() {
-  if [ "$#" -eq 0 ]; then command edge -i; else command edge "$@"; fi
-}
-php() {
-  if [ "$#" -eq 0 ]; then command php -a; else command php "$@"; fi
-}
 `,
     "README.txt": `wasmer.sh
 =========

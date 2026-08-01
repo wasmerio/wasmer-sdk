@@ -1,5 +1,5 @@
 use std::{
-    io,
+    fmt, io,
     pin::Pin,
     sync::{
         Arc,
@@ -13,6 +13,7 @@ use futures::future::Either;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use wasmer_wasix::{
     os::task::{TaskJoinHandle, process::WasiProcess},
+    os::tty::{InputEvent, Tty},
     runtime::task_manager::VirtualTaskManager,
 };
 #[cfg(target_arch = "wasm32")]
@@ -23,19 +24,50 @@ use crate::{
     CapturedOutput, Error, ExitReason, ExitStatus, Output, Result,
     capture::CaptureHandle,
     stream::{PipeCloser, PipeReader, PipeWriter},
+    terminal::TerminalBridge,
 };
 
 /// Writable live stdin for a spawned guest process.
-#[derive(Debug)]
 pub struct ProcessStdin {
-    inner: Option<PipeWriter>,
+    inner: Option<ProcessStdinInner>,
     closer: PipeCloser,
+}
+
+enum ProcessStdinInner {
+    Pipe(PipeWriter),
+    Terminal(Box<TerminalStdin>),
+}
+
+struct TerminalStdin {
+    tty: Option<Tty>,
+    pending: Option<futures::future::BoxFuture<'static, Tty>>,
+    pending_len: usize,
+}
+
+impl fmt::Debug for ProcessStdin {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProcessStdin")
+            .field("open", &self.inner.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl ProcessStdin {
     pub(crate) fn new(inner: PipeWriter, closer: PipeCloser) -> Self {
         Self {
-            inner: Some(inner),
+            inner: Some(ProcessStdinInner::Pipe(inner)),
+            closer,
+        }
+    }
+
+    pub(crate) fn terminal(tty: Tty, closer: PipeCloser) -> Self {
+        Self {
+            inner: Some(ProcessStdinInner::Terminal(Box::new(TerminalStdin {
+                tty: Some(tty),
+                pending: None,
+                pending_len: 0,
+            }))),
             closer,
         }
     }
@@ -64,7 +96,34 @@ impl AsyncWrite for ProcessStdin {
         let Some(stream) = this.inner.as_mut() else {
             return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
         };
-        Pin::new(stream).poll_write(cx, bytes)
+        match stream {
+            ProcessStdinInner::Pipe(stream) => Pin::new(stream).poll_write(cx, bytes),
+            ProcessStdinInner::Terminal(terminal) => {
+                let TerminalStdin {
+                    tty,
+                    pending,
+                    pending_len,
+                } = terminal.as_mut();
+                if pending.is_none() {
+                    let Some(current) = tty.take() else {
+                        return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+                    };
+                    *pending_len = bytes.len();
+                    *pending = Some(current.on_event(InputEvent::Raw(bytes.to_vec())));
+                }
+                let future = pending.as_mut().expect("terminal write future");
+                match future.as_mut().poll(cx) {
+                    Poll::Ready(next) => {
+                        let written = *pending_len;
+                        *tty = Some(next);
+                        *pending = None;
+                        *pending_len = 0;
+                        Poll::Ready(Ok(written))
+                    }
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -72,7 +131,10 @@ impl AsyncWrite for ProcessStdin {
         let Some(stream) = this.inner.as_mut() else {
             return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
         };
-        Pin::new(stream).poll_flush(cx)
+        match stream {
+            ProcessStdinInner::Pipe(stream) => Pin::new(stream).poll_flush(cx),
+            ProcessStdinInner::Terminal(_) => Poll::Ready(Ok(())),
+        }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -80,12 +142,18 @@ impl AsyncWrite for ProcessStdin {
         let Some(stream) = this.inner.as_mut() else {
             return Poll::Ready(Ok(()));
         };
-        match Pin::new(stream).poll_shutdown(cx) {
-            Poll::Ready(result) => {
+        match stream {
+            ProcessStdinInner::Pipe(stream) => match Pin::new(stream).poll_shutdown(cx) {
+                Poll::Ready(result) => {
+                    this.inner.take();
+                    Poll::Ready(result)
+                }
+                Poll::Pending => Poll::Pending,
+            },
+            ProcessStdinInner::Terminal(_) => {
                 this.inner.take();
-                Poll::Ready(result)
+                Poll::Ready(Ok(()))
             }
-            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -137,6 +205,7 @@ pub struct Process {
     stderr: Option<ProcessStderr>,
     stdout_capture: CaptureHandle,
     stderr_capture: CaptureHandle,
+    terminal: Option<Arc<TerminalBridge>>,
     completed: Option<Output>,
 }
 
@@ -151,6 +220,7 @@ impl Process {
         stderr: Option<ProcessStderr>,
         stdout_capture: CaptureHandle,
         stderr_capture: CaptureHandle,
+        terminal: Option<Arc<TerminalBridge>>,
     ) -> Self {
         let stdin_control = stdin.as_ref().map(ProcessStdin::closer);
         let control = Arc::new(ProcessControl {
@@ -168,6 +238,7 @@ impl Process {
             stderr,
             stdout_capture,
             stderr_capture,
+            terminal,
             completed: None,
         }
     }
@@ -182,6 +253,19 @@ impl Process {
         self.id
     }
 
+    /// Resize the attached terminal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when this process was not spawned in terminal mode.
+    pub fn resize_terminal(&self, columns: u32, rows: u32) -> Result<()> {
+        let terminal = self.terminal.as_ref().ok_or_else(|| Error::Execution {
+            message: "the process has no terminal".to_owned(),
+        })?;
+        terminal.resize(columns, rows);
+        Ok(())
+    }
+
     /// A cloneable handle that can signal this process without owning it.
     ///
     /// The handle never contends with [`Self::wait`]: killing or terminating
@@ -191,6 +275,7 @@ impl Process {
         ProcessHandle {
             control: Arc::clone(&self.control),
             tasks: Arc::clone(&self.tasks),
+            terminal: self.terminal.clone(),
         }
     }
 
@@ -320,6 +405,7 @@ impl Process {
 pub struct ProcessHandle {
     control: Arc<ProcessControl>,
     tasks: Arc<dyn VirtualTaskManager>,
+    terminal: Option<Arc<TerminalBridge>>,
 }
 
 impl ProcessHandle {
@@ -327,6 +413,19 @@ impl ProcessHandle {
     #[must_use]
     pub fn id(&self) -> u32 {
         self.control.process.pid().raw()
+    }
+
+    /// Resize the attached terminal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when this process was not spawned in terminal mode.
+    pub fn resize_terminal(&self, columns: u32, rows: u32) -> Result<()> {
+        let terminal = self.terminal.as_ref().ok_or_else(|| Error::Execution {
+            message: "the process has no terminal".to_owned(),
+        })?;
+        terminal.resize(columns, rows);
+        Ok(())
     }
 
     /// Immediately signal the guest with `SIGKILL`.

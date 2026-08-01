@@ -58,6 +58,8 @@ pub(crate) fn bounded_pipe(capacity: usize) -> (PipeReader, PipeWriter, PipeClos
         PipeWriter {
             sender: sender.clone(),
             state: Arc::clone(&state),
+            active: true,
+            owns_lifetime: true,
         },
         PipeCloser { sender, state },
     )
@@ -98,7 +100,7 @@ impl PipeReader {
 
         loop {
             match self.receiver.poll_recv(cx) {
-                Poll::Ready(Some(PipeMessage::Data(bytes))) if bytes.is_empty() => continue,
+                Poll::Ready(Some(PipeMessage::Data(bytes))) if bytes.is_empty() => {}
                 Poll::Ready(Some(PipeMessage::Data(bytes))) => {
                     let available = bytes.len();
                     self.pending = Some(bytes);
@@ -175,11 +177,26 @@ impl Drop for PipeReader {
 pub(crate) struct PipeWriter {
     sender: UnboundedSender<PipeMessage>,
     state: Arc<PipeState>,
+    active: bool,
+    owns_lifetime: bool,
 }
 
 impl PipeWriter {
+    /// Create a writer that can add data while this pipe remains open, without
+    /// keeping the reader alive on its own. This is used for terminal echo:
+    /// the guest's stdout owns the stream lifetime, while the line discipline
+    /// is merely another producer.
+    pub(crate) fn tap(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+            state: Arc::clone(&self.state),
+            active: self.active,
+            owns_lifetime: false,
+        }
+    }
+
     fn poll_capacity(&self, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
-        if self.state.closed.load(Ordering::Acquire) {
+        if !self.active || self.state.closed.load(Ordering::Acquire) {
             return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
         }
 
@@ -200,11 +217,12 @@ impl PipeWriter {
         }
     }
 
-    fn close(&self) {
-        if !self.state.closed.swap(true, Ordering::AcqRel) {
+    fn close(&mut self) {
+        if self.active && self.owns_lifetime && !self.state.closed.swap(true, Ordering::AcqRel) {
             let _ = self.sender.send(PipeMessage::Close);
             self.state.writer_waker.wake();
         }
+        self.active = false;
     }
 }
 
@@ -264,7 +282,7 @@ impl AsyncWrite for PipeWriter {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.close();
         Poll::Ready(Ok(()))
     }
@@ -549,5 +567,22 @@ mod tests {
             Pin::new(&mut reader).poll_read_ready(&mut cx),
             Poll::Ready(Ok(0))
         ));
+    }
+
+    #[tokio::test]
+    async fn tap_writes_without_keeping_the_pipe_open() {
+        let (mut reader, mut writer, _closer) = bounded_pipe(4);
+        let mut tap = writer.tap();
+
+        tap.write_all(b"x").await.unwrap();
+        writer.shutdown().await.unwrap();
+
+        let mut output = Vec::new();
+        reader.read_to_end(&mut output).await.unwrap();
+        assert_eq!(output, b"x");
+        assert_eq!(
+            tap.write_all(b"y").await.unwrap_err().kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
     }
 }

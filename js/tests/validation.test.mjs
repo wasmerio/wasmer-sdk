@@ -61,6 +61,10 @@ test("wasm facade rejects invalid retention values from direct callers", async (
       () => command.outputBytes(1.5),
       (error) => error?.code === "INVALID_ARGUMENT",
     );
+    assert.throws(
+      () => command.terminal(0, 24),
+      (error) => error?.code === "INVALID_ARGUMENT",
+    );
   } finally {
     await sandbox.close();
     await client.shutdown();
@@ -102,6 +106,14 @@ test("command options are validated before constructing the wasm command", async
     command.run({ outputBytes: UINT32_MAX + 1 }),
     isInvalidArgument,
   );
+  await assert.rejects(
+    command.spawn({ terminal: { columns: 0 } }),
+    isInvalidArgument,
+  );
+  await assert.rejects(
+    command.spawn({ terminal: { rows: 24.5 } }),
+    isInvalidArgument,
+  );
   assert.equal(builds, 0);
 });
 
@@ -140,6 +152,8 @@ test("port and termination inputs enforce their public ranges", async () => {
     process.terminate({ gracePeriodMs: 1.5 }),
     isInvalidArgument,
   );
+  assert.throws(() => process.resizeTerminal(0, 24), isInvalidArgument);
+  assert.throws(() => process.resizeTerminal(80, Number.NaN), isInvalidArgument);
   assert.equal(terminateCalls, 0);
 });
 

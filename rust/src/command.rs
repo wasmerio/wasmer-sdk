@@ -8,6 +8,7 @@ use wasmer_wasix::{
     Runtime,
     bin_factory::spawn_exec,
     fs::WasiFsRoot,
+    os::tty::Tty,
     runners::wasi::{PackageOrHash, RuntimeOrEngine, WasiRunner},
 };
 
@@ -18,7 +19,8 @@ use crate::{
     ProcessStdout, Result, Sandbox,
     capture::{CaptureFile, CaptureHandle},
     fs::validate_guest_path,
-    stream::{PipeReader, PipeVirtualFile, RetainedOutput, bounded_pipe},
+    stream::{PipeReader, PipeVirtualFile, PipeWriter, RetainedOutput, bounded_pipe},
+    terminal::{TerminalBridge, TerminalOptions},
 };
 
 /// Live stdio configuration for [`Command::spawn`].
@@ -73,6 +75,7 @@ pub struct Command {
     stdout: Stdio,
     stderr: Stdio,
     stream_bytes: usize,
+    terminal: Option<TerminalOptions>,
 }
 
 impl Command {
@@ -90,6 +93,7 @@ impl Command {
             stdout: Stdio::Piped,
             stderr: Stdio::Piped,
             stream_bytes: 64 * 1024,
+            terminal: None,
         }
     }
 
@@ -163,6 +167,15 @@ impl Command {
         self
     }
 
+    /// Attach an interactive terminal to this command and its child process tree.
+    ///
+    /// Terminal mode provides piped stdin/stdout/stderr, canonical input and
+    /// echo, terminal detection, and process-controlled raw/canonical mode.
+    pub fn terminal(&mut self, options: TerminalOptions) -> &mut Self {
+        self.terminal = Some(options);
+        self
+    }
+
     /// Run to completion, capture bounded output, and require success.
     ///
     /// Use [`Self::output`] when a non-zero exit, termination, or timeout is
@@ -233,14 +246,34 @@ impl Command {
         let stdout_capture = CaptureHandle::new(limit);
         let stderr_capture = CaptureHandle::new(limit);
 
-        let (guest_stdin, process_stdin) = match self.stdin {
+        let terminal_bridge = self.terminal.map(TerminalBridge::new);
+        let stdin_mode = if terminal_bridge.is_some() {
+            Stdio::Piped
+        } else {
+            self.stdin
+        };
+        let stdout_mode = if terminal_bridge.is_some() {
+            Stdio::Piped
+        } else {
+            self.stdout
+        };
+        let stderr_mode = if terminal_bridge.is_some() {
+            Stdio::Piped
+        } else {
+            self.stderr
+        };
+        let mut terminal_input = None;
+        let (guest_stdin, mut process_stdin) = match stdin_mode {
             Stdio::Piped => {
                 let (guest, user, closer) = bounded_pipe(self.stream_bytes);
-                (
-                    Box::new(PipeVirtualFile::reader(guest))
-                        as Box<dyn virtual_fs::VirtualFile + Send + Sync>,
-                    Some(ProcessStdin::new(user, closer)),
-                )
+                let guest = Box::new(PipeVirtualFile::reader(guest))
+                    as Box<dyn virtual_fs::VirtualFile + Send + Sync>;
+                if terminal_bridge.is_some() {
+                    terminal_input = Some((user, closer));
+                    (guest, None)
+                } else {
+                    (guest, Some(ProcessStdin::new(user, closer)))
+                }
             }
             Stdio::Capture | Stdio::Null => (
                 Box::<virtual_fs::NullFile>::default()
@@ -248,10 +281,10 @@ impl Command {
                 None,
             ),
         };
-        let (guest_stdout, stdout_stream) =
-            guest_output_file(self.stdout, &stdout_capture, self.stream_bytes);
-        let (guest_stderr, stderr_stream) =
-            guest_output_file(self.stderr, &stderr_capture, self.stream_bytes);
+        let (guest_stdout, stdout_stream, terminal_echo) =
+            guest_output_file(stdout_mode, &stdout_capture, self.stream_bytes);
+        let (guest_stderr, stderr_stream, _) =
+            guest_output_file(stderr_mode, &stderr_capture, self.stream_bytes);
         let process_stdout = stdout_stream.map(ProcessStdout::new);
         let process_stderr = stderr_stream.map(ProcessStderr::new);
 
@@ -319,7 +352,7 @@ impl Command {
             })?
             .unwrap_or_else(|| webc::metadata::annotations::Wasi::new(&command_name));
         let executable_name = wasi.exec_name.as_deref().unwrap_or(&command_name);
-        let builder = runner
+        let mut builder = runner
             .prepare_webc_env(
                 executable_name,
                 &wasi,
@@ -330,10 +363,31 @@ impl Command {
             .map_err(|error| Error::Execution {
                 message: format!("unable to prepare the WASI environment: {error:#}"),
             })?;
+        if let Some(bridge) = &terminal_bridge {
+            builder.set_tty(bridge.clone());
+        }
         let environment = builder.build().map_err(|error| Error::Execution {
             message: format!("unable to build the WASI environment: {error}"),
         })?;
         let wasi_process = environment.process.clone();
+        if let Some((guest_input, closer)) = terminal_input {
+            let bridge = terminal_bridge
+                .as_ref()
+                .ok_or_else(|| Error::InternalState {
+                    message: "terminal input has no terminal bridge".to_owned(),
+                })?;
+            let echo = terminal_echo.ok_or_else(|| Error::InternalState {
+                message: "terminal mode has no output stream".to_owned(),
+            })?;
+            let mut tty = Tty::new(
+                Box::new(PipeVirtualFile::writer(guest_input)),
+                Box::new(RetainedOutput::new(echo, stdout_capture.clone())),
+                false,
+                bridge.options(),
+            );
+            tty.set_signaler(Box::new(wasi_process.clone()));
+            process_stdin = Some(ProcessStdin::terminal(tty, closer));
+        }
         let task = spawn_exec(
             selected.inner.binary.clone(),
             &command_name,
@@ -355,6 +409,7 @@ impl Command {
             process_stderr,
             stdout_capture,
             stderr_capture,
+            terminal_bridge,
         );
         self.sandbox.register_process(process.control())?;
 
@@ -489,17 +544,20 @@ fn guest_output_file(
 ) -> (
     Box<dyn virtual_fs::VirtualFile + Send + Sync>,
     Option<PipeReader>,
+    Option<PipeWriter>,
 ) {
     match mode {
         Stdio::Piped => {
             let (user, guest, _closer) = bounded_pipe(stream_bytes);
+            let terminal_echo = guest.tap();
             (
                 Box::new(RetainedOutput::new(guest, capture.clone())),
                 Some(user),
+                Some(terminal_echo),
             )
         }
-        Stdio::Capture => (Box::new(CaptureFile::new(capture.clone())), None),
-        Stdio::Null => (Box::<virtual_fs::NullFile>::default(), None),
+        Stdio::Capture => (Box::new(CaptureFile::new(capture.clone())), None, None),
+        Stdio::Null => (Box::<virtual_fs::NullFile>::default(), None, None),
     }
 }
 

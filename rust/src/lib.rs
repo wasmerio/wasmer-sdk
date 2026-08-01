@@ -13,6 +13,7 @@ mod process;
 mod provider_fs;
 mod sandbox;
 mod stream;
+mod terminal;
 
 pub use client::{CacheConfig, Packages, Sandboxes, Wasmer, WasmerConfig};
 pub use command::{CapturedOutput, Command, ExitReason, ExitStatus, Output, Stdio};
@@ -25,3 +26,4 @@ pub use provider_fs::{
     FileSystemCapabilities, FileType, FsError, FsResult, MountMode, RelativePath,
 };
 pub use sandbox::{IntoFileSystem, NetworkPolicy, Ports, Sandbox, SandboxBuilder};
+pub use terminal::TerminalOptions;

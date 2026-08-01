@@ -56,6 +56,24 @@ const result = await process.wait({ check: true });
 
 Unlike `run()`, `process.wait()` is unchecked by default.
 
+For an interactive shell or REPL, attach one terminal to the entire process
+tree. Child packages inherit its TTY state and live streams:
+
+```javascript
+const bash = await sandbox
+  .command("bash", ["-i"])
+  .spawn({ terminal: { columns: 100, rows: 30 } });
+
+if (!bash.stdin || !bash.stdout || !bash.stderr) throw new Error("no terminal");
+terminal.onData((data) => void bash.stdin.write(data));
+terminal.onResize(({ cols, rows }) => bash.resizeTerminal(cols, rows));
+const pump = async (stream) => {
+  for await (const chunk of stream) terminal.write(chunk);
+};
+void pump(bash.stdout);
+void pump(bash.stderr);
+```
+
 Call `sandbox.close()` and `wasmer.close()` when a long-lived application no
 longer needs them.
 

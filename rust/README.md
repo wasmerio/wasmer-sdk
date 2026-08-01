@@ -109,6 +109,7 @@ cargo +1.94.0 run --locked -p wasmer-sdk --example python
 cargo +1.94.0 run --locked -p wasmer-sdk --example multiple_runtimes
 cargo +1.94.0 run --locked -p wasmer-sdk --example edgejs_http
 cargo +1.94.0 run --locked -p wasmer-sdk --example postgres_psql
+cargo +1.94.0 run --locked -p wasmer-sdk --example terminal
 ```
 
 The PostgreSQL example requires `psql` on `PATH`; set `PSQL` or pass its path
