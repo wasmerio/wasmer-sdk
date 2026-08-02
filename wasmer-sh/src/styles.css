@@ -133,6 +133,47 @@ button {
   background: var(--line-strong);
 }
 
+.live-http-badge {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid rgba(94, 230, 168, 0.18);
+  border-radius: 999px;
+  background: rgba(94, 230, 168, 0.07);
+  color: #a5d9c1;
+  cursor: pointer;
+  font: 10px "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.live-http-badge:hover,
+.live-http-badge[aria-pressed="true"] {
+  border-color: rgba(94, 230, 168, 0.32);
+  background: rgba(94, 230, 168, 0.12);
+  color: #c4ecd8;
+}
+
+.live-http-badge:focus-visible {
+  outline: 2px solid rgba(94, 230, 168, 0.55);
+  outline-offset: 2px;
+}
+
+.live-http-badge[hidden] {
+  display: none;
+}
+
+.live-http-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--green);
+  box-shadow: 0 0 0 3px rgba(94, 230, 168, 0.08);
+}
+
 #package-name {
   max-width: min(32vw, 280px);
   overflow: hidden;

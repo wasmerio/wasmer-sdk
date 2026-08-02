@@ -250,6 +250,11 @@ try {
     );
   });
   await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
+  await page.locator("#live-http-badge").waitFor({ timeout: 30_000 });
+  assert.equal(
+    await page.locator("#live-http-label").textContent(),
+    "Live HTTP :8000",
+  );
   const previewUrl = await page
     .locator("#preview-panel iframe")
     .getAttribute("src");
@@ -296,6 +301,19 @@ try {
   await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
   await page.locator("#preview-refresh").click();
   await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
+  await page.locator("#preview-close").click();
+  await page.locator("#preview-panel").waitFor({
+    state: "hidden",
+    timeout: 30_000,
+  });
+  assert.equal(await page.locator("#live-http-badge").isVisible(), true);
+  await page.locator("#live-http-badge").click();
+  await page.locator("#preview-panel").waitFor({ timeout: 30_000 });
+  await page
+    .frameLocator("#preview-panel iframe")
+    .frameLocator("iframe")
+    .locator("#php-preview")
+    .waitFor({ timeout: 30_000 });
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send("\x03");
   });
@@ -305,6 +323,10 @@ try {
     { timeout: 30_000 },
   );
   await page.locator("#preview-panel").waitFor({
+    state: "hidden",
+    timeout: 30_000,
+  });
+  await page.locator("#live-http-badge").waitFor({
     state: "hidden",
     timeout: 30_000,
   });

@@ -49,6 +49,7 @@ interface ActiveSession {
   stdin?: WritableBytes;
   stopWatchingPorts?: () => void;
   preview?: PreviewSession;
+  listeningPorts: Set<number>;
   pendingPreviewPorts: Set<number>;
 }
 
@@ -84,6 +85,8 @@ const elements = {
   stage: document.querySelector<HTMLElement>(".shell-stage")!,
   terminal: requiredElement<HTMLDivElement>("terminal"),
   status: requiredElement<HTMLSpanElement>("session-status"),
+  liveHttpBadge: requiredElement<HTMLButtonElement>("live-http-badge"),
+  liveHttpLabel: requiredElement<HTMLSpanElement>("live-http-label"),
   packageName: requiredElement<HTMLSpanElement>("package-name"),
   bootTitle: requiredElement<HTMLHeadingElement>("boot-title"),
   bootDetail: requiredElement<HTMLParagraphElement>("boot-detail"),
@@ -171,6 +174,12 @@ elements.clear.addEventListener("click", () => {
 });
 elements.restart.addEventListener("click", () => void start());
 elements.retry.addEventListener("click", () => void start());
+elements.liveHttpBadge.addEventListener("click", () => {
+  const session = activeSession;
+  if (!session) return;
+  const port = [...session.listeningPorts].at(-1);
+  if (port !== undefined) void openPreview(session, port).catch(showTerminalError);
+});
 elements.previewClose.addEventListener("click", () => {
   const session = activeSession;
   if (session) void closePreview(session);
@@ -275,15 +284,20 @@ async function start(): Promise<void> {
 
     const session: ActiveSession = {
       sandbox,
+      listeningPorts: new Set(),
       pendingPreviewPorts: new Set(),
     };
     activeSession = session;
     session.stopWatchingPorts = sandbox.ports.onListen(
       (port) => {
+        session.listeningPorts.add(port);
+        updateLiveHttpBadge(session);
         void openPreview(session, port).catch(showTerminalError);
       },
       {
         onClose: (port) => {
+          session.listeningPorts.delete(port);
+          updateLiveHttpBadge(session);
           if (session.preview?.port === port) void closePreview(session);
         },
       },
@@ -438,6 +452,7 @@ async function pumpOutput(stream: ReadableBytes): Promise<void> {
 async function closeActiveSession(): Promise<void> {
   const session = activeSession;
   activeSession = undefined;
+  updateLiveHttpBadge();
   inputQueue = Promise.resolve();
   if (!session) return;
 
@@ -484,6 +499,7 @@ async function openPreview(session: ActiveSession, port: number): Promise<void> 
     elements.previewForward.disabled = true;
     elements.previewPanel.hidden = false;
     elements.stage.classList.add("has-preview");
+    updateLiveHttpBadge(session);
     fitTerminal();
     writeTerminal(
       `\r\n\x1b[38;5;81m[web server listening on port ${port} · preview opened]\x1b[0m\r\n`,
@@ -504,8 +520,29 @@ async function closePreview(session: ActiveSession): Promise<void> {
     elements.previewLocation.value = "";
     elements.previewBack.disabled = true;
     elements.previewForward.disabled = true;
+    updateLiveHttpBadge(activeSession === session ? session : undefined);
     fitTerminal();
   }
+}
+
+function updateLiveHttpBadge(session = activeSession): void {
+  if (!session || session.listeningPorts.size === 0) {
+    elements.liveHttpBadge.hidden = true;
+    elements.liveHttpBadge.setAttribute("aria-pressed", "false");
+    return;
+  }
+  const ports = [...session.listeningPorts];
+  const port = ports.at(-1)!;
+  elements.liveHttpLabel.textContent =
+    ports.length === 1 ? `Live HTTP :${port}` : `Live HTTP · ${ports.length}`;
+  elements.liveHttpBadge.title = session.preview
+    ? `Web preview open on port ${session.preview.port}`
+    : `Open web preview on port ${port}`;
+  elements.liveHttpBadge.setAttribute(
+    "aria-pressed",
+    String(session.preview !== undefined),
+  );
+  elements.liveHttpBadge.hidden = false;
 }
 
 function createPreviewIframe(
