@@ -10,10 +10,11 @@ import { chromium } from "playwright";
 const packageRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 
 test(
-  "routes an iframe and its absolute URLs to a PHP listener through a service worker",
+  "serves one PHP listener from the service-worker origin root",
   { timeout: 240_000 },
   async () => {
-    const host = await startServer();
+    const appHost = await startAppServer();
+    const httpHost = await startHttpHost();
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     const diagnostics = [];
@@ -28,12 +29,8 @@ test(
     });
 
     try {
-      await page.goto(host.url, { waitUntil: "load" });
-      await page.evaluate(async () => {
-        const registration = await navigator.serviceWorker.register(
-          "/wasmer-service-worker.js",
-          { scope: "/", type: "module" },
-        );
+      await page.goto(appHost.url, { waitUntil: "load" });
+      await page.evaluate(async (httpOrigin) => {
         const { Wasmer } = await import("/dist/index.js");
         const wasmer = new Wasmer({
           cache: { namespace: "browser-service-worker-test" },
@@ -68,16 +65,16 @@ test(
             for await (const line of process.stderr.lines()) console.error(`php: ${line}`);
           })();
         }
-        globalThis.__wasmerTest = { wasmer, sandbox, process };
+        globalThis.__wasmerTest = { wasmer, sandbox, process, httpOrigin };
         const server = await sandbox.ports.expose(8080, {
-          serviceWorker: registration,
+          serviceWorker: httpOrigin,
           timeoutMs: 30_000,
         });
         const iframe = server.createIframe({ title: "PHP preview" });
         iframe.id = "preview";
         document.body.append(iframe);
         globalThis.__wasmerTest.server = server;
-      });
+      }, httpHost.url);
 
       const preview = page.frameLocator("#preview");
       await assert.doesNotReject(async () => {
@@ -88,6 +85,23 @@ test(
           .filter({ hasText: "absolute route works" })
           .waitFor({ timeout: 60_000 });
       }, diagnostics.join("\n"));
+
+      const serverState = await page.evaluate(async () => {
+        const test = globalThis.__wasmerTest;
+        let duplicate;
+        try {
+          await test.sandbox.ports.expose(8080, {
+            serviceWorker: test.httpOrigin,
+            timeoutMs: 5_000,
+          });
+        } catch (error) {
+          duplicate = { message: error.message, code: error.code };
+        }
+        return { url: test.server.url.href, duplicate };
+      });
+      assert.equal(serverState.url, httpHost.url);
+      assert.equal(serverState.duplicate?.code, "CAPABILITY_UNAVAILABLE");
+      assert.match(serverState.duplicate?.message ?? "", /already exposes/);
 
       const closedStatus = await page.evaluate(async () => {
         const test = globalThis.__wasmerTest;
@@ -104,12 +118,13 @@ test(
       throw new Error(`${error?.stack ?? error}\n${diagnostics.join("\n")}`);
     } finally {
       await browser.close();
-      await host.close();
+      await appHost.close();
+      await httpHost.close();
     }
   },
 );
 
-async function startServer() {
+async function startAppServer() {
   const server = createServer(async (request, response) => {
     response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     response.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
@@ -120,15 +135,55 @@ async function startServer() {
         response.end("<!doctype html><meta charset=utf-8><title>Wasmer HTTP test</title>");
         return;
       }
-      const relative = pathname === "/wasmer-service-worker.js"
-        ? "/dist/service-worker.js"
-        : pathname;
-      const file = resolve(packageRoot, `.${decodeURIComponent(relative)}`);
+      const file = resolve(packageRoot, `.${decodeURIComponent(pathname)}`);
       if (file !== packageRoot && !file.startsWith(`${packageRoot}${sep}`)) {
         response.writeHead(403).end();
         return;
       }
       response.setHeader("Content-Type", contentType(file));
+      response.end(await readFile(file));
+    } catch (error) {
+      response.writeHead(error?.code === "ENOENT" ? 404 : 500).end();
+    }
+  });
+  await new Promise((resolvePromise, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolvePromise);
+  });
+  const address = server.address();
+  assert(address && typeof address !== "string");
+  return {
+    url: `http://127.0.0.1:${address.port}/`,
+    close: () => new Promise((resolvePromise, reject) =>
+      server.close((error) => error ? reject(error) : resolvePromise()),
+    ),
+  };
+}
+
+async function startHttpHost() {
+  const server = createServer(async (request, response) => {
+    response.setHeader("Access-Control-Allow-Origin", "*");
+    response.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+    response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    try {
+      const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+      let file;
+      if (pathname === "/.wasmer/host.html") {
+        response.setHeader("Content-Type", "text/html; charset=utf-8");
+        response.end(
+          "<!doctype html><script type=module src=/.wasmer/service-worker-host.js></script>",
+        );
+        return;
+      }
+      if (pathname === "/.wasmer/service-worker-host.js") {
+        file = resolve(packageRoot, "dist/service-worker-host.js");
+      } else if (pathname === "/wasmer-service-worker.js") {
+        file = resolve(packageRoot, "dist/service-worker.js");
+      } else {
+        response.writeHead(404).end();
+        return;
+      }
+      response.setHeader("Content-Type", "text/javascript; charset=utf-8");
       response.end(await readFile(file));
     } catch (error) {
       response.writeHead(error?.code === "ENOENT" ? 404 : 500).end();

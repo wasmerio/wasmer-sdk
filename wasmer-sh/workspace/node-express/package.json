@@ -1,0 +1,8 @@
+{
+  "name": "wasmer-sh-express-example",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

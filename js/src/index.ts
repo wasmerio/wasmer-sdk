@@ -104,8 +104,10 @@ export interface DirectoryEntry extends FileStat {
 }
 
 export interface ExposePortOptions {
-  /** An active registration running `@wasmer/sdk2/service-worker`. */
-  serviceWorker: ServiceWorkerRegistration;
+  /**
+   * The origin of a standalone Wasmer HTTP host.
+   */
+  serviceWorker: string | URL;
   /** Time allowed for the guest to begin listening. Defaults to 30 seconds. */
   timeoutMs?: number;
 }
@@ -648,11 +650,8 @@ export class Ports {
   }
 
   /**
-   * Expose a guest HTTP listener through a same-origin service-worker URL.
-   *
-   * The sandbox must use `network: { mode: "http" }`. The returned URL can be
-   * assigned directly to an iframe; requests made by that iframe, including
-   * absolute paths, remain routed to the same guest listener.
+   * Expose a guest HTTP listener at the root of a standalone Wasmer HTTP host.
+   * The sandbox must use `network: { mode: "http" }`.
    */
   async expose(
     port: number,
@@ -666,17 +665,16 @@ export class Ports {
     }
     if (!options?.serviceWorker) {
       throw new WasmerError(
-        "ports.expose() requires an active service worker registration",
+        "ports.expose() requires an HTTP host origin",
         "INVALID_ARGUMENT",
       );
     }
     const validPort = validateInteger("port", port, 1, 65_535);
     const timeoutMs = validateTimeoutMs(options.timeoutMs ?? 30_000);
-    const worker = await activeServiceWorker(options.serviceWorker, timeoutMs);
+    const target = await resolveServiceWorker(options.serviceWorker, timeoutMs);
     await waitForHttpListener(this.#core, validPort, timeoutMs);
 
     const id = createBrowserServerId();
-    const path = `/.wasmer/sdk/${id}/`;
     const channel = new MessageChannel();
     let server: BrowserServer;
     const ready = deferred<void>();
@@ -687,15 +685,20 @@ export class Ports {
         ready.resolve();
         return;
       }
+      if (message.type === "wasmer-sdk:http-error" && message.serverId === id) {
+        ready.reject(
+          new WasmerError(message.error, "CAPABILITY_UNAVAILABLE"),
+        );
+        return;
+      }
       if (message.type !== "wasmer-sdk:http-request") return;
       void forwardHttpRequest(this.#core, validPort, channel.port1, message);
     });
     channel.port1.start();
-    worker.postMessage(
+    target.worker.postMessage(
       {
         type: "wasmer-sdk:http-register",
         serverId: id,
-        path,
       },
       [channel.port2],
     );
@@ -707,7 +710,7 @@ export class Ports {
         "the Wasmer service worker did not accept the HTTP route",
       );
       server = new BrowserServer(
-        new URL(path, window.location.origin),
+        new URL("/", target.origin),
         id,
         channel.port1,
         () => this.#servers.delete(server),
@@ -855,11 +858,25 @@ interface HttpReadyMessage {
   serverId: string;
 }
 
-function asBridgeMessage(value: unknown): HttpRequestMessage | HttpReadyMessage | undefined {
+interface HttpErrorMessage {
+  type: "wasmer-sdk:http-error";
+  serverId: string;
+  error: string;
+}
+
+function asBridgeMessage(
+  value: unknown,
+): HttpRequestMessage | HttpReadyMessage | HttpErrorMessage | undefined {
   if (typeof value !== "object" || value === null || !("type" in value)) return undefined;
   const type = (value as { type?: unknown }).type;
-  if (type !== "wasmer-sdk:http-request" && type !== "wasmer-sdk:http-ready") return undefined;
-  return value as HttpRequestMessage | HttpReadyMessage;
+  if (
+    type !== "wasmer-sdk:http-request" &&
+    type !== "wasmer-sdk:http-ready" &&
+    type !== "wasmer-sdk:http-error"
+  ) {
+    return undefined;
+  }
+  return value as HttpRequestMessage | HttpReadyMessage | HttpErrorMessage;
 }
 
 async function forwardHttpRequest(
@@ -901,40 +918,133 @@ async function forwardHttpRequest(
   }
 }
 
-async function activeServiceWorker(
-  registration: ServiceWorkerRegistration,
+interface ServiceWorkerTarget {
+  origin: string;
+  worker: ServiceWorkerMessenger;
+}
+
+interface ServiceWorkerMessenger {
+  postMessage(message: unknown, transfer?: Transferable[]): void;
+}
+
+const remoteServiceWorkers = new Map<string, Promise<ServiceWorkerTarget>>();
+
+async function resolveServiceWorker(
+  serviceWorker: string | URL,
   timeoutMs: number,
-): Promise<ServiceWorker> {
-  const worker = registration.active ?? registration.installing ?? registration.waiting;
-  if (!worker) {
+): Promise<ServiceWorkerTarget> {
+  let host: URL;
+  try {
+    host = new URL(serviceWorker, window.location.href);
+  } catch {
     throw new WasmerError(
-      "the service worker registration has no installing, waiting, or active worker",
+      "the service worker origin must be a valid URL",
       "INVALID_ARGUMENT",
     );
   }
-  if (worker.state !== "activated") {
-    await withTimeout(
-      new Promise<void>((resolve, reject) => {
-      const onStateChange = () => {
-        if (worker.state === "activated") resolve();
-        if (worker.state === "redundant") {
-          reject(new Error("the service worker became redundant"));
-        }
-      };
-      worker.addEventListener("statechange", onStateChange);
-      onStateChange();
-      }),
-      timeoutMs,
-      "the Wasmer service worker did not activate",
+  if (host.protocol !== "http:" && host.protocol !== "https:") {
+    throw new WasmerError(
+      "the service worker origin must use HTTP or HTTPS",
+      "INVALID_ARGUMENT",
     );
   }
-  if (!registration.active) {
+  const origin = host.origin;
+  let connection = remoteServiceWorkers.get(origin);
+  if (!connection) {
+    connection = connectRemoteServiceWorker(origin, timeoutMs);
+    remoteServiceWorkers.set(origin, connection);
+    void connection.catch(() => remoteServiceWorkers.delete(origin));
+  }
+  return withTimeout(
+    connection,
+    timeoutMs,
+    `the Wasmer HTTP host at ${origin} did not become ready`,
+  );
+}
+
+async function connectRemoteServiceWorker(
+  origin: string,
+  timeoutMs: number,
+): Promise<ServiceWorkerTarget> {
+  if (!document.body) {
     throw new WasmerError(
-      "the service worker did not become active",
+      "the document body must exist before connecting to a Wasmer HTTP host",
       "INITIALIZATION_ERROR",
     );
   }
-  return registration.active;
+  const iframe = document.createElement("iframe");
+  const hostUrl = new URL("/.wasmer/host.html", origin);
+  hostUrl.searchParams.set("parentOrigin", window.location.origin);
+  iframe.src = hostUrl.href;
+  iframe.hidden = true;
+  iframe.tabIndex = -1;
+  iframe.setAttribute("aria-hidden", "true");
+
+  const loaded = new Promise<void>((resolve, reject) => {
+    iframe.addEventListener("load", () => resolve(), { once: true });
+    iframe.addEventListener(
+      "error",
+      () => reject(new Error(`failed to load the Wasmer HTTP host at ${origin}`)),
+      { once: true },
+    );
+  });
+  document.body.append(iframe);
+
+  try {
+    await withTimeout(
+      loaded,
+      timeoutMs,
+      `the Wasmer HTTP host at ${origin} did not load`,
+    );
+    if (!iframe.contentWindow) {
+      throw new Error("the Wasmer HTTP host iframe has no content window");
+    }
+    const channel = new MessageChannel();
+    const ready = new Promise<void>((resolve, reject) => {
+      channel.port1.addEventListener(
+        "message",
+        (event: MessageEvent<unknown>) => {
+          const message = event.data as {
+            type?: unknown;
+            error?: unknown;
+          } | null;
+          if (message?.type === "wasmer-sdk:http-host-ready") {
+            resolve();
+          } else if (message?.type === "wasmer-sdk:http-host-error") {
+            reject(
+              new Error(
+                typeof message.error === "string"
+                  ? message.error
+                  : "the Wasmer HTTP host failed to initialize",
+              ),
+            );
+          }
+        },
+      );
+      channel.port1.start();
+    });
+    iframe.contentWindow.postMessage(
+      { type: "wasmer-sdk:http-host-connect" },
+      origin,
+      [channel.port2],
+    );
+    await withTimeout(
+      ready,
+      timeoutMs,
+      `the Wasmer HTTP host at ${origin} did not connect`,
+    );
+    return {
+      origin,
+      worker: {
+        postMessage(message: unknown, transfer: Transferable[] = []): void {
+          channel.port1.postMessage(message, transfer);
+        },
+      },
+    };
+  } catch (error) {
+    iframe.remove();
+    throw error;
+  }
 }
 
 async function waitForHttpListener(
@@ -963,12 +1073,15 @@ function createBrowserServerId(): string {
 function deferred<T>(): {
   promise: Promise<T>;
   resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
 } {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 async function withTimeout<T>(

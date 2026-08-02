@@ -65,6 +65,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-self: start;
+  gap: 1px;
   width: max-content;
   text-decoration: none;
 }
@@ -73,6 +74,16 @@ button {
   display: block;
   width: auto;
   height: 28px;
+}
+
+.brand-suffix {
+  color: var(--violet);
+  font-family:
+    "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.08em;
 }
 
 .session-summary {
@@ -203,10 +214,7 @@ button {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 76% -20%, rgba(103, 232, 249, 0.055), transparent 31%),
-    radial-gradient(circle at 22% 110%, rgba(167, 139, 250, 0.065), transparent 32%),
-    var(--panel);
+  background: var(--panel);
 }
 
 .preview-panel {
@@ -253,9 +261,11 @@ button {
 #terminal .xterm {
   height: 100%;
   padding: 15px 17px;
+  background: var(--panel);
 }
 
 #terminal .xterm-viewport {
+  background-color: var(--panel);
   scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
   scrollbar-width: thin;
 }

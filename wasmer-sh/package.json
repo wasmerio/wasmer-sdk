@@ -5,9 +5,11 @@
   "description": "An interactive browser shell powered by Wasmer, WASIX, and the Wasmer JavaScript SDK",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
+    "dev": "node scripts/run-servers.mjs dev",
+    "dev:app": "vite --host 127.0.0.1 --port 5173",
+    "dev:http": "vite --config service-worker/vite.config.ts --host 127.0.0.1 --port 5174",
+    "build": "tsc --noEmit && vite build && vite build --config service-worker/vite.config.ts",
+    "preview": "node scripts/run-servers.mjs preview",
     "test": "node tests/browser-smoke.mjs"
   },
   "dependencies": {

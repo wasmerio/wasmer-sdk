@@ -15,18 +15,6 @@ const testPnpm = process.env.WASMER_TEST_PNPM === "1" || Boolean(edgejsWebc);
 if (edgejsWebc && !process.env.VITE_EDGEJS_WEBC_URL) {
   process.env.VITE_EDGEJS_WEBC_URL = `/@fs/${edgejsWebc}`;
 }
-const server = await createServer({
-  root,
-  configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
-  logLevel: "warn",
-  server: {
-    host: "127.0.0.1",
-    port: 0,
-    fs: edgejsWebc
-      ? { allow: [root, dirname(edgejsWebc)] }
-      : undefined,
-  },
-});
 const externalWispUrl = process.env.WASMER_WISP_URL;
 const proxy = externalWispUrl
   ? undefined
@@ -40,8 +28,36 @@ proxy?.on("upgrade", (request, socket, head) => {
 
 let browser;
 let page;
+let server;
+let serviceWorkerServer;
+let serviceWorkerOrigin;
 const diagnostics = [];
 try {
+  serviceWorkerServer = await createServer({
+    configFile: fileURLToPath(
+      new URL("../service-worker/vite.config.ts", import.meta.url),
+    ),
+    logLevel: "warn",
+    server: { host: "127.0.0.1", port: 0 },
+  });
+  await serviceWorkerServer.listen();
+  const serviceWorkerAddress = serviceWorkerServer.httpServer?.address();
+  assert(serviceWorkerAddress && typeof serviceWorkerAddress !== "string");
+  serviceWorkerOrigin = `http://127.0.0.1:${serviceWorkerAddress.port}`;
+  process.env.VITE_WASMER_SERVICE_WORKER_ORIGIN = serviceWorkerOrigin;
+
+  server = await createServer({
+    root,
+    configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
+    logLevel: "warn",
+    server: {
+      host: "127.0.0.1",
+      port: 0,
+      fs: edgejsWebc
+        ? { allow: [root, dirname(edgejsWebc)] }
+        : undefined,
+    },
+  });
   if (proxy) {
     await new Promise((resolve, reject) => {
       proxy.once("error", reject);
@@ -109,7 +125,7 @@ try {
   if (testPnpm) {
     await page.evaluate(async () => {
       await globalThis.__wasmerShell.send(
-        "pnpm add react --ignore-scripts && node -e \"console.log('__PNPM_OK__', require('react').version)\"\r",
+        "(cd node-express && pnpm install --ignore-scripts && node -e \"console.log('__PNPM_OK__', require('express/package.json').version)\")\r",
       );
     });
     await page.waitForFunction(
@@ -230,15 +246,20 @@ try {
 
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send(
-      "printf '<h1 id=php-preview>PHP_PREVIEW_OK</h1>' > index.php\rphp -S 0.0.0.0:8000 -t /workspace\r",
+      "php -S 0.0.0.0:8000 -t /workspace/php\r",
     );
   });
   await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
+  const previewUrl = await page
+    .locator("#preview-panel iframe")
+    .getAttribute("src");
+  assert(previewUrl);
+  assert.equal(new URL(previewUrl).origin, serviceWorkerOrigin);
   const preview = page.frameLocator("#preview-panel iframe");
   await preview.locator("#php-preview").waitFor({ timeout: 60_000 });
   assert.equal(
     await preview.locator("#php-preview").textContent(),
-    "PHP_PREVIEW_OK",
+    "Hello from PHP!",
   );
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send("\x03");
@@ -254,7 +275,7 @@ try {
   });
 
   await page.evaluate(async () => {
-    await globalThis.__wasmerShell.send("node server.js\r");
+    await globalThis.__wasmerShell.send("node node/server.js\r");
   });
   await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
   const nodePreview = page.frameLocator("#preview-panel iframe");
@@ -281,7 +302,7 @@ try {
   });
 
   await page.evaluate(async () => {
-    await globalThis.__wasmerShell.send("python server.py\r");
+    await globalThis.__wasmerShell.send("python python/server.py\r");
   });
   await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
   const pythonPreview = page.frameLocator("#preview-panel iframe");
@@ -328,6 +349,7 @@ try {
   process.exitCode = 1;
 } finally {
   await browser?.close();
-  await server.close();
+  await server?.close();
+  await serviceWorkerServer?.close();
   if (proxy) await new Promise((resolve) => proxy.close(resolve));
 }

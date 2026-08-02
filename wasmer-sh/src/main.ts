@@ -13,7 +13,17 @@ import {
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 
-import expressServerSource from "../../fixtures/edgejs/express-server.js?raw";
+import expressReadme from "../workspace/node-express/README.md?raw";
+import expressPackage from "../workspace/node-express/package.json?raw";
+import expressServer from "../workspace/node-express/server.js?raw";
+import nodeReadme from "../workspace/node/README.md?raw";
+import nodeServer from "../workspace/node/server.js?raw";
+import phpIndex from "../workspace/php/index.php?raw";
+import phpInfo from "../workspace/php/phpinfo.php?raw";
+import phpReadme from "../workspace/php/README.md?raw";
+import pythonReadme from "../workspace/python/README.md?raw";
+import pythonServer from "../workspace/python/server.py?raw";
+import workspaceReadme from "../workspace/README.md?raw";
 
 const DEFAULT_PACKAGE = "wasmer/bash";
 const DEFAULT_USES = [
@@ -30,6 +40,7 @@ interface ShellConfig {
   uses: string[];
   args: string[];
   wispUrl?: string;
+  serviceWorkerOrigin?: string;
 }
 
 interface ActiveSession {
@@ -118,7 +129,6 @@ let generation = 0;
 let inputQueue = Promise.resolve();
 let pendingProcessInput = "";
 let transcript = "";
-let serviceWorkerRegistration: Promise<ServiceWorkerRegistration> | undefined;
 
 terminal.loadAddon(fit);
 terminal.open(elements.terminal);
@@ -414,21 +424,21 @@ async function openPreview(session: ActiveSession, port: number): Promise<void> 
   if (
     activeSession !== session ||
     session.preview?.port === port ||
-    session.pendingPreviewPorts.has(port)
+    session.pendingPreviewPorts.size > 0
   ) {
     return;
   }
   session.pendingPreviewPorts.add(port);
   try {
-    const registration = await getServiceWorkerRegistration();
+    await closePreview(session);
+    const serviceWorker = getServiceWorkerOrigin();
     const server = await session.sandbox.ports.expose(port, {
-      serviceWorker: registration,
+      serviceWorker,
     });
     if (activeSession !== session) {
       await server.close();
       return;
     }
-    await closePreview(session);
     session.preview = { port, server };
     elements.previewContent.replaceChildren(
       server.createIframe({ title: `localhost:${port}` }),
@@ -458,19 +468,11 @@ async function closePreview(session: ActiveSession): Promise<void> {
   }
 }
 
-function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration> {
-  serviceWorkerRegistration ??= navigator.serviceWorker
-    .register(
-      import.meta.env.DEV
-        ? "/wasmer-service-worker.ts"
-        : "/wasmer-service-worker.js",
-      { scope: "/", type: "module" },
-    )
-    .catch((error: unknown) => {
-      serviceWorkerRegistration = undefined;
-      throw error;
-    });
-  return serviceWorkerRegistration;
+function getServiceWorkerOrigin(): string {
+  if (config.serviceWorkerOrigin) return config.serviceWorkerOrigin;
+  throw new Error(
+    "Browser previews require VITE_WASMER_SERVICE_WORKER_ORIGIN to point at the standalone Wasmer HTTP host",
+  );
 }
 
 async function dispose(): Promise<void> {
@@ -486,8 +488,8 @@ function writeWelcome(): void {
   writeTerminal(
     [
       "\x1b[38;5;141mWelcome to wasmer.sh\x1b[0m",
-      "Unix commands, running as WebAssembly inside your browser.",
-      "Type \x1b[38;5;81mhelp\x1b[0m for a few ideas.",
+      "Run any Wasmer package in your browser with the Wasmer SDK for JavaScript.",
+      "Type \x1b[38;5;81mcat README.md\x1b[0m to explore the workspace.",
       "",
     ].join("\r\n"),
   );
@@ -530,6 +532,10 @@ function readConfig(params: URLSearchParams): ShellConfig {
       params.get("wisp")?.trim() ||
       import.meta.env.VITE_WISP_URL?.trim() ||
       undefined,
+    serviceWorkerOrigin:
+      params.get("httpOrigin")?.trim() ||
+      import.meta.env.VITE_WASMER_SERVICE_WORKER_ORIGIN?.trim() ||
+      (import.meta.env.DEV ? "http://127.0.0.1:5174" : undefined),
   };
 }
 
@@ -537,157 +543,20 @@ function workspaceFiles(): Record<string, string> {
   return {
     ".bashrc": `# wasmer.sh is a real Bash session. Keep runtime conveniences here
 # so Bash—not the browser—owns command parsing and process execution.
-PS1='\\[\\033[38;5;141m\\]wasmer\\[\\033[0m\\]@\\[\\033[38;5;81m\\]web\\[\\033[0m\\]:\\[\\033[38;5;117m\\]\\w\\[\\033[0m\\]$ '
+PS1='\\[\\033[1;38;5;141m\\]➜\\[\\033[0m\\] \\[\\033[1;38;5;117m\\]\\W\\[\\033[0m\\] \\[\\033[1m\\]$\\[\\033[0m\\] '
 HISTFILE=/workspace/.bash_history
 `,
-    "README.txt": `wasmer.sh
-=========
-
-This shell launches real commands from Wasmer packages inside a browser sandbox.
-
-Things to try:
-  ls -lah
-  cat example.c
-  date
-  base64 README.txt
-  printf "hello from WASIX\\n"
-  python -c "print('hello from Python')"
-  edge -e "console.log('hello from Edge.js')"
-  php -r "echo 'hello from PHP';"
-  php -S 0.0.0.0:8000 -t /workspace
-  node server.js
-  pnpm i express && node express-server.js
-  python server.py
-  pnpm install <package>  # requires a configured WISP proxy
-
-Package data is cached by the browser for faster future starts.
-`,
-    "example.c": `#include <stdio.h>
-
-int main(void) {
-    printf("Hello World from WebAssembly!\\n");
-    return 0;
-}
-`,
-    "package.json": `${JSON.stringify(
-      {
-        name: "wasmer-sh-workspace",
-        private: true,
-        scripts: { express: "node express-server.js" },
-      },
-      null,
-      2,
-    )}\n`,
-    "express-server.js": expressServerSource,
-    "server.js": `const http = require("node:http");
-
-const host = "0.0.0.0";
-const port = Number(process.env.PORT || 8000);
-
-const server = http.createServer((request, response) => {
-  const body = request.url === "/health"
-    ? JSON.stringify({ ok: true })
-    : \`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Node.js on Wasmer</title>
-    <style>
-      body { font: 18px system-ui; max-width: 680px; margin: 12vh auto; padding: 0 24px; color: #20172b; }
-      code { color: #7040a0; }
-    </style>
-  </head>
-  <body>
-    <h1 id="node-preview">Hello from Node.js!</h1>
-    <p><code>\${request.method} \${request.url}</code>, served by Edge.js inside WASIX.</p>
-    <p><a href="/health">Open the absolute <code>/health</code> route</a></p>
-    <p id="node-health">Checking /health…</p>
-    <script>
-      fetch("/health")
-        .then((response) => response.json())
-        .then((health) => {
-          document.querySelector("#node-health").textContent = health.ok
-            ? "/health is ready"
-            : "/health failed";
-        });
-    </script>
-  </body>
-</html>\`;
-
-  response.writeHead(200, {
-    "content-type": request.url === "/health"
-      ? "application/json; charset=utf-8"
-      : "text/html; charset=utf-8",
-    "content-length": Buffer.byteLength(body),
-  });
-  response.end(body);
-});
-
-server.listen(port, host, () => {
-  console.log(\`Node.js listening on http://localhost:\${port}\`);
-});
-`,
-    "server.py": `import json
-import os
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/health":
-            body = json.dumps({"ok": True}).encode()
-            content_type = "application/json; charset=utf-8"
-        else:
-            body = b"""<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Python on Wasmer</title>
-    <style>
-      body { font: 18px system-ui; max-width: 680px; margin: 12vh auto; padding: 0 24px; color: #20172b; }
-      code { color: #7040a0; }
-    </style>
-  </head>
-  <body>
-    <h1 id="python-preview">Hello from Python!</h1>
-    <p>Served by <code>http.server</code> inside WASIX.</p>
-    <p id="python-health">Checking /health...</p>
-    <script>
-      fetch("/health")
-        .then((response) => response.json())
-        .then((health) => {
-          document.querySelector("#python-health").textContent = health.ok
-            ? "/health is ready"
-            : "/health failed";
-        });
-    </script>
-  </body>
-</html>"""
-            content_type = "text/html; charset=utf-8"
-
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, format, *args):
-        print(f"{self.address_string()} - {format % args}", flush=True)
-
-
-port = int(os.environ.get("PORT", "8000"))
-server = HTTPServer(("0.0.0.0", port), Handler)
-print(f"Python listening on http://localhost:{port}", flush=True)
-try:
-    server.serve_forever()
-except KeyboardInterrupt:
-    pass
-finally:
-    server.server_close()
-`,
-    "hello.txt": "Hello from a Wasmer sandbox.\\n",
+    "README.md": workspaceReadme,
+    "node/README.md": nodeReadme,
+    "node/server.js": nodeServer,
+    "node-express/README.md": expressReadme,
+    "node-express/package.json": expressPackage,
+    "node-express/server.js": expressServer,
+    "python/README.md": pythonReadme,
+    "python/server.py": pythonServer,
+    "php/README.md": phpReadme,
+    "php/index.php": phpIndex,
+    "php/phpinfo.php": phpInfo,
   };
 }
 

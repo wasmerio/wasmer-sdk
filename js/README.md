@@ -108,6 +108,7 @@ Import the browser entrypoint:
 ```javascript
 import { Wasmer } from "@wasmer/sdk2/browser";
 
+const httpHost = "https://http.example.com";
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
   packages: ["python/python@3.13.5"],
@@ -151,24 +152,25 @@ connection metadata and decide which destinations and ports are allowed.
 
 ### Run a web server in an iframe
 
-Browser sandboxes can expose an HTTP listener through a service worker. First,
-make the SDK's worker available at the root of your origin. For example, copy
-`node_modules/@wasmer/sdk2/dist/service-worker.js` to
-`public/wasmer-service-worker.js`, or bundle this worker entry:
+Browser sandboxes expose one HTTP listener at the root of a dedicated static
+origin. That origin needs two small SDK entrypoints. Serve the worker as
+`/wasmer-service-worker.js`:
 
 ```javascript
 import "@wasmer/sdk2/service-worker";
 ```
 
-Register it with root scope, start the guest server, then expose its port:
+Serve a control document at `/.wasmer/host.html` which imports:
+
+```javascript
+import "@wasmer/sdk2/service-worker-host";
+```
+
+The application itself stays on a different origin. Start the guest server,
+then pass the static HTTP-host origin to `ports.expose()`:
 
 ```javascript
 import { Wasmer } from "@wasmer/sdk2/browser";
-
-const serviceWorker = await navigator.serviceWorker.register(
-  "/wasmer-service-worker.js",
-  { scope: "/", type: "module" },
-);
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
@@ -181,7 +183,9 @@ const php = await sandbox
   .command("php", ["-S", "0.0.0.0:8080", "-t", "/workspace"])
   .spawn({ stdout: "capture", stderr: "capture" });
 
-const server = await sandbox.ports.expose(8080, { serviceWorker });
+const server = await sandbox.ports.expose(8080, {
+  serviceWorker: httpHost,
+});
 document.body.append(server.createIframe({ title: "PHP preview" }));
 ```
 
@@ -191,25 +195,29 @@ advance:
 ```javascript
 const stopWatching = sandbox.ports.onListen((port) => {
   void sandbox.ports
-    .expose(port, { serviceWorker })
+    .expose(port, { serviceWorker: httpHost })
     .then((server) => document.body.append(server.createIframe()));
 }, {
   onClose: (port) => console.log(`server on ${port} closed`),
 });
 ```
 
-`server.url` is also available for custom UI. The service worker follows the
-iframe's browser client, so absolute links and subresource requests continue
-to reach the same guest listener. Closing the server unregisters its route;
-closing the sandbox closes all routes it owns.
+`server.url` is the HTTP-host origin root. Requests are forwarded with their
+original path and body; the SDK does not rewrite HTML or add a path prefix.
+One service worker exposes exactly one guest server. A second call using the
+same origin fails until the first `BrowserServer` is closed. To serve guests
+concurrently, assign each one its own origin (for example with wildcard
+subdomains).
+
+See `wasmer-sh/service-worker` in this repository for a complete static Vite
+build. The relay transfers the route directly to its local service worker; the
+Wasmer runtime remains in the application page.
 
 `network: { mode: "wisp", ... }` includes this HTTP-listener support, so one
 sandbox can serve a browser preview while making outbound connections.
 
-The worker needs scope `/` to route absolute guest URLs. Guest documents share
-the registration's origin, so serve untrusted HTML from a dedicated preview
-origin rather than the origin containing privileged application state. The
-SDK-generated iframe uses the capabilities required for scripts and service
+The worker needs scope `/` to route absolute guest URLs. The SDK-generated
+iframe uses the capabilities required for scripts and service
 worker control, but an iframe sandbox is not an origin boundary when both
 `allow-scripts` and `allow-same-origin` are enabled.
 

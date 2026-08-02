@@ -30,6 +30,10 @@
     "./service-worker": {
       "types": "./dist/service-worker.d.ts",
       "default": "./dist/service-worker.js"
+    },
+    "./service-worker-host": {
+      "types": "./dist/service-worker-host.d.ts",
+      "default": "./dist/service-worker-host.js"
     }
   },
   "types": "./dist/index.d.ts",

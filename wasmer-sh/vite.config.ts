@@ -10,6 +10,7 @@ const crossOriginIsolationHeaders = {
 const root = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
+  cacheDir: resolve(root, "node_modules/.vite/app"),
   server: {
     headers: crossOriginIsolationHeaders,
     fs: {
@@ -33,20 +34,6 @@ export default defineConfig({
   },
   build: {
     target: "es2022",
-    modulePreload: {
-      polyfill: false,
-    },
-    rollupOptions: {
-      input: {
-        app: resolve(root, "index.html"),
-        "wasmer-service-worker": resolve(root, "wasmer-service-worker.ts"),
-      },
-      output: {
-        entryFileNames: (chunk) =>
-          chunk.name === "wasmer-service-worker"
-            ? "wasmer-service-worker.js"
-            : "assets/[name]-[hash].js",
-      },
-    },
+    modulePreload: { polyfill: false },
   },
 });

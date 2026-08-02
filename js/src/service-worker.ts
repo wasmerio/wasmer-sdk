@@ -9,7 +9,6 @@
 interface RegisterMessage {
   type: "wasmer-sdk:http-register";
   serverId: string;
-  path: string;
 }
 
 interface CloseMessage {
@@ -30,7 +29,6 @@ interface ResponseMessage {
 
 interface Route {
   id: string;
-  path: string;
   port: MessagePort;
   pending: Map<string, PendingResponse>;
 }
@@ -48,8 +46,6 @@ interface ServiceWorkerMessageEvent extends Event {
 
 interface ServiceWorkerFetchEvent extends Event {
   request: Request;
-  clientId: string;
-  resultingClientId: string;
   respondWith(response: Promise<Response> | Response): void;
 }
 
@@ -64,8 +60,7 @@ interface WorkerScope {
 }
 
 const scope = globalThis as unknown as WorkerScope;
-const routes = new Map<string, Route>();
-const clients = new Map<string, string>();
+let activeRoute: Route | undefined;
 const REQUEST_TIMEOUT_MS = 60_000;
 
 scope.addEventListener("install", ((event: ServiceWorkerLifecycleEvent) => {
@@ -81,17 +76,24 @@ scope.addEventListener("message", ((event: ServiceWorkerMessageEvent) => {
   if (!message || typeof message !== "object") return;
   if (message.type === "wasmer-sdk:http-register") {
     const port = event.ports[0];
-    if (!port || typeof message.serverId !== "string" || typeof message.path !== "string") {
+    if (!port || typeof message.serverId !== "string") {
       return;
     }
-    closeRoute(message.serverId);
+    if (activeRoute) {
+      port.postMessage({
+        type: "wasmer-sdk:http-error",
+        serverId: message.serverId,
+        error: "this service worker already exposes another guest server",
+      });
+      port.close();
+      return;
+    }
     const route: Route = {
       id: message.serverId,
-      path: normalizePath(message.path),
       port,
       pending: new Map(),
     };
-    routes.set(route.id, route);
+    activeRoute = route;
     port.addEventListener("message", (responseEvent: MessageEvent<unknown>) => {
       receiveResponse(route, responseEvent.data);
     });
@@ -105,22 +107,13 @@ scope.addEventListener("message", ((event: ServiceWorkerMessageEvent) => {
 
 scope.addEventListener("fetch", ((event: ServiceWorkerFetchEvent) => {
   const url = new URL(event.request.url);
-  let route = [...routes.values()].find((candidate) =>
-    url.pathname.startsWith(candidate.path),
-  );
-  let path = url.pathname + url.search;
-
-  if (route) {
-    const suffix = url.pathname.slice(route.path.length);
-    path = `/${suffix}${url.search}`;
-  } else if (event.clientId) {
-    const routeId = clients.get(event.clientId);
-    route = routeId ? routes.get(routeId) : undefined;
-  }
-
+  // Keep the cross-origin control document reachable while the guest owns `/`.
+  if (url.pathname.startsWith("/.wasmer/")) return;
+  const route = activeRoute;
   if (!route) return;
-  if (event.resultingClientId) clients.set(event.resultingClientId, route.id);
-  event.respondWith(forwardRequest(route, event.request, path));
+  event.respondWith(
+    forwardRequest(route, event.request, url.pathname + url.search),
+  );
 }) as (event: never) => void);
 
 async function forwardRequest(
@@ -187,7 +180,8 @@ function receiveResponse(route: Route, value: unknown): void {
   // Preserve cross-origin isolation when the host page uses SharedArrayBuffer.
   headers.set("cross-origin-embedder-policy", "require-corp");
   headers.set("cross-origin-opener-policy", "same-origin");
-  headers.set("cross-origin-resource-policy", "same-origin");
+  // The HTTP host may live on a dedicated origin and be embedded by the app.
+  headers.set("cross-origin-resource-policy", "cross-origin");
   pending.resolve(
     new Response(bodyAllowed ? body : null, {
       status,
@@ -198,21 +192,13 @@ function receiveResponse(route: Route, value: unknown): void {
 }
 
 function closeRoute(id: string): void {
-  const route = routes.get(id);
-  if (!route) return;
-  routes.delete(id);
-  for (const [clientId, routeId] of clients) {
-    if (routeId === id) clients.delete(clientId);
-  }
+  const route = activeRoute;
+  if (!route || route.id !== id) return;
+  activeRoute = undefined;
   for (const pending of route.pending.values()) {
     clearTimeout(pending.timer);
     pending.reject(new Error("the Wasmer browser server was closed"));
   }
   route.pending.clear();
   route.port.close();
-}
-
-function normalizePath(path: string): string {
-  const leading = path.startsWith("/") ? path : `/${path}`;
-  return leading.endsWith("/") ? leading : `${leading}/`;
 }

@@ -12,6 +12,5 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "service-worker/**/*.ts", "vite.config.ts"]
 }
-

@@ -18,7 +18,7 @@ const sandbox = await wasmer.sandboxes.create({
     bashPackage,
     "wasmer/neatvi",
     "python/python",
-    "wasmer/edgejs-quickjs@0.1.1",
+    "wasmer/edgejs-quickjs@0.1.2",
     "php/php-32",
   ],
   files: { ".bashrc": "PS1='wasmer@web:\\w$ '" },
@@ -36,31 +36,29 @@ and `php`:
 ```console
 echo "hello" > hello.txt && cat hello.txt
 find /workspace -type f | sort | head
+cat README.md
 python -c "print('hello from Python')"
 edge -e "console.log('hello from Edge.js')"
 php -r "echo 'hello from PHP';"
-php -S 0.0.0.0:8000 -t /workspace
-node server.js
-pnpm i express && node express-server.js
-python server.py
+cd php && php -S 0.0.0.0:8000 -t .
+cd node && node server.js
+cd python && python server.py
+cd node-express && pnpm i && node server.js
 ```
 
 When a command opens an HTTP listener, wasmer.sh detects the port and opens a
 live preview beside the terminal. The preview stays attached to the guest, so
 absolute URLs and subresources are routed back to the same WASIX server.
-The workspace includes `server.js`, a small Node-compatible HTTP server backed
-by `wasmer/edgejs-quickjs`; run it with `node server.js` and stop it with
-Ctrl-C. Closing the listener closes its preview automatically.
-`server.py` provides the same example with Python's standard-library
-`HTTPServer`; run it with `python server.py` or choose a port with
-`PORT=3000 python server.py`.
+The `node/`, `node-express/`, `python/`, and `php/` directories are independent
+examples with their own README files. `node/server.js` is backed by
+`wasmer/edgejs-quickjs`; `python/server.py` uses Python's standard-library
+`HTTPServer`. Closing a listener closes its preview automatically.
 
 For an Express application, install the dependency inside the browser sandbox
 and start the included server:
 
 ```console
-pnpm i express
-node express-server.js
+cd node-express && pnpm i && node server.js
 ```
 
 The server exposes `/`, `/api/hello`, and `/health`. Starting it opens the live
@@ -71,7 +69,7 @@ real outbound TCP and DNS from the browser, multiplexed over one WebSocket. A
 WASI-compatible Edge.js build can then run `pnpm` against the npm registry:
 
 ```console
-pnpm add is-number
+cd node-express && pnpm i && node server.js
 ```
 
 Running `python`, `edge`, or `php` without arguments lets each runtime detect
@@ -94,24 +92,45 @@ wasmer run . --net
 Then start wasmer.sh in another terminal:
 
 ```console
-npm install
-VITE_WISP_URL=ws://127.0.0.1:4000/ npm run dev
+pnpm install
+VITE_WISP_URL=ws://127.0.0.1:4000/ pnpm dev
 ```
 
-Vite serves the COOP and COEP headers required for `SharedArrayBuffer` and the
-worker-backed WASIX runtime. A production host must serve the same headers:
+`pnpm dev` starts two independent servers. The shell runs at
+`http://127.0.0.1:5173`, while a small static HTTP host runs at
+`http://127.0.0.1:5174`. The latter owns the service worker and all guest HTTP
+URLs, so guest routes never overlap Vite routes.
+
+The service worker exposes one guest server at its origin root. It forwards
+paths unchanged and never rewrites HTML or mounts the site beneath an SDK
+prefix. A second guest needs another origin; production deployments can use a
+wildcard domain to allocate one subdomain per active app.
+
+The app server provides the COOP and COEP headers required for
+`SharedArrayBuffer` and the worker-backed WASIX runtime. A production app host
+must serve the same headers:
 
 ```text
 Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-Build and preview the static application with:
+Build both static applications with:
 
 ```console
-npm run build
-npm run preview
+VITE_WASMER_SERVICE_WORKER_ORIGIN=https://http.wasmer.sh pnpm build
 ```
+
+The shell is emitted to `dist/`; the standalone service-worker host is emitted
+to `dist-service-worker/`. Deploy them to separate origins, then configure the
+shell build with `VITE_WASMER_SERVICE_WORKER_ORIGIN`. The HTTP host must serve
+`Cross-Origin-Resource-Policy: cross-origin`; its Vite preview configuration
+does this automatically. A wildcard production setup can point the configured
+origin at the domain responsible for guest HTTP traffic.
+
+For a local production preview, build with
+`VITE_WASMER_SERVICE_WORKER_ORIGIN=http://127.0.0.1:4174` and run
+`pnpm preview`; it starts the two outputs on ports 4173 and 4174.
 
 ## Browser smoke test
 
@@ -132,13 +151,13 @@ the compiled WASIX sidecar instead, start it and run:
 WASMER_WISP_URL=ws://127.0.0.1:4000/ npm test
 ```
 
-The published `wasmer/edgejs-quickjs@0.1.1` predates the WASI
-`AI_ADDRCONFIG` compatibility fix needed by pnpm. Until the corrected Edge.js
-package is published, point the regression test at a locally built package;
-the test then additionally installs and loads React through the proxy:
+Set `WASMER_TEST_PNPM=1` to make the regression test additionally install and
+load React through the proxy. A local Edge.js package can still be tested with
+`WASMER_EDGEJS_WEBC`:
 
 ```console
 WASMER_EDGEJS_WEBC=/absolute/path/to/edgejs-quickjs.webc \
+WASMER_TEST_PNPM=1 \
 WASMER_WISP_URL=ws://127.0.0.1:4000/ \
 npm test
 ```
@@ -155,6 +174,7 @@ package entrypoint directly without rebuilding the site:
 | `use` | Supporting package; repeat it to install several |
 | `arg` | Process argument; repeat it to pass several |
 | `wisp` | WISP WebSocket URL for outbound TCP and DNS |
+| `httpOrigin` | Standalone Wasmer HTTP host origin; overrides the build-time setting |
 
 For example:
 
