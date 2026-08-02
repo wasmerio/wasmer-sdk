@@ -48,8 +48,24 @@ interface ActiveSession {
   process?: Process;
   stdin?: WritableBytes;
   stopWatchingPorts?: () => void;
-  preview?: { port: number; server: BrowserServer };
+  preview?: PreviewSession;
   pendingPreviewPorts: Set<number>;
+}
+
+interface PreviewSession {
+  port: number;
+  server: BrowserServer;
+  iframe: HTMLIFrameElement;
+  id: string;
+  url: URL;
+}
+
+interface PreviewStateMessage {
+  type?: unknown;
+  previewId?: unknown;
+  url?: unknown;
+  canGoBack?: unknown;
+  canGoForward?: unknown;
 }
 
 interface DevelopmentShellApi {
@@ -76,7 +92,11 @@ const elements = {
   retry: requiredElement<HTMLButtonElement>("retry-button"),
   previewPanel: requiredElement<HTMLElement>("preview-panel"),
   previewContent: requiredElement<HTMLDivElement>("preview-content"),
-  previewTitle: requiredElement<HTMLSpanElement>("preview-title"),
+  previewBack: requiredElement<HTMLButtonElement>("preview-back"),
+  previewForward: requiredElement<HTMLButtonElement>("preview-forward"),
+  previewRefresh: requiredElement<HTMLButtonElement>("preview-refresh"),
+  previewLocationForm: requiredElement<HTMLFormElement>("preview-location-form"),
+  previewLocation: requiredElement<HTMLInputElement>("preview-location"),
   previewOpen: requiredElement<HTMLAnchorElement>("preview-open"),
   previewClose: requiredElement<HTMLButtonElement>("preview-close"),
 };
@@ -155,6 +175,21 @@ elements.previewClose.addEventListener("click", () => {
   const session = activeSession;
   if (session) void closePreview(session);
 });
+elements.previewBack.addEventListener("click", () => sendPreviewCommand("back"));
+elements.previewForward.addEventListener("click", () =>
+  sendPreviewCommand("forward"),
+);
+elements.previewRefresh.addEventListener("click", () =>
+  sendPreviewCommand("refresh"),
+);
+elements.previewLocationForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  navigatePreview(elements.previewLocation.value);
+});
+elements.previewLocation.addEventListener("focus", () => {
+  elements.previewLocation.select();
+});
+window.addEventListener("message", receivePreviewState);
 window.addEventListener("pagehide", () => void dispose());
 
 if (import.meta.env.DEV) {
@@ -439,12 +474,14 @@ async function openPreview(session: ActiveSession, port: number): Promise<void> 
       await server.close();
       return;
     }
-    session.preview = { port, server };
-    elements.previewContent.replaceChildren(
-      server.createIframe({ title: `localhost:${port}` }),
-    );
-    elements.previewTitle.textContent = `localhost:${port}`;
+    const id = crypto.randomUUID();
+    const iframe = createPreviewIframe(server, port, id);
+    session.preview = { port, server, iframe, id, url: server.url };
+    elements.previewContent.replaceChildren(iframe);
+    elements.previewLocation.value = formatPreviewAddress(server.url, port);
     elements.previewOpen.href = server.url.href;
+    elements.previewBack.disabled = true;
+    elements.previewForward.disabled = true;
     elements.previewPanel.hidden = false;
     elements.stage.classList.add("has-preview");
     fitTerminal();
@@ -464,8 +501,107 @@ async function closePreview(session: ActiveSession): Promise<void> {
     elements.previewContent.replaceChildren();
     elements.previewPanel.hidden = true;
     elements.stage.classList.remove("has-preview");
+    elements.previewLocation.value = "";
+    elements.previewBack.disabled = true;
+    elements.previewForward.disabled = true;
     fitTerminal();
   }
+}
+
+function createPreviewIframe(
+  server: BrowserServer,
+  port: number,
+  id: string,
+): HTMLIFrameElement {
+  const wrapper = new URL("/.wasmer/browser.html", server.url);
+  wrapper.searchParams.set("parentOrigin", window.location.origin);
+  wrapper.searchParams.set("previewId", id);
+  wrapper.searchParams.set("url", server.url.href);
+  const iframe = document.createElement("iframe");
+  iframe.src = wrapper.href;
+  iframe.title = `localhost:${port}`;
+  for (const capability of [
+    "allow-downloads",
+    "allow-forms",
+    "allow-modals",
+    "allow-popups",
+    "allow-same-origin",
+    "allow-scripts",
+  ]) {
+    iframe.sandbox.add(capability);
+  }
+  return iframe;
+}
+
+function receivePreviewState(event: MessageEvent<unknown>): void {
+  const preview = activeSession?.preview;
+  if (!preview || event.source !== preview.iframe.contentWindow) return;
+  if (event.origin !== preview.server.url.origin) return;
+  const message = event.data as PreviewStateMessage | null;
+  if (
+    message?.type !== "wasmer-sh:preview-state" ||
+    message.previewId !== preview.id ||
+    typeof message.url !== "string"
+  ) {
+    return;
+  }
+  const url = new URL(message.url);
+  if (url.origin !== preview.server.url.origin) return;
+  preview.url = url;
+  elements.previewLocation.value = formatPreviewAddress(url, preview.port);
+  elements.previewOpen.href = url.href;
+  elements.previewBack.disabled = message.canGoBack !== true;
+  elements.previewForward.disabled = message.canGoForward !== true;
+}
+
+function sendPreviewCommand(
+  action: "back" | "forward" | "refresh" | "navigate",
+  url?: URL,
+): void {
+  const preview = activeSession?.preview;
+  if (!preview?.iframe.contentWindow) return;
+  preview.iframe.contentWindow.postMessage(
+    {
+      type: "wasmer-sh:preview-command",
+      previewId: preview.id,
+      action,
+      url: url?.href,
+    },
+    preview.server.url.origin,
+  );
+}
+
+function navigatePreview(address: string): void {
+  const preview = activeSession?.preview;
+  if (!preview) return;
+  const value = address.trim();
+  if (!value) {
+    elements.previewLocation.value = formatPreviewAddress(
+      preview.url,
+      preview.port,
+    );
+    return;
+  }
+  let path = value;
+  try {
+    const entered = new URL(value.includes("://") ? value : `http://${value}`);
+    if (entered.hostname === "localhost" && entered.port === String(preview.port)) {
+      path = `${entered.pathname}${entered.search}${entered.hash}`;
+    } else if (entered.origin === preview.server.url.origin) {
+      path = `${entered.pathname}${entered.search}${entered.hash}`;
+    }
+  } catch {
+    // Treat non-URL input as a path on the guest server.
+  }
+  const url = new URL(path.startsWith("/") ? path : `/${path}`, preview.url);
+  if (url.origin !== preview.server.url.origin) return;
+  sendPreviewCommand("navigate", url);
+  elements.previewLocation.blur();
+}
+
+function formatPreviewAddress(url: URL, port: number): string {
+  const suffix = `${url.pathname}${url.search}${url.hash}`;
+  return `localhost:${port}${suffix === "/" ? "" : suffix}`;
 }
 
 function getServiceWorkerOrigin(): string {

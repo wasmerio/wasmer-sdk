@@ -80,10 +80,28 @@
 
       <section id="preview-panel" class="preview-panel" aria-label="Web server preview" hidden>
         <header class="preview-bar">
-          <span id="preview-title">Web preview</span>
+          <nav class="preview-navigation" aria-label="Preview navigation">
+            <button id="preview-back" class="browser-button" type="button" aria-label="Back" title="Back" disabled>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4.5-5.5 5.5 5.5 5.5" /></svg>
+            </button>
+            <button id="preview-forward" class="browser-button" type="button" aria-label="Forward" title="Forward" disabled>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 4.5 5.5 5.5-5.5 5.5" /></svg>
+            </button>
+            <button id="preview-refresh" class="browser-button" type="button" aria-label="Refresh" title="Refresh">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 7.2A6 6 0 1 0 16 11" /><path d="M15.5 3.8v3.7h-3.7" /></svg>
+            </button>
+          </nav>
+          <form id="preview-location-form" class="preview-location" role="search">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6.75 9V7.25a3.25 3.25 0 0 1 6.5 0V9" /><rect x="5" y="9" width="10" height="7" rx="2" /></svg>
+            <input id="preview-location" type="text" aria-label="Preview address" autocomplete="off" autocapitalize="off" spellcheck="false" />
+          </form>
           <div class="preview-actions">
-            <a id="preview-open" class="text-button" target="_blank" rel="noreferrer">Open</a>
-            <button id="preview-close" class="text-button" type="button">Close</button>
+            <a id="preview-open" class="browser-button" target="_blank" rel="noreferrer" aria-label="Open in new tab" title="Open in new tab">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11 4h5v5" /><path d="m16 4-7 7" /><path d="M14 11v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" /></svg>
+            </a>
+            <button id="preview-close" class="browser-button" type="button" aria-label="Close preview" title="Close preview">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
+            </button>
           </div>
         </header>
         <div id="preview-content" class="preview-content"></div>

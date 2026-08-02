@@ -3,3 +3,5 @@ dist-service-worker
 node_modules
 .vite
 .wasmer
+!service-worker/.wasmer/
+!service-worker/.wasmer/**

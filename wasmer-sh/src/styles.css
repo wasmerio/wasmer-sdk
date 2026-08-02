@@ -218,6 +218,8 @@ button {
 }
 
 .preview-panel {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   border-left: 1px solid #24242d;
@@ -230,23 +232,105 @@ button {
 
 .preview-bar {
   display: flex;
-  height: 40px;
+  height: 46px;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 8px 0 13px;
+  gap: 7px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--line);
   background: var(--panel-raised);
   color: var(--muted);
-  font: 11px "SFMono-Regular", "Cascadia Code", monospace;
 }
 
+.preview-navigation,
 .preview-actions {
   display: flex;
+  flex: none;
   align-items: center;
+  gap: 1px;
+}
+
+.browser-button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #aaa6b6;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.browser-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.browser-button:focus-visible,
+.preview-location:focus-within {
+  outline: 2px solid rgba(167, 139, 250, 0.72);
+  outline-offset: 1px;
+}
+
+.browser-button:disabled {
+  cursor: default;
+  opacity: 0.28;
+}
+
+.browser-button svg,
+.preview-location svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.preview-location {
+  display: flex;
+  min-width: 0;
+  height: 31px;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: rgba(5, 5, 9, 0.72);
+  color: #777281;
+}
+
+.preview-location svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.preview-location input {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #d9d6df;
+  font: 12px "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace;
+}
+
+.preview-location input::selection {
+  background: rgba(167, 139, 250, 0.35);
 }
 
 .preview-content {
-  height: calc(100% - 40px);
+  min-height: 0;
+  flex: 1;
   background: #fff;
 }
 

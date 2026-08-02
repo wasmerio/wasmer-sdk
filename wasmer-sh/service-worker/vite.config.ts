@@ -29,6 +29,7 @@ export default defineConfig({
     modulePreload: { polyfill: false },
     rollupOptions: {
       input: {
+        browser: resolve(root, ".wasmer/browser.html"),
         host: resolve(root, ".wasmer/host.html"),
         "wasmer-service-worker": resolve(root, "wasmer-service-worker.js"),
       },

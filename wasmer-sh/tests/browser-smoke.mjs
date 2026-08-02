@@ -101,7 +101,7 @@ try {
     /^wasmer\/bash@/,
   );
   await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
     undefined,
     { timeout: 120_000 },
   );
@@ -117,7 +117,7 @@ try {
     { timeout: 30_000 },
   );
   await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
     undefined,
     { timeout: 30_000 },
   );
@@ -134,7 +134,7 @@ try {
       { timeout: pnpmTimeout },
     );
     await page.waitForFunction(
-      () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+      () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
       undefined,
       { timeout: 30_000 },
     );
@@ -156,7 +156,7 @@ try {
       { timeout: 30_000 },
     );
     await page.waitForFunction(
-      () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+      () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
       undefined,
       { timeout: 30_000 },
     );
@@ -212,7 +212,7 @@ try {
     await globalThis.__wasmerShell.send("exit()\r");
   });
   await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
     undefined,
     { timeout: 30_000 },
   );
@@ -221,7 +221,7 @@ try {
     await globalThis.__wasmerShell.send("edge\r");
   });
   await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().endsWith("> "),
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("> "),
     undefined,
     { timeout: 120_000 },
   );
@@ -239,7 +239,7 @@ try {
     await globalThis.__wasmerShell.send(".exit\r");
   });
   await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
     undefined,
     { timeout: 30_000 },
   );
@@ -255,17 +255,52 @@ try {
     .getAttribute("src");
   assert(previewUrl);
   assert.equal(new URL(previewUrl).origin, serviceWorkerOrigin);
-  const preview = page.frameLocator("#preview-panel iframe");
+  const previewHost = page.frameLocator("#preview-panel iframe");
+  const preview = previewHost.frameLocator("iframe");
   await preview.locator("#php-preview").waitFor({ timeout: 60_000 });
   assert.equal(
     await preview.locator("#php-preview").textContent(),
     "Hello from PHP!",
   );
+  await preview.getByRole("link", { name: "View PHP configuration" }).click();
+  await page.waitForFunction(
+    () => document.querySelector("#preview-location")?.value.endsWith("/phpinfo.php"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  assert.equal(await page.locator("#preview-back").isEnabled(), true);
+  await page.locator("#preview-back").click();
+  await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
+  await page.waitForFunction(
+    () => document.querySelector("#preview-location")?.value === "localhost:8000",
+    undefined,
+    { timeout: 30_000 },
+  );
+  assert.equal(await page.locator("#preview-forward").isEnabled(), true);
+  await page.locator("#preview-forward").click();
+  await page.waitForFunction(
+    () => document.querySelector("#preview-location")?.value.endsWith("/phpinfo.php"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.locator("#preview-back").click();
+  await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
+  await page.locator("#preview-location").fill("localhost:8000/phpinfo.php");
+  await page.locator("#preview-location").press("Enter");
+  await page.waitForFunction(
+    () => document.querySelector("#preview-location")?.value.endsWith("/phpinfo.php"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.locator("#preview-back").click();
+  await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
+  await page.locator("#preview-refresh").click();
+  await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send("\x03");
   });
   await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
     undefined,
     { timeout: 30_000 },
   );
@@ -278,7 +313,9 @@ try {
     await globalThis.__wasmerShell.send("node node/server.js\r");
   });
   await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
-  const nodePreview = page.frameLocator("#preview-panel iframe");
+  const nodePreview = page
+    .frameLocator("#preview-panel iframe")
+    .frameLocator("iframe");
   await nodePreview.locator("#node-preview").waitFor({ timeout: 60_000 });
   assert.equal(
     await nodePreview.locator("#node-preview").textContent(),
@@ -292,7 +329,7 @@ try {
     await globalThis.__wasmerShell.send("\x03");
   });
   await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
     undefined,
     { timeout: 30_000 },
   );
@@ -305,7 +342,9 @@ try {
     await globalThis.__wasmerShell.send("python python/server.py\r");
   });
   await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
-  const pythonPreview = page.frameLocator("#preview-panel iframe");
+  const pythonPreview = page
+    .frameLocator("#preview-panel iframe")
+    .frameLocator("iframe");
   await pythonPreview.locator("#python-preview").waitFor({ timeout: 60_000 });
   assert.equal(
     await pythonPreview.locator("#python-preview").textContent(),
@@ -319,7 +358,7 @@ try {
     await globalThis.__wasmerShell.send("\x03");
   });
   await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().endsWith("$ "),
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
     undefined,
     { timeout: 30_000 },
   );
