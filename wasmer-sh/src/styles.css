@@ -65,7 +65,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-self: start;
-  gap: 1px;
+  gap: 0;
   width: max-content;
   text-decoration: none;
 }
@@ -77,7 +77,10 @@ button {
 }
 
 .brand-suffix {
-  color: var(--violet);
+  position: relative;
+  top: 1px;
+  margin-left: -2px;
+  color: var(--muted);
   font-family:
     "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace;
   font-size: 19px;

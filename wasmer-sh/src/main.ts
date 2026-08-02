@@ -123,7 +123,7 @@ const terminal = new Terminal({
     foreground: "#e8e5ed",
     cursor: "#a78bfa",
     cursorAccent: "#0c0c12",
-    selectionBackground: "#5b4b8a80",
+    selectionBackground: "#d8d8df45",
     black: "#17171f",
     red: "#fb7185",
     green: "#5ee6a8",
@@ -623,7 +623,7 @@ async function dispose(): Promise<void> {
 function writeWelcome(): void {
   writeTerminal(
     [
-      "\x1b[38;5;141mWelcome to wasmer.sh\x1b[0m",
+      "\x1b[38;5;245mWelcome to wasmer.sh\x1b[0m",
       "Run any Wasmer package in your browser with the Wasmer SDK for JavaScript.",
       "Type \x1b[38;5;81mcat README.md\x1b[0m to explore the workspace.",
       "",
