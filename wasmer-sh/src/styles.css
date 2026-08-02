@@ -73,7 +73,7 @@ button {
 .brand-logo {
   display: block;
   width: auto;
-  height: 28px;
+  height: 24px;
 }
 
 .brand-suffix {
@@ -83,7 +83,7 @@ button {
   color: var(--muted);
   font-family:
     "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace;
-  font-size: 19px;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.08em;
