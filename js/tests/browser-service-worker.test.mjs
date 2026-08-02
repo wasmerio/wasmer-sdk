@@ -103,6 +103,52 @@ test(
       assert.equal(serverState.duplicate?.code, "CAPABILITY_UNAVAILABLE");
       assert.match(serverState.duplicate?.message ?? "", /already exposes/);
 
+      await page.evaluate(async () => {
+        const test = globalThis.__wasmerTest;
+        await test.server.close();
+        document.querySelector("#preview")?.remove();
+      });
+
+      const hostAdmin = await browser.newPage();
+      await hostAdmin.goto(new URL("/.wasmer/host.html", httpHost.url).href);
+      await hostAdmin.evaluate(async () => {
+        const replacement = await navigator.serviceWorker.register(
+          "/.wasmer/empty-service-worker.js",
+          { scope: "/" },
+        );
+        const worker =
+          replacement.active ?? replacement.waiting ?? replacement.installing;
+        if (worker && worker.state !== "activated") {
+          await new Promise((resolve, reject) => {
+            worker.addEventListener("statechange", () => {
+              if (worker.state === "activated") resolve();
+              if (worker.state === "redundant") {
+                reject(new Error("replacement service worker became redundant"));
+              }
+            });
+          });
+        }
+        await replacement.unregister();
+      });
+      await hostAdmin.close();
+
+      await page.evaluate(async () => {
+        const test = globalThis.__wasmerTest;
+        const server = await test.sandbox.ports.expose(8080, {
+          serviceWorker: test.httpOrigin,
+          timeoutMs: 30_000,
+        });
+        const iframe = server.createIframe({ title: "Recovered PHP preview" });
+        iframe.id = "recovered-preview";
+        document.body.append(iframe);
+        test.server = server;
+      });
+      const recoveredPreview = page.frameLocator("#recovered-preview");
+      await assert.doesNotReject(async () => {
+        await recoveredPreview.locator("#title").waitFor({ timeout: 60_000 });
+        assert.equal(await recoveredPreview.locator("#title").textContent(), "PHP 42");
+      }, diagnostics.join("\n"));
+
       const closedStatus = await page.evaluate(async () => {
         const test = globalThis.__wasmerTest;
         const url = test.server.url;
@@ -172,6 +218,15 @@ async function startHttpHost() {
         response.setHeader("Content-Type", "text/html; charset=utf-8");
         response.end(
           "<!doctype html><script type=module src=/.wasmer/service-worker-host.js></script>",
+        );
+        return;
+      }
+      if (pathname === "/.wasmer/empty-service-worker.js") {
+        response.setHeader("Content-Type", "text/javascript; charset=utf-8");
+        response.setHeader("Service-Worker-Allowed", "/");
+        response.end(
+          "self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));" +
+          "self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));",
         );
         return;
       }
