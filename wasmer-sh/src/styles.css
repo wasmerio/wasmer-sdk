@@ -237,6 +237,7 @@ button {
 }
 
 .shell-stage,
+.workspace-column,
 .terminal-frame,
 #terminal {
   width: 100%;
@@ -252,6 +253,67 @@ button {
 
 .shell-stage.has-preview {
   grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
+}
+
+.workspace-column {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--panel);
+  transition: grid-template-rows 180ms ease;
+}
+
+.workspace-column.has-editor {
+  grid-template-rows: minmax(260px, 3fr) minmax(180px, 2fr);
+}
+
+.editor-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line-strong);
+  background: #181818;
+}
+
+.editor-panel[hidden] {
+  display: none;
+}
+
+.editor-workbench {
+  width: 100%;
+  height: 100%;
+}
+
+.editor-workbench .tabs-container > .tab.dirty .label-name::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+  opacity: 0.85;
+}
+
+.editor-loading {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #181818;
+  color: var(--muted);
+  font: 11px "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace;
+}
+
+.editor-panel[data-ready="true"] .editor-loading {
+  display: none;
+}
+
+.editor-panel[data-error="true"] .editor-loading {
+  color: var(--red);
 }
 
 .terminal-frame {
@@ -557,8 +619,12 @@ button {
     grid-template-rows: minmax(240px, 1fr) minmax(260px, 1fr);
   }
 
-  .shell-stage.has-preview .terminal-frame {
+  .shell-stage.has-preview .workspace-column {
     height: auto;
+  }
+
+  .workspace-column.has-editor {
+    grid-template-rows: minmax(220px, 3fr) minmax(160px, 2fr);
   }
 
   .preview-panel {

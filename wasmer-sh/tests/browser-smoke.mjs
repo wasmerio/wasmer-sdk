@@ -106,6 +106,54 @@ try {
     { timeout: 120_000 },
   );
 
+  assert.equal(await page.locator("#editor-panel").isHidden(), true);
+  await page.locator("#editor-button").click();
+  await page.waitForFunction(
+    () => document.querySelector("#editor-panel")?.dataset.ready === "true",
+    undefined,
+    { timeout: 90_000 },
+  );
+  const workspaceReadme = page
+    .getByLabel("Files Explorer")
+    .locator("a")
+    .filter({ hasText: /^README\.md$/ });
+  await workspaceReadme.waitFor({ timeout: 30_000 });
+  await workspaceReadme.click();
+  const editorHeading = page.getByText("# Wasmer shell workspace", {
+    exact: true,
+  });
+  await editorHeading.waitFor({ timeout: 30_000 });
+  await editorHeading.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" EDITOR_SMOKE");
+  const dirtyTab = page.locator("#editor-workbench .tabs-container > .tab.dirty");
+  await dirtyTab.waitFor({ timeout: 10_000 });
+  assert.equal(
+    await dirtyTab.locator(".label-name").evaluate((label) =>
+      getComputedStyle(label, "::after").content,
+    ),
+    '\"\"',
+  );
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+s" : "Control+s");
+  await dirtyTab.waitFor({ state: "hidden", timeout: 10_000 });
+  assert.equal(
+    await page.locator("#workspace-column").getAttribute("class"),
+    "workspace-column has-editor",
+  );
+  await page.locator("#editor-button").click();
+  await page.locator("#editor-panel").waitFor({ state: "hidden" });
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
+      "grep -q EDITOR_SMOKE README.md && echo __EDITOR_SAVE_OK__\r",
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("__EDITOR_SAVE_OK__"),
+    undefined,
+    { timeout: 30_000 },
+  );
+
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send(
       "node -e \"require('dns').lookup('registry.npmjs.org', (error, address) => console.log('__EDGE_DNS_RESULT__', error && error.code, address))\"\r",
@@ -301,6 +349,22 @@ try {
   await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
   await page.locator("#preview-refresh").click();
   await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
+  await preview.locator("body").evaluate(() => {
+    globalThis.__WASMER_SH_RELOAD_MARKER__ = true;
+  });
+  await preview.locator("#php-preview").click();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+r" : "Control+r");
+  const reloadDeadline = Date.now() + 30_000;
+  let shortcutReloaded = false;
+  while (!shortcutReloaded && Date.now() < reloadDeadline) {
+    shortcutReloaded = await preview
+      .locator("body")
+      .evaluate(() => globalThis.__WASMER_SH_RELOAD_MARKER__ !== true)
+      .catch(() => false);
+    if (!shortcutReloaded) await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(shortcutReloaded, true);
+  await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
   await page.locator("#preview-close").click();
   await page.locator("#preview-panel").waitFor({
     state: "hidden",
@@ -402,6 +466,10 @@ try {
           status: document.querySelector("#session-status")?.textContent,
         }))
         .catch(() => undefined),
+    );
+    console.error(
+      "editor state:",
+      await page.locator("#editor-panel").innerText().catch(() => undefined),
     );
   }
   if (diagnostics.length > 0) {

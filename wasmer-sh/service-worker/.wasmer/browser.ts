@@ -37,10 +37,14 @@ frame.src = initialUrl.href;
 let observedNavigation: NavigationState | undefined;
 
 frame.addEventListener("load", () => {
+  const child = frame.contentWindow;
+  child?.removeEventListener("keydown", refreshWithKeyboard, true);
+  child?.addEventListener("keydown", refreshWithKeyboard, true);
   observeNavigation();
   reportState();
 });
 document.body.append(frame);
+globalThis.addEventListener("keydown", refreshWithKeyboard, true);
 
 globalThis.addEventListener("message", (event: MessageEvent<unknown>) => {
   const message = event.data as PreviewCommand | null;
@@ -90,4 +94,18 @@ function reportState(): void {
     },
     parentOrigin,
   );
+}
+
+function refreshWithKeyboard(event: KeyboardEvent): void {
+  if (
+    event.altKey ||
+    event.shiftKey ||
+    (!event.metaKey && !event.ctrlKey) ||
+    event.key.toLowerCase() !== "r"
+  ) {
+    return;
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  frame.contentWindow?.location.reload();
 }

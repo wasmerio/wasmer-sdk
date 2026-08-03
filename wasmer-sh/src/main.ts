@@ -13,6 +13,7 @@ import {
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 
+import { WorkspaceEditor } from "./editor";
 import expressReadme from "../workspace/node-express/README.md?raw";
 import expressPackage from "../workspace/node-express/package.json?raw";
 import expressServer from "../workspace/node-express/server.js?raw";
@@ -83,6 +84,7 @@ declare global {
 
 const elements = {
   stage: document.querySelector<HTMLElement>(".shell-stage")!,
+  workspaceColumn: requiredElement<HTMLDivElement>("workspace-column"),
   terminal: requiredElement<HTMLDivElement>("terminal"),
   status: requiredElement<HTMLSpanElement>("session-status"),
   liveHttpBadge: requiredElement<HTMLButtonElement>("live-http-badge"),
@@ -92,6 +94,10 @@ const elements = {
   bootDetail: requiredElement<HTMLParagraphElement>("boot-detail"),
   clear: requiredElement<HTMLButtonElement>("clear-button"),
   restart: requiredElement<HTMLButtonElement>("restart-button"),
+  editorButton: requiredElement<HTMLButtonElement>("editor-button"),
+  editorPanel: requiredElement<HTMLElement>("editor-panel"),
+  editorLoading: requiredElement<HTMLDivElement>("editor-loading"),
+  editorWorkbench: requiredElement<HTMLDivElement>("editor-workbench"),
   retry: requiredElement<HTMLButtonElement>("retry-button"),
   previewPanel: requiredElement<HTMLElement>("preview-panel"),
   previewContent: requiredElement<HTMLDivElement>("preview-content"),
@@ -146,6 +152,10 @@ const terminal = new Terminal({
   },
 });
 const fit = new FitAddon();
+const workspaceEditor = new WorkspaceEditor(
+  elements.editorWorkbench,
+  () => activeSession?.sandbox,
+);
 
 let activeSession: ActiveSession | undefined;
 let generation = 0;
@@ -173,6 +183,32 @@ elements.clear.addEventListener("click", () => {
   terminal.focus();
 });
 elements.restart.addEventListener("click", () => void start());
+elements.editorButton.addEventListener("click", () => void toggleEditor());
+window.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.altKey || event.shiftKey || (!event.metaKey && !event.ctrlKey)) return;
+    const key = event.key.toLowerCase();
+    if (
+      key === "s" &&
+      !elements.editorPanel.hidden &&
+      elements.editorWorkbench.contains(event.target as Node)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      workspaceEditor.save();
+    } else if (
+      key === "r" &&
+      !elements.previewPanel.hidden &&
+      activeSession?.preview
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      sendPreviewCommand("refresh");
+    }
+  },
+  { capture: true },
+);
 elements.retry.addEventListener("click", () => void start());
 elements.liveHttpBadge.addEventListener("click", () => {
   const session = activeSession;
@@ -545,6 +581,25 @@ function updateLiveHttpBadge(session = activeSession): void {
   elements.liveHttpBadge.hidden = false;
 }
 
+async function toggleEditor(): Promise<void> {
+  const opening = elements.editorPanel.hidden;
+  elements.editorPanel.hidden = !opening;
+  elements.workspaceColumn.classList.toggle("has-editor", opening);
+  elements.editorButton.setAttribute("aria-pressed", String(opening));
+  fitTerminal();
+  setTimeout(fitTerminal, 200);
+  if (!opening || elements.editorPanel.dataset.ready === "true") return;
+  elements.editorPanel.dataset.error = "false";
+  elements.editorLoading.textContent = "Loading editor…";
+  try {
+    await workspaceEditor.load();
+    elements.editorPanel.dataset.ready = "true";
+  } catch (error) {
+    elements.editorPanel.dataset.error = "true";
+    elements.editorLoading.textContent = `Editor unavailable: ${describeError(error)}`;
+  }
+}
+
 function createPreviewIframe(
   server: BrowserServer,
   port: number,
@@ -763,6 +818,7 @@ function setState(state: string, status: string): void {
 
 function setBusy(busy: boolean): void {
   elements.restart.disabled = busy;
+  elements.editorButton.disabled = busy || activeSession === undefined;
 }
 
 function showStartupError(error: unknown): void {

@@ -36,6 +36,9 @@
       </div>
 
       <nav class="app-actions" aria-label="Shell actions">
+        <button id="editor-button" class="text-button" type="button" aria-pressed="false" disabled>
+          Editor
+        </button>
         <button id="clear-button" class="text-button" type="button">
           Clear
         </button>
@@ -60,27 +63,36 @@
     </header>
 
     <main class="shell-stage">
-      <section class="terminal-frame" aria-label="Wasmer shell terminal">
-        <div id="terminal"></div>
-
-        <div class="boot-screen" role="status">
-          <div class="boot-card">
-            <div class="runtime-glyph" aria-hidden="true">
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-            <p class="eyebrow">WebAssembly + WASIX</p>
-            <h1 id="boot-title">Starting your shell</h1>
-            <p id="boot-detail">
-              Initializing the Wasmer runtime in this browser.
-            </p>
-            <button id="retry-button" class="primary-button" type="button" hidden>
-              Try again
-            </button>
+      <div id="workspace-column" class="workspace-column">
+        <section id="editor-panel" class="editor-panel" aria-label="Workspace editor" hidden>
+          <div id="editor-loading" class="editor-loading" role="status">
+            Loading editor…
           </div>
-        </div>
-      </section>
+          <div id="editor-workbench" class="editor-workbench"></div>
+        </section>
+
+        <section class="terminal-frame" aria-label="Wasmer shell terminal">
+          <div id="terminal"></div>
+
+          <div class="boot-screen" role="status">
+            <div class="boot-card">
+              <div class="runtime-glyph" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <p class="eyebrow">WebAssembly + WASIX</p>
+              <h1 id="boot-title">Starting your shell</h1>
+              <p id="boot-detail">
+                Initializing the Wasmer runtime in this browser.
+              </p>
+              <button id="retry-button" class="primary-button" type="button" hidden>
+                Try again
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
 
       <section id="preview-panel" class="preview-panel" aria-label="Web server preview" hidden>
         <header class="preview-bar">

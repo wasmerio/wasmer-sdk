@@ -1,0 +1,20 @@
+{
+  "name": "workbench",
+  "displayName": "Wasmer Workspace",
+  "publisher": "wasmer",
+  "description": "Connects Code OSS to a Wasmer sandbox filesystem",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "1.108.2"
+  },
+  "activationEvents": [
+    "onFileSystem:wasmer"
+  ],
+  "enabledApiProposals": [
+    "ipc"
+  ],
+  "extensionKind": [
+    "web"
+  ],
+  "browser": "./extension.js"
+}

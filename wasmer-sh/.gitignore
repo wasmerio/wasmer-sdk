@@ -3,5 +3,7 @@ dist-service-worker
 node_modules
 .vite
 .wasmer
+.wasmer-workbench
+public/workbench-code
 !service-worker/.wasmer/
 !service-worker/.wasmer/**
