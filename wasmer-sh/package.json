@@ -5,26 +5,22 @@
   "description": "An interactive browser shell powered by Wasmer, WASIX, and the Wasmer JavaScript SDK",
   "type": "module",
   "scripts": {
-    "prepare:workbench": "node scripts/prepare-workbench.mjs",
-    "predev": "pnpm prepare:workbench",
     "dev": "node scripts/run-servers.mjs dev",
     "dev:app": "vite --host 127.0.0.1 --port 5173",
     "dev:http": "vite --config service-worker/vite.config.ts --host 127.0.0.1 --port 5174",
-    "prebuild": "pnpm prepare:workbench",
     "build": "tsc --noEmit && vite build && vite build --config service-worker/vite.config.ts",
     "preview": "node scripts/run-servers.mjs preview",
-    "pretest": "pnpm prepare:workbench",
     "test": "node tests/browser-smoke.mjs"
   },
   "dependencies": {
     "@wasmer/sdk2": "file:../js",
     "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0"
+    "@xterm/xterm": "^6.0.0",
+    "monaco-editor": "0.56.0"
   },
   "devDependencies": {
     "@mercuryworkshop/wisp-js": "0.4.1",
     "@types/node": "^26.1.2",
-    "extract-zip": "^2.0.1",
     "playwright": "^1.62.0",
     "typescript": "^5.9.2",
     "vite": "^8.2.0"

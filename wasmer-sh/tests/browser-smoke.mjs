@@ -113,29 +113,46 @@ try {
     undefined,
     { timeout: 90_000 },
   );
-  const workspaceReadme = page
-    .getByLabel("Files Explorer")
-    .locator("a")
-    .filter({ hasText: /^README\.md$/ });
+  const editorLayout = await page.evaluate(() => {
+    const explorer = document.querySelector(".editor-explorer")?.getBoundingClientRect();
+    const editor = document.querySelector(".editor-main")?.getBoundingClientRect();
+    const terminal = document.querySelector(".terminal-frame")?.getBoundingClientRect();
+    if (!explorer || !editor || !terminal) return undefined;
+    return {
+      explorerRight: explorer.right,
+      explorerBottom: explorer.bottom,
+      editorLeft: editor.left,
+      terminalLeft: terminal.left,
+      terminalBottom: terminal.bottom,
+    };
+  });
+  assert.ok(editorLayout);
+  assert.ok(Math.abs(editorLayout.editorLeft - editorLayout.terminalLeft) < 1);
+  assert.ok(Math.abs(editorLayout.explorerRight - editorLayout.editorLeft) < 1);
+  assert.ok(Math.abs(editorLayout.explorerBottom - editorLayout.terminalBottom) < 1);
+  const workspaceReadme = page.locator(
+    '#editor-tree .editor-tree-row[data-path="README.md"]',
+  );
   await workspaceReadme.waitFor({ timeout: 30_000 });
   await workspaceReadme.click();
-  const editorHeading = page.getByText("# Wasmer shell workspace", {
-    exact: true,
-  });
-  await editorHeading.waitFor({ timeout: 30_000 });
-  await editorHeading.click();
-  await page.keyboard.press("End");
+  assert.match(await workspaceReadme.getAttribute("class"), /\bactive\b/);
+  assert.equal(await workspaceReadme.getAttribute("aria-current"), "true");
+  const editorInput = page.locator("#editor-workbench .monaco-editor .view-lines");
+  await editorInput.waitFor({ timeout: 30_000 });
+  await editorInput.click({ position: { x: 100, y: 12 } });
+  await page.keyboard.press("Control+End");
   await page.keyboard.type(" EDITOR_SMOKE");
-  const dirtyTab = page.locator("#editor-workbench .tabs-container > .tab.dirty");
+  const dirtyTab = page.locator("#editor-workbench .editor-tab.dirty");
   await dirtyTab.waitFor({ timeout: 10_000 });
-  assert.equal(
-    await dirtyTab.locator(".label-name").evaluate((label) =>
-      getComputedStyle(label, "::after").content,
-    ),
-    '\"\"',
-  );
+  assert.match((await dirtyTab.getAttribute("aria-label")) ?? "", /unsaved/);
   await page.keyboard.press(process.platform === "darwin" ? "Meta+s" : "Control+s");
   await dirtyTab.waitFor({ state: "hidden", timeout: 10_000 });
+  const readmeTab = page.locator('.editor-tab[title="README.md"]');
+  const closeReadme = page.getByRole("button", { name: "Close README.md" });
+  assert.equal(await closeReadme.count(), 1);
+  await closeReadme.click();
+  await readmeTab.waitFor({ state: "detached", timeout: 10_000 });
+  assert.equal(await workspaceReadme.getAttribute("aria-current"), null);
   assert.equal(
     await page.locator("#workspace-column").getAttribute("class"),
     "workspace-column has-editor",

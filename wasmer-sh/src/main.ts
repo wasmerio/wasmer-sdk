@@ -198,6 +198,14 @@ window.addEventListener(
       event.stopPropagation();
       workspaceEditor.save();
     } else if (
+      key === "w" &&
+      !elements.editorPanel.hidden &&
+      elements.editorWorkbench.contains(event.target as Node)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      workspaceEditor.closeActive();
+    } else if (
       key === "r" &&
       !elements.previewPanel.hidden &&
       activeSession?.preview

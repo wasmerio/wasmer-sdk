@@ -79,6 +79,12 @@ naturally to Bash when they exit.
 Package data is persisted in the browser cache under the `wasmer.sh`
 namespace, so subsequent sessions avoid downloading the same packages again.
 
+The optional Editor panel uses a lean, lazy-loaded Monaco editor over the
+sandbox's `/workspace` directory. Directories are read on demand, modified
+tabs show an unsaved marker, and `Cmd+S` or `Ctrl+S` writes the active file
+back to the sandbox. Monaco and its language grammars are not downloaded until
+the panel is opened.
+
 ## Run locally
 
 Build and start the WASIX Epoxy sidecar in one terminal:
