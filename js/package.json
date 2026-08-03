@@ -44,7 +44,8 @@
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
     "build:ts": "tsc -p tsconfig.json",
-    "build": "npm run build:wasm && npm run build:ts",
+    "build": "npm run build:wasm && npm run check:size && npm run build:ts",
+    "check:size": "node scripts/check-wasm-size.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build:ts && node scripts/test-node.mjs",
     "test:runtime": "npm run build:ts && node scripts/test-node.mjs runtime",

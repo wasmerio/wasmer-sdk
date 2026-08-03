@@ -41,7 +41,12 @@ run(
     "wasm32-unknown-unknown",
     "--release",
   ],
-  { RUSTFLAGS: rustflags },
+  {
+    RUSTFLAGS: rustflags,
+    CARGO_PROFILE_RELEASE_LTO: "fat",
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1",
+    CARGO_PROFILE_RELEASE_OPT_LEVEL: "3",
+  },
 );
 
 run(wasmBindgen, [
@@ -56,6 +61,8 @@ run(wasmBindgen, [
   "--target",
   "web",
   "--typescript",
+  "--remove-name-section",
+  "--remove-producers-section",
 ]);
 
 function run(command, args, environment = {}) {
