@@ -242,7 +242,8 @@ the first argument otherwise. All examples reuse the programs in
 ## Build and test locally
 
 Install Node.js 20 or newer, Rust nightly with `rust-src`, and the matching
-`wasm-bindgen` CLI:
+`wasm-bindgen` CLI. `npm ci` installs the pinned Binaryen toolchain used to run
+`wasm-opt -Oz` as part of every JavaScript build:
 
 ```console
 rustup toolchain install nightly \

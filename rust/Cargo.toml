@@ -30,7 +30,7 @@ wasmer-config = "=0.702.1"
 wasmer-package = "=0.702.1"
 wasmer-wasix = { version = "=0.702.1", default-features = false }
 wasmer-wasix-types = "=0.702.1"
-webc = "=12.0.0"
+webc = { version = "=12.0.0", default-features = false, features = ["v3"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1.49", features = ["fs", "rt-multi-thread"] }

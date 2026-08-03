@@ -36,7 +36,7 @@ wasmer-package = "=0.702.1"
 wasmer-wasix = { version = "=0.702.1", default-features = false, features = ["js", "js-default"] }
 wasmer-wasix-types = "=0.702.1"
 wasmer-types = "=7.2.1"
-webc = "=12.0.0"
+webc = { version = "=12.0.0", default-features = false, features = ["v3"] }
 
 [dependencies.web-sys]
 version = "0.3"

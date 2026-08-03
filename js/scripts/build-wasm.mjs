@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,11 @@ const wasmBindgen =
     "bin",
     `wasm-bindgen${executableSuffix}`,
   );
+const wasmOpt =
+  process.env.WASM_OPT ??
+  join(packageRoot, "node_modules", ".bin", `wasm-opt${executableSuffix}`);
+const wasmOutput = join(packageRoot, "pkg", "wasmer_sdk_js_bg.wasm");
+const optimizedWasmOutput = `${wasmOutput}.optimized`;
 
 const rustflags = [
   "-Ctarget-feature=+atomics,+bulk-memory,+mutable-globals",
@@ -64,6 +70,17 @@ run(wasmBindgen, [
   "--remove-name-section",
   "--remove-producers-section",
 ]);
+
+run(wasmOpt, [
+  wasmOutput,
+  "-Oz",
+  "--enable-bulk-memory",
+  "--enable-threads",
+  "--enable-mutable-globals",
+  "-o",
+  optimizedWasmOutput,
+]);
+renameSync(optimizedWasmOutput, wasmOutput);
 
 function run(command, args, environment = {}) {
   const result = spawnSync(command, args, {
