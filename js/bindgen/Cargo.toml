@@ -32,7 +32,7 @@ wasm-bindgen = "0.2.120"
 wasm-bindgen-futures = "0.4"
 wasmer = { version = "=7.2.1", default-features = false, features = ["js", "js-default"] }
 wasmer-sdk = { path = "../../rust", default-features = false, features = ["js"] }
-wasmer-package = "=0.702.1"
+wasmer-package = { version = "=0.702.1", default-features = false, features = ["execution", "webc-v3"] }
 wasmer-wasix = { version = "=0.702.1", default-features = false, features = ["js", "js-default"] }
 wasmer-wasix-types = "=0.702.1"
 wasmer-types = "=7.2.1"
