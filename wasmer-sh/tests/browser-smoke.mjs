@@ -187,6 +187,26 @@ try {
     { timeout: 30_000 },
   );
 
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
+      "sh -c 'node -e \"console.log(\\\"__NESTED_NODE_OK__\\\", process.env.PATH)\"'\r",
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("\n__NESTED_NODE_OK__"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  assert.match(
+    await page.evaluate(() => globalThis.__wasmerShell.snapshot()),
+    /__NESTED_NODE_OK__[^\n]*\/bin/,
+  );
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+
   if (testPnpm) {
     await page.evaluate(async () => {
       await globalThis.__wasmerShell.send(

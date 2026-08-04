@@ -322,6 +322,7 @@ async function start(): Promise<void> {
         : { mode: "http" },
       env: {
         HOME: "/workspace",
+        PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:.",
         USER: "wasmer",
         LOGNAME: "wasmer",
         TERM: "xterm-256color",
