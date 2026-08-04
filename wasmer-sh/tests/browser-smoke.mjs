@@ -72,8 +72,17 @@ try {
 
   browser = await chromium.launch({ headless: true });
   page = await browser.newPage();
+  await page.addInitScript(() => {
+    globalThis.addEventListener("error", (event) => {
+      console.error("[wasmer-sh-debug-error]", event.error?.stack ?? event.message);
+    });
+    globalThis.addEventListener("unhandledrejection", (event) => {
+      console.error("[wasmer-sh-debug-rejection]", event.reason?.stack ?? event.reason);
+    });
+  });
   page.on("console", (message) =>
-    diagnostics.push(`console.${message.type()}: ${message.text()}`),
+    (diagnostics.push(`console.${message.type()}: ${message.text()}`),
+    message.text().startsWith("[wasmer-sh-debug-") && console.error(message.text())),
   );
   page.on("pageerror", (error) =>
     diagnostics.push(`pageerror: ${error.stack ?? error.message}`),
@@ -202,6 +211,38 @@ try {
   assert.match(
     await page.evaluate(() => globalThis.__wasmerShell.snapshot()),
     /__NESTED_NODE_OK__[^\n]*\/bin/,
+  );
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
+      "mkdir -p .wasmer-test/bin .wasmer-test/pkg && printf '%s\\n' '#!/usr/bin/env node' 'console.log(\"__SYMLINK_SHEBANG_OK__\")' > .wasmer-test/pkg/next && ln -sf ../pkg/next .wasmer-test/bin/next && .wasmer-test/bin/next\r",
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("\n__SYMLINK_SHEBANG_OK__"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
+      `node -e 'const fs=require("fs"),{fork}=require("child_process"),path="/workspace/.wasmer-test/fork-child.js";fs.writeFileSync(path,"process.send(\\"ready\\");process.on(\\"message\\",m=>{if(m===\\"finish\\")process.exit(0)})");const child=fork(path);child.on("message",m=>{if(m==="ready")child.send("finish")});child.on("exit",code=>console.log(code===0?"__FORK_IPC_OK__":"__FORK_IPC_FAILED__"))'\r`,
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("\n__FORK_IPC_OK__"),
+    undefined,
+    { timeout: 30_000 },
   );
   await page.waitForFunction(
     () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),

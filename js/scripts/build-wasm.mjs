@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { renameSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,24 @@ const wasmOpt =
   join(packageRoot, "node_modules", ".bin", `wasm-opt${executableSuffix}`);
 const wasmOutput = join(packageRoot, "pkg", "wasmer_sdk_js_bg.wasm");
 const optimizedWasmOutput = `${wasmOutput}.optimized`;
+const localWasmer = process.env.WASMER_REPO;
+const localWasmerPatches = localWasmer
+  ? [
+      ["virtual-fs", "lib/virtual-fs"],
+      ["virtual-mio", "lib/virtual-io"],
+      ["virtual-net", "lib/virtual-net"],
+      ["wasmer", "lib/api"],
+      ["wasmer-c-api-imports", "lib/c-api-imports"],
+      ["wasmer-config", "lib/config"],
+      ["wasmer-package", "lib/package"],
+      ["wasmer-types", "lib/types"],
+      ["wasmer-wasix", "lib/wasix"],
+      ["wasmer-wasix-types", "lib/wasi-types"],
+    ].flatMap(([name, path]) => [
+      "--config",
+      `patch.crates-io.${name}.path=${JSON.stringify(join(localWasmer, path))}`,
+    ])
+  : [];
 
 const rustflags = [
   "-Ctarget-feature=+atomics,+bulk-memory,+mutable-globals",
@@ -40,7 +58,8 @@ run(
     "build",
     "-Z",
     "build-std=std,panic_abort",
-    "--locked",
+    ...(localWasmer ? [] : ["--locked"]),
+    ...localWasmerPatches,
     "-p",
     "wasmer-sdk-js",
     "--target",
@@ -70,6 +89,7 @@ run(wasmBindgen, [
   "--remove-name-section",
   "--remove-producers-section",
 ]);
+patchGrowableSharedMemoryViews(join(packageRoot, "pkg", "wasmer_sdk_js.js"));
 
 run(wasmOpt, [
   wasmOutput,
@@ -81,6 +101,22 @@ run(wasmOpt, [
   optimizedWasmOutput,
 ]);
 renameSync(optimizedWasmOutput, wasmOutput);
+
+function patchGrowableSharedMemoryViews(path) {
+  const source = readFileSync(path, "utf8");
+  let replacements = 0;
+  const patched = source.replace(
+    /(cached(?:DataView|Uint16Array|Uint8Array)Memory0)\.buffer !== wasm\.memory\.buffer/g,
+    (_match, cache) => {
+      replacements += 1;
+      return `${cache}.buffer !== wasm.memory.buffer || ${cache}.byteLength !== wasm.memory.buffer.byteLength`;
+    },
+  );
+  if (replacements !== 3) {
+    throw new Error(`expected to patch 3 wasm-bindgen memory views, patched ${replacements}`);
+  }
+  writeFileSync(path, patched);
+}
 
 function run(command, args, environment = {}) {
   const result = spawnSync(command, args, {

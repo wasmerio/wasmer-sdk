@@ -18,7 +18,7 @@ const sandbox = await wasmer.sandboxes.create({
     bashPackage,
     "wasmer/neatvi",
     "python/python",
-    "wasmer/edgejs-quickjs@0.1.2",
+    "wasmer/edgejs-quickjs@0.1.3",
     "php/php-32",
   ],
   files: { ".bashrc": "PS1='wasmer@web:\\w$ '" },

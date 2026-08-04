@@ -3,7 +3,7 @@ import { client as wisp } from "@mercuryworkshop/wisp-js/client";
 import { NETWORK_RPC_CONTROL_BYTES } from "./node-network-rpc.js";
 import type { NodeNetworkMethod } from "./node-network.js";
 
-type Wake = (id: number, event: string) => void;
+type Wake = (id: number, event: string) => boolean;
 type WispStream = ReturnType<wisp.ClientConnection["create_stream"]>;
 
 interface SocketState {
@@ -42,7 +42,7 @@ export class WispNetworkBridge {
   readonly #resolvedHosts = new Map<string, string>();
   readonly #dnsUrl: URL;
   #nextSocketId = 1;
-  #wake: Wake = () => {};
+  #wake: Wake = () => true;
   #closed = false;
 
   constructor(
@@ -112,18 +112,18 @@ export class WispNetworkBridge {
       if (state.buffered + copy.byteLength > RECEIVE_LIMIT_BYTES) {
         state.ended = true;
         stream.close(0x03);
-        this.#wake(id, "error");
+        this.#emitWake(id, "error");
         return;
       }
       state.chunks.push(copy);
       state.buffered += copy.byteLength;
-      this.#wake(id, "readable");
+      this.#emitWake(id, "readable");
     };
     stream.onclose = () => {
       state.ended = true;
-      this.#wake(id, "close");
+      this.#emitWake(id, "close");
     };
-    queueMicrotask(() => this.#wake(id, "writable"));
+    queueMicrotask(() => this.#emitWake(id, "writable"));
     return {
       id,
       local: "0.0.0.0:0",
@@ -195,9 +195,9 @@ export class WispNetworkBridge {
     queueMicrotask(() => {
       const state = this.#sockets.get(id);
       if (!state) return;
-      if (state.buffered > 0) this.#wake(id, "readable");
-      if (state.ended) this.#wake(id, "close");
-      else this.#wake(id, "writable");
+      if (state.buffered > 0) this.#emitWake(id, "readable");
+      if (state.ended) this.#emitWake(id, "close");
+      else this.#emitWake(id, "writable");
     });
   }
 
@@ -207,7 +207,7 @@ export class WispNetworkBridge {
     bridges.delete(this.id);
     this.#closeSockets();
     this.#connection.close();
-    this.#wake = () => {};
+    this.#wake = () => true;
   }
 
   #requireSocket(id: number): SocketState {
@@ -219,7 +219,14 @@ export class WispNetworkBridge {
   #closeSockets(): void {
     for (const [id, state] of this.#sockets) {
       state.ended = true;
-      this.#wake(id, "close");
+      this.#emitWake(id, "close");
+    }
+  }
+
+  #emitWake(id: number, event: string): void {
+    if (this.#closed) return;
+    if (!this.#wake(id, event)) {
+      setTimeout(() => this.#emitWake(id, event), 0);
     }
   }
 

@@ -18,6 +18,17 @@ interface InitMessage {
 
 Error.stackTraceLimit = 50;
 installNetworkProxy();
+let runtimeMemory: WebAssembly.Memory | undefined;
+globalThis.addEventListener("error", (event) => {
+  console.error(
+    "[wasmer-sdk-worker-error]",
+    runtimeMemory?.buffer.byteLength,
+    event.error?.stack ?? event.message,
+  );
+});
+globalThis.addEventListener("unhandledrejection", (event) => {
+  console.error("[wasmer-sdk-worker-rejection]", event.reason?.stack ?? event.reason);
+});
 
 let worker: WorkerRuntime | undefined;
 const pendingMessages: unknown[] = [];
@@ -31,6 +42,7 @@ globalThis.onmessage = ({ data }: MessageEvent<unknown>) => {
 
 async function handleMessage(data: unknown): Promise<void> {
   if (isInitMessage(data)) {
+    runtimeMemory = data.memory;
     const sdk = (await import(data.sdkUrl)) as {
       default(options: {
         module_or_path: WebAssembly.Module;
