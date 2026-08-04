@@ -17,6 +17,13 @@ import { WorkspaceEditor } from "./editor";
 import expressReadme from "../workspace/node-express/README.md?raw";
 import expressPackage from "../workspace/node-express/package.json?raw";
 import expressServer from "../workspace/node-express/server.js?raw";
+import nextGlobals from "../workspace/next/app/globals.css?raw";
+import nextLayout from "../workspace/next/app/layout.js?raw";
+import nextPage from "../workspace/next/app/page.js?raw";
+import nextApiHello from "../workspace/next/app/api/hello/route.js?raw";
+import nextConfig from "../workspace/next/next.config.mjs?raw";
+import nextPackage from "../workspace/next/package.json?raw";
+import nextReadme from "../workspace/next/README.md?raw";
 import nodeReadme from "../workspace/node/README.md?raw";
 import nodeServer from "../workspace/node/server.js?raw";
 import phpIndex from "../workspace/php/index.php?raw";
@@ -888,6 +895,13 @@ HISTFILE=/workspace/.bash_history
     "node-express/README.md": expressReadme,
     "node-express/package.json": expressPackage,
     "node-express/server.js": expressServer,
+    "next/README.md": nextReadme,
+    "next/package.json": nextPackage,
+    "next/next.config.mjs": nextConfig,
+    "next/app/layout.js": nextLayout,
+    "next/app/page.js": nextPage,
+    "next/app/globals.css": nextGlobals,
+    "next/app/api/hello/route.js": nextApiHello,
     "python/README.md": pythonReadme,
     "python/server.py": pythonServer,
     "php/README.md": phpReadme,

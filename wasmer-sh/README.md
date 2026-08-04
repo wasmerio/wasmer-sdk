@@ -44,12 +44,13 @@ cd php && php -S 0.0.0.0:8000 -t .
 cd node && node server.js
 cd python && python server.py
 cd node-express && pnpm i && node server.js
+cd next && pnpm i && pnpm dev
 ```
 
 When a command opens an HTTP listener, wasmer.sh detects the port and opens a
 live preview beside the terminal. The preview stays attached to the guest, so
 absolute URLs and subresources are routed back to the same WASIX server.
-The `node/`, `node-express/`, `python/`, and `php/` directories are independent
+The `node/`, `node-express/`, `next/`, `python/`, and `php/` directories are independent
 examples with their own README files. `node/server.js` is backed by
 `wasmer/edgejs-quickjs`; `python/server.py` uses Python's standard-library
 `HTTPServer`. Closing a listener closes its preview automatically.

@@ -10,8 +10,10 @@ import { createServer } from "vite";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const pnpmTimeout = Number(process.env.WASMER_PNPM_TIMEOUT ?? 120_000);
+const nextTimeout = Number(process.env.WASMER_NEXT_TIMEOUT ?? 240_000);
 const edgejsWebc = process.env.WASMER_EDGEJS_WEBC;
 const testPnpm = process.env.WASMER_TEST_PNPM === "1" || Boolean(edgejsWebc);
+const testNext = process.env.WASMER_TEST_NEXT === "1";
 if (edgejsWebc && !process.env.VITE_EDGEJS_WEBC_URL) {
   process.env.VITE_EDGEJS_WEBC_URL = `/@fs/${edgejsWebc}`;
 }
@@ -218,6 +220,29 @@ try {
       undefined,
       { timeout: pnpmTimeout },
     );
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+      undefined,
+      { timeout: 30_000 },
+    );
+  }
+
+  if (testNext) {
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send(
+        "cd next && pnpm install --ignore-scripts && pnpm dev\r",
+      );
+    });
+    await page.locator("#preview-panel").waitFor({ timeout: nextTimeout });
+    const nextPreview = page
+      .frameLocator("#preview-panel iframe")
+      .frameLocator("iframe");
+    await nextPreview
+      .getByText("Welcome to Next.js on Wasmer.", { exact: true })
+      .waitFor({ timeout: nextTimeout });
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("\x03");
+    });
     await page.waitForFunction(
       () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
       undefined,

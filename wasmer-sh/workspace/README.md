@@ -6,6 +6,7 @@ These examples run entirely inside your browser with Wasmer and WASIX.
 | --- | --- |
 | Node.js HTTP server | `cd node && node server.js` |
 | Express | `cd node-express && pnpm i && node server.js` |
+| Next.js | `cd next && pnpm i && pnpm dev` |
 | Python HTTP server | `cd python && python server.py` |
 | PHP site | `cd php && php -S 0.0.0.0:8000 -t .` |
 
