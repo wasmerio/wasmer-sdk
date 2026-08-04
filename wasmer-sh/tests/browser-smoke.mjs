@@ -365,7 +365,16 @@ try {
   await page.locator("#preview-back").click();
   await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
   await page.locator("#preview-refresh").click();
+  assert.match(
+    (await page.locator("#preview-refresh").getAttribute("class")) ?? "",
+    /\brefreshing\b/,
+  );
   await preview.locator("#php-preview").waitFor({ timeout: 30_000 });
+  await page.waitForFunction(
+    () => !document.querySelector("#preview-refresh")?.classList.contains("refreshing"),
+    undefined,
+    { timeout: 10_000 },
+  );
   await preview.locator("body").evaluate(() => {
     globalThis.__WASMER_SH_RELOAD_MARKER__ = true;
   });

@@ -631,6 +631,11 @@ button {
   stroke-width: 1.7;
 }
 
+#preview-refresh.refreshing svg {
+  animation: preview-refresh-spin 420ms linear infinite;
+  transform-origin: center;
+}
+
 .preview-location {
   display: flex;
   min-width: 0;
@@ -826,6 +831,12 @@ button {
   }
   50% {
     opacity: 1;
+  }
+}
+
+@keyframes preview-refresh-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

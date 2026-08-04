@@ -34,6 +34,9 @@ const DEFAULT_USES = [
   "php/php-32",
 ];
 const TRANSCRIPT_LIMIT = 128 * 1024;
+const MINIMUM_PREVIEW_REFRESH_MS = 180;
+const PREVIEW_REFRESH_SETTLE_MS = 90;
+const PREVIEW_REFRESH_FADE_OUT_MS = 55;
 
 interface ShellConfig {
   packageName: string;
@@ -68,6 +71,11 @@ interface PreviewStateMessage {
   url?: unknown;
   canGoBack?: unknown;
   canGoForward?: unknown;
+}
+
+interface PreviewLoadingMessage {
+  type?: unknown;
+  previewId?: unknown;
 }
 
 interface DevelopmentShellApi {
@@ -162,6 +170,8 @@ let generation = 0;
 let inputQueue = Promise.resolve();
 let pendingProcessInput = "";
 let transcript = "";
+let previewRefreshStartedAt = 0;
+let previewRefreshTimer: number | undefined;
 
 terminal.loadAddon(fit);
 terminal.open(elements.terminal);
@@ -212,7 +222,7 @@ window.addEventListener(
     ) {
       event.preventDefault();
       event.stopPropagation();
-      sendPreviewCommand("refresh");
+      refreshPreview();
     }
   },
   { capture: true },
@@ -232,9 +242,7 @@ elements.previewBack.addEventListener("click", () => sendPreviewCommand("back"))
 elements.previewForward.addEventListener("click", () =>
   sendPreviewCommand("forward"),
 );
-elements.previewRefresh.addEventListener("click", () =>
-  sendPreviewCommand("refresh"),
-);
+elements.previewRefresh.addEventListener("click", refreshPreview);
 elements.previewLocationForm.addEventListener("submit", (event) => {
   event.preventDefault();
   navigatePreview(elements.previewLocation.value);
@@ -556,6 +564,7 @@ async function openPreview(session: ActiveSession, port: number): Promise<void> 
 async function closePreview(session: ActiveSession): Promise<void> {
   const preview = session.preview;
   session.preview = undefined;
+  cancelPreviewRefresh();
   if (preview) await preview.server.close();
   if (activeSession === session || activeSession === undefined) {
     elements.previewContent.replaceChildren();
@@ -637,7 +646,14 @@ function receivePreviewState(event: MessageEvent<unknown>): void {
   const preview = activeSession?.preview;
   if (!preview || event.source !== preview.iframe.contentWindow) return;
   if (event.origin !== preview.server.url.origin) return;
-  const message = event.data as PreviewStateMessage | null;
+  const message = event.data as (PreviewStateMessage & PreviewLoadingMessage) | null;
+  if (
+    message?.type === "wasmer-sh:preview-loading" &&
+    message.previewId === preview.id
+  ) {
+    beginPreviewRefresh();
+    return;
+  }
   if (
     message?.type !== "wasmer-sh:preview-state" ||
     message.previewId !== preview.id ||
@@ -652,6 +668,89 @@ function receivePreviewState(event: MessageEvent<unknown>): void {
   elements.previewOpen.href = url.href;
   elements.previewBack.disabled = message.canGoBack !== true;
   elements.previewForward.disabled = message.canGoForward !== true;
+  finishPreviewRefresh();
+}
+
+function refreshPreview(): void {
+  if (!activeSession?.preview) return;
+  beginPreviewRefresh();
+  sendPreviewCommand("refresh");
+}
+
+function beginPreviewRefresh(): void {
+  if (previewRefreshTimer !== undefined) window.clearTimeout(previewRefreshTimer);
+  resetPreviewRefreshIcon();
+  previewRefreshStartedAt = performance.now();
+  elements.previewRefresh.classList.add("refreshing");
+  elements.previewRefresh.setAttribute("aria-busy", "true");
+  previewRefreshTimer = window.setTimeout(finishPreviewRefresh, 10_000);
+}
+
+function finishPreviewRefresh(): void {
+  if (!elements.previewRefresh.classList.contains("refreshing")) return;
+  if (previewRefreshTimer !== undefined) window.clearTimeout(previewRefreshTimer);
+  previewRefreshTimer = undefined;
+  const remaining =
+    MINIMUM_PREVIEW_REFRESH_MS -
+    PREVIEW_REFRESH_SETTLE_MS -
+    (performance.now() - previewRefreshStartedAt);
+  if (remaining > 0) {
+    previewRefreshTimer = window.setTimeout(finishPreviewRefresh, remaining);
+    return;
+  }
+  const icon = elements.previewRefresh.querySelector<SVGSVGElement>("svg");
+  const angle = icon ? rotationAngle(getComputedStyle(icon).transform) : 0;
+  if (icon) icon.style.transform = `rotate(${angle}deg)`;
+  elements.previewRefresh.classList.remove("refreshing");
+  if (icon) {
+    void icon.getBoundingClientRect();
+    icon.style.transition = [
+      `transform ${PREVIEW_REFRESH_FADE_OUT_MS}ms cubic-bezier(0.16, 1, 0.3, 1)`,
+      `opacity ${PREVIEW_REFRESH_FADE_OUT_MS}ms ease-out`,
+    ].join(", ");
+    icon.style.transform = `rotate(${angle + 30}deg)`;
+    icon.style.opacity = "0";
+  }
+  previewRefreshTimer = window.setTimeout(() => {
+    if (!icon) {
+      elements.previewRefresh.removeAttribute("aria-busy");
+      return;
+    }
+    icon.style.transition = "none";
+    icon.style.transform = "rotate(0deg)";
+    void icon.getBoundingClientRect();
+    const fadeIn = PREVIEW_REFRESH_SETTLE_MS - PREVIEW_REFRESH_FADE_OUT_MS;
+    icon.style.transition = `opacity ${fadeIn}ms ease-out`;
+    icon.style.opacity = "1";
+    previewRefreshTimer = window.setTimeout(() => {
+      resetPreviewRefreshIcon();
+      elements.previewRefresh.removeAttribute("aria-busy");
+    }, fadeIn);
+  }, PREVIEW_REFRESH_FADE_OUT_MS);
+}
+
+function cancelPreviewRefresh(): void {
+  if (previewRefreshTimer !== undefined) window.clearTimeout(previewRefreshTimer);
+  previewRefreshTimer = undefined;
+  elements.previewRefresh.classList.remove("refreshing");
+  elements.previewRefresh.removeAttribute("aria-busy");
+  resetPreviewRefreshIcon();
+}
+
+function resetPreviewRefreshIcon(): void {
+  const icon = elements.previewRefresh.querySelector<SVGSVGElement>("svg");
+  if (!icon) return;
+  icon.style.removeProperty("transition");
+  icon.style.removeProperty("transform");
+  icon.style.removeProperty("opacity");
+}
+
+function rotationAngle(transform: string): number {
+  if (transform === "none") return 0;
+  const values = transform.match(/^matrix\(([^)]+)\)$/)?.[1]?.split(",").map(Number);
+  if (!values || values.length < 2) return 0;
+  const angle = (Math.atan2(values[1]!, values[0]!) * 180) / Math.PI;
+  return (angle + 360) % 360;
 }
 
 function sendPreviewCommand(
