@@ -5,6 +5,10 @@ import {
   networkResponseBufferBytes,
 } from "./node-network-rpc.js";
 import type { NodeCacheMethod } from "./node-cache.js";
+import {
+  installCapiObjectBridge,
+  receiveCapiDispatch,
+} from "./capi-worker-bridge.js";
 
 if (!parentPort) throw new Error("Wasmer SDK worker has no parent port");
 const port: NonNullable<typeof parentPort> = parentPort;
@@ -12,6 +16,7 @@ const port: NonNullable<typeof parentPort> = parentPort;
 Error.stackTraceLimit = 50;
 installNetworkProxy();
 installCacheProxy();
+installCapiObjectBridge((message) => port.postMessage(message));
 
 Object.defineProperty(globalThis, "postMessage", {
   configurable: true,
@@ -43,6 +48,7 @@ port.on("message", async (data) => {
 });
 
 async function handleMessage(data: any): Promise<void> {
+  data = receiveCapiDispatch(data);
   if (data?.type === "wasmer-cache-rpc-response") {
     const pending = pendingCacheRequests.get(data.requestId);
     if (!pending) return;

@@ -360,8 +360,7 @@ impl VirtualNetworking for NodeNetworking {
 
 fn has_global_function(name: &str) -> bool {
     let global = js_sys::global();
-    Reflect::get(&global, &JsValue::from_str(name))
-        .is_ok_and(|value| value.is_function())
+    Reflect::get(&global, &JsValue::from_str(name)).is_ok_and(|value| value.is_function())
 }
 
 fn call_global_sync(name: &str, args: &[JsValue]) -> Result<JsValue, JsValue> {

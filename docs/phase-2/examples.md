@@ -118,7 +118,7 @@ filesystem setup calls.
 
 ```ts
 const edgejs = await wasmer.packages.load(
-  "wasmer/edgejs-quickjs@0.0.3",
+  "syrusakbary/edgejs-quickjs-wasi@0.1.5",
 );
 
 await using sandbox = await wasmer.sandboxes.create({
@@ -149,7 +149,7 @@ let source = r#"
 
 let edgejs = wasmer
     .packages()
-    .load("wasmer/edgejs-quickjs@0.0.3")
+    .load("syrusakbary/edgejs-quickjs-wasi@0.1.5")
     .await?;
 
 let sandbox = wasmer

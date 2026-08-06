@@ -16,7 +16,7 @@ const cacheDirectory = fileURLToPath(
 test("serves HTTP from EdgeJS QuickJS through the Node network bridge", async (context) => {
   const port = await reservePort();
   const client = new Wasmer({ cache: { directory: cacheDirectory } });
-  const edgejs = await client.packages.load("wasmer/edgejs-quickjs@0.1.0");
+  const edgejs = await client.packages.load("syrusakbary/edgejs-quickjs-wasi@0.1.5");
   const sandbox = await client.sandboxes.create({
     packages: [edgejs],
     files: { "server.js": serverSource },
@@ -83,7 +83,7 @@ test(
 async function startServer(name) {
   const port = await reservePort();
   const client = new Wasmer({ cache: { directory: cacheDirectory } });
-  const edgejs = await client.packages.load("wasmer/edgejs-quickjs@0.1.0");
+  const edgejs = await client.packages.load("syrusakbary/edgejs-quickjs-wasi@0.1.5");
   const source = new TextDecoder()
     .decode(serverSource)
     .replace("Hello from Edge.js!", name);

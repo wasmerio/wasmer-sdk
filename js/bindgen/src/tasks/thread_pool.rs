@@ -3,7 +3,10 @@ use std::{fmt::Debug, future::Future, pin::Pin};
 use futures::future::LocalBoxFuture;
 use instant::Duration;
 use wasm_bindgen_futures::JsFuture;
-use wasmer_wasix::{VirtualTaskManager, WasiThreadError, runtime::task_manager::TaskWasm};
+use wasmer_wasix::{
+    VirtualTaskManager, WasiProcessId, WasiThreadError, WasiThreadId,
+    runtime::task_manager::TaskWasm,
+};
 
 use crate::{
     tasks::{Scheduler, SchedulerMessage},
@@ -128,6 +131,17 @@ impl VirtualTaskManager for ThreadPool {
     fn task_wasm(&self, task: TaskWasm) -> Result<(), WasiThreadError> {
         let msg = crate::tasks::task_wasm::to_scheduler_message(task)?;
         self.send(msg)
+    }
+
+    fn terminate_wasm_thread(
+        &self,
+        pid: WasiProcessId,
+        tid: WasiThreadId,
+    ) -> Result<(), WasiThreadError> {
+        self.send(SchedulerMessage::TerminateWasmThread {
+            pid: pid.raw(),
+            tid: tid.raw(),
+        })
     }
 
     /// Starts an asynchronous task will will run on a dedicated thread

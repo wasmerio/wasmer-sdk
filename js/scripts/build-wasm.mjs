@@ -89,7 +89,7 @@ run(wasmBindgen, [
   "--remove-name-section",
   "--remove-producers-section",
 ]);
-patchGrowableSharedMemoryViews(join(packageRoot, "pkg", "wasmer_sdk_js.js"));
+patchMemory32Glue(join(packageRoot, "pkg", "wasmer_sdk_js.js"));
 
 run(wasmOpt, [
   wasmOutput,
@@ -102,18 +102,33 @@ run(wasmOpt, [
 ]);
 renameSync(optimizedWasmOutput, wasmOutput);
 
-function patchGrowableSharedMemoryViews(path) {
+function patchMemory32Glue(path) {
   const source = readFileSync(path, "utf8");
-  let replacements = 0;
-  const patched = source.replace(
+  let viewReplacements = 0;
+  let pointerReplacements = 0;
+  const patchedViews = source.replace(
     /(cached(?:DataView|Uint16Array|Uint8Array)Memory0)\.buffer !== wasm\.memory\.buffer/g,
     (_match, cache) => {
-      replacements += 1;
+      viewReplacements += 1;
       return `${cache}.buffer !== wasm.memory.buffer || ${cache}.byteLength !== wasm.memory.buffer.byteLength`;
     },
   );
-  if (replacements !== 3) {
-    throw new Error(`expected to patch 3 wasm-bindgen memory views, patched ${replacements}`);
+  const patched = patchedViews.replace(
+    /(getDataViewMemory0\(\)\.set(?:BigInt64|Float64|Int32)\()arg0( \+)/g,
+    (_match, prefix, suffix) => {
+      pointerReplacements += 1;
+      return `${prefix}(arg0 >>> 0)${suffix}`;
+    },
+  );
+  if (viewReplacements !== 3) {
+    throw new Error(
+      `expected to patch 3 wasm-bindgen memory views, patched ${viewReplacements}`,
+    );
+  }
+  if (pointerReplacements !== 22) {
+    throw new Error(
+      `expected to patch 22 wasm-bindgen return pointers, patched ${pointerReplacements}`,
+    );
   }
   writeFileSync(path, patched);
 }

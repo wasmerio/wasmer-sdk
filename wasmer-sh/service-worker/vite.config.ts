@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,10 +10,38 @@ const crossOriginHeaders = {
   "Cross-Origin-Embedder-Policy": "require-corp",
   "Cross-Origin-Resource-Policy": "cross-origin",
 };
+const controlDocuments = new Map([
+  ["/.wasmer/browser.html", resolve(root, ".wasmer/browser.html")],
+  ["/.wasmer/host.html", resolve(root, ".wasmer/host.html")],
+]);
 
 export default defineConfig({
   root,
   cacheDir: resolve(root, "../node_modules/.vite/http"),
+  plugins: [
+    {
+      name: "wasmer-static-control-documents",
+      configureServer(server) {
+        server.middlewares.use(async (request, response, next) => {
+          const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+          const file = controlDocuments.get(pathname);
+          if (!file) {
+            next();
+            return;
+          }
+          try {
+            for (const [name, value] of Object.entries(crossOriginHeaders)) {
+              response.setHeader(name, value);
+            }
+            response.setHeader("Content-Type", "text/html; charset=utf-8");
+            response.end(await readFile(file));
+          } catch (error) {
+            next(error);
+          }
+        });
+      },
+    },
+  ],
   server: {
     headers: crossOriginHeaders,
     fs: {

@@ -4941,6 +4941,9 @@ name = "wasmer-c-api-imports"
 version = "7.2.1"
 dependencies = [
  "anyhow",
+ "bytes",
+ "js-sys",
+ "wasm-bindgen",
  "wasmer",
  "wasmer-wasix",
 ]

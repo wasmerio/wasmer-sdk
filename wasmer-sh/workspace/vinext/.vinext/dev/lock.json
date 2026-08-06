@@ -1,0 +1,8 @@
+{
+  "pid": 54341,
+  "port": 4317,
+  "hostname": "0.0.0.0",
+  "appUrl": "http://localhost:4317",
+  "startedAt": 1786047148771,
+  "cwd": "/Users/syrusakbary/Documents/wasmer-sdk/wasmer-sh/workspace/vinext"
+}

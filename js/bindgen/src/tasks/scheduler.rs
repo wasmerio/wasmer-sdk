@@ -13,8 +13,8 @@ use wasmer::js::AsJs;
 use wasmer_types::ModuleHash;
 
 use crate::tasks::{
-    AsyncJob, BlockingJob, Notification, PostMessagePayload, SchedulerMessage, WorkerHandle,
-    WorkerMessage,
+    AsyncJob, BlockingJob, CapiTransfer, Notification, PostMessagePayload, SchedulerMessage,
+    WorkerHandle, WorkerMessage,
 };
 
 /// A handle for interacting with the threadpool's scheduler.
@@ -132,6 +132,106 @@ struct SchedulerState {
     /// A channel that can be used to send messages to this scheduler.
     mailbox: Scheduler,
     cached_modules: BTreeMap<ModuleHash, js_sys::WebAssembly::Module>,
+    /// Nested WebAssembly objects waiting to travel with the next blocking
+    /// task emitted by their source worker.
+    pending_capi_transfers: BTreeMap<u32, BTreeMap<(u32, i32), JsValue>>,
+    /// The browser worker executing each WASIX WebAssembly thread.
+    wasm_workers: BTreeMap<(u32, u32), WasmWorker>,
+}
+
+#[derive(Debug)]
+struct WasmWorker {
+    worker_id: u32,
+    completion: Option<WasmThreadCompletion>,
+}
+
+#[derive(Debug)]
+struct WasmThreadCompletion {
+    memory: js_sys::WebAssembly::Memory,
+    control_block: u32,
+}
+
+impl WasmThreadCompletion {
+    const THREAD_START_PTHREAD_WORD: u32 = 4;
+    const PTHREAD_PREV_WORD: u32 = 1;
+    const PTHREAD_NEXT_WORD: u32 = 2;
+    const PTHREAD_TID_WORD: u32 = 5;
+    const PTHREAD_DETACH_STATE_WORD: u32 = 7;
+
+    fn from_thread_start(
+        memory: &js_sys::WebAssembly::Memory,
+        thread_start_ptr: Option<u64>,
+    ) -> Option<Self> {
+        // WASIX libc stores its pthread control block in reserved[0] of the
+        // thread-start record. Its detach-state futex is 28 bytes into that
+        // control block. The scheduler completes this futex after terminating
+        // a browser worker, just as the guest trampoline does on normal exit.
+        let start_ptr: u32 = thread_start_ptr?.try_into().ok()?;
+        if start_ptr % 4 != 0 {
+            return None;
+        }
+        let view = js_sys::Int32Array::new(&memory.buffer());
+        let control_block =
+            js_sys::Atomics::load(&view, start_ptr / 4 + Self::THREAD_START_PTHREAD_WORD).ok()?
+                as u32;
+        let state_address = control_block.checked_add(Self::PTHREAD_DETACH_STATE_WORD * 4)?;
+        if control_block == 0 || state_address % 4 != 0 {
+            return None;
+        }
+        Some(Self {
+            memory: memory.clone(),
+            control_block,
+        })
+    }
+
+    fn finish(self) {
+        // Shared memories can grow after this thread starts. A fresh view is
+        // required to reach pthreads allocated after a grow.
+        let memory = js_sys::Int32Array::new(&self.memory.buffer());
+        let control_index = self.control_block / 4;
+        let previous = js_sys::Atomics::load(&memory, control_index + Self::PTHREAD_PREV_WORD)
+            .ok()
+            .map(|v| v as u32);
+        let next = js_sys::Atomics::load(&memory, control_index + Self::PTHREAD_NEXT_WORD)
+            .ok()
+            .map(|v| v as u32);
+        // A forcibly terminated worker cannot run WASIX libc's pthread-exit
+        // trampoline. Complete the small piece of guest bookkeeping which the
+        // kernel normally owns: unlink the thread, clear its TID, then publish
+        // DT_EXITED. The browser Worker is already gone, so no guest code can
+        // race these writes.
+        if let (Some(previous), Some(next)) = (previous, next)
+            && previous != 0
+            && next != 0
+            && previous % 4 == 0
+            && next % 4 == 0
+        {
+            let _ = js_sys::Atomics::store(
+                &memory,
+                previous / 4 + Self::PTHREAD_NEXT_WORD,
+                next as i32,
+            );
+            let _ = js_sys::Atomics::store(
+                &memory,
+                next / 4 + Self::PTHREAD_PREV_WORD,
+                previous as i32,
+            );
+            let _ = js_sys::Atomics::store(
+                &memory,
+                control_index + Self::PTHREAD_PREV_WORD,
+                self.control_block as i32,
+            );
+            let _ = js_sys::Atomics::store(
+                &memory,
+                control_index + Self::PTHREAD_NEXT_WORD,
+                self.control_block as i32,
+            );
+        }
+        let _ = js_sys::Atomics::store(&memory, control_index + Self::PTHREAD_TID_WORD, 0);
+        let state_index = control_index + Self::PTHREAD_DETACH_STATE_WORD;
+        let _ = js_sys::Atomics::store(&memory, state_index, 0);
+        let _ = js_sys::Atomics::notify(&memory, state_index);
+    }
 }
 
 impl SchedulerState {
@@ -141,10 +241,20 @@ impl SchedulerState {
             busy: VecDeque::new(),
             mailbox,
             cached_modules: BTreeMap::new(),
+            pending_capi_transfers: BTreeMap::new(),
+            wasm_workers: BTreeMap::new(),
         }
     }
 
     fn execute(&mut self, message: SchedulerMessage) -> Result<(), Error> {
+        self.execute_from(None, message)
+    }
+
+    fn execute_from(
+        &mut self,
+        source_worker_id: Option<u32>,
+        message: SchedulerMessage,
+    ) -> Result<(), Error> {
         match message {
             SchedulerMessage::Close => {
                 // Unreachable in practice: the receive loop breaks on Close
@@ -152,12 +262,18 @@ impl SchedulerState {
                 // every worker via WorkerHandle::drop.
                 Ok(())
             }
-            SchedulerMessage::SpawnAsync(task) => {
-                self.post_message(PostMessagePayload::Async(AsyncJob::Thunk(task)))
-            }
-            SchedulerMessage::SpawnBlocking(task) => {
-                self.post_message(PostMessagePayload::Blocking(BlockingJob::Thunk(task)))
-            }
+            SchedulerMessage::SpawnAsync(task) => self.post_message_from(
+                source_worker_id,
+                PostMessagePayload::Async(AsyncJob::Thunk(task)),
+            ),
+            SchedulerMessage::SpawnBlocking(task) => self.post_message_from(
+                source_worker_id,
+                PostMessagePayload::Blocking(BlockingJob::Thunk(task)),
+            ),
+            SchedulerMessage::FromWorker {
+                source_worker_id,
+                message,
+            } => self.execute_from(Some(source_worker_id), *message),
             SchedulerMessage::CacheModule { hash, module } => {
                 let module: js_sys::WebAssembly::Module = JsValue::from(module).unchecked_into();
                 self.cached_modules.insert(hash, module.clone());
@@ -173,28 +289,37 @@ impl SchedulerState {
 
                 Ok(())
             }
-            SchedulerMessage::SpawnWithModule { module, task } => {
-                self.post_message(PostMessagePayload::Blocking(BlockingJob::SpawnWithModule {
+            SchedulerMessage::SpawnWithModule { module, task } => self.post_message_from(
+                source_worker_id,
+                PostMessagePayload::Blocking(BlockingJob::SpawnWithModule {
                     module: JsValue::from(module).unchecked_into(),
                     task,
-                }))
-            }
+                }),
+            ),
             SchedulerMessage::SpawnWithModuleAndMemory {
                 module,
                 memory,
                 spawn_wasm,
             } => {
                 let temp_store = wasmer::Store::default();
-                let memory = memory.map(|m| m.as_jsvalue(&temp_store).dyn_into().unwrap());
+                let memory: Option<js_sys::WebAssembly::Memory> =
+                    memory.map(|m| m.as_jsvalue(&temp_store).dyn_into().unwrap());
                 let module = JsValue::from(module).dyn_into().unwrap();
+                let task_key = spawn_wasm.task_key();
+                let completion = memory.as_ref().and_then(|memory| {
+                    WasmThreadCompletion::from_thread_start(memory, spawn_wasm.thread_start_ptr())
+                });
 
-                self.post_message(PostMessagePayload::Blocking(
-                    BlockingJob::SpawnWithModuleAndMemory {
+                self.post_wasm_message_from(
+                    source_worker_id,
+                    PostMessagePayload::Blocking(BlockingJob::SpawnWithModuleAndMemory {
                         module,
                         memory,
                         spawn_wasm,
-                    },
-                ))
+                    }),
+                    task_key,
+                    completion,
+                )
             }
             SchedulerMessage::WorkerBusy { worker_id } => {
                 move_worker(worker_id, &mut self.idle, &mut self.busy);
@@ -206,8 +331,14 @@ impl SchedulerState {
                 );
                 Ok(())
             }
+            SchedulerMessage::TerminateWasmThread { pid, tid } => {
+                self.terminate_wasm_thread((pid, tid));
+                Ok(())
+            }
             SchedulerMessage::WorkerIdle { worker_id } => {
                 move_worker(worker_id, &mut self.busy, &mut self.idle);
+                self.wasm_workers
+                    .retain(|_, worker| worker.worker_id != worker_id);
                 tracing::trace!(
                     worker.id=worker_id,
                     idle_workers=?self.idle.iter().map(|w| w.id()).collect::<Vec<_>>(),
@@ -216,18 +347,50 @@ impl SchedulerState {
                 );
                 Ok(())
             }
+            SchedulerMessage::CapiShare {
+                source_worker_id,
+                registry_id,
+                handle,
+                value,
+            } => {
+                self.pending_capi_transfers
+                    .entry(source_worker_id)
+                    .or_default()
+                    .insert((registry_id, handle), value);
+                Ok(())
+            }
+            SchedulerMessage::CapiDelete {
+                source_worker_id,
+                registry_id,
+                handle,
+            } => {
+                let remove_source = if let Some(transfers) =
+                    self.pending_capi_transfers.get_mut(&source_worker_id)
+                {
+                    transfers.remove(&(registry_id, handle));
+                    transfers.is_empty()
+                } else {
+                    false
+                };
+                if remove_source {
+                    self.pending_capi_transfers.remove(&source_worker_id);
+                }
+                Ok(())
+            }
             SchedulerMessage::Markers { uninhabited, .. } => match uninhabited {},
         }
     }
 
-    /// Send a task to one of the worker threads, preferring workers that aren't
-    /// running synchronous work.
-    fn post_message(&mut self, msg: PostMessagePayload) -> Result<(), Error> {
-        let worker = self.next_available_worker()?;
-
+    fn post_message_from(
+        &mut self,
+        source_worker_id: Option<u32>,
+        msg: PostMessagePayload,
+    ) -> Result<(), Error> {
         let would_block = msg.would_block();
+        let transfers = self.take_capi_transfers(source_worker_id, would_block);
+        let worker = self.next_available_worker()?;
         worker
-            .send(msg)
+            .send_with_capi_transfers(msg, transfers)
             .with_context(|| format!("Unable to send a message to worker {}", worker.id()))?;
 
         if would_block {
@@ -236,6 +399,29 @@ impl SchedulerState {
             self.idle.push_back(worker);
         }
 
+        Ok(())
+    }
+
+    fn post_wasm_message_from(
+        &mut self,
+        source_worker_id: Option<u32>,
+        msg: PostMessagePayload,
+        task_key: (u32, u32),
+        completion: Option<WasmThreadCompletion>,
+    ) -> Result<(), Error> {
+        let transfers = self.take_capi_transfers(source_worker_id, true);
+        let worker = self.next_available_worker()?;
+        self.wasm_workers.insert(
+            task_key,
+            WasmWorker {
+                worker_id: worker.id(),
+                completion,
+            },
+        );
+        worker
+            .send_with_capi_transfers(msg, transfers)
+            .with_context(|| format!("Unable to send a message to worker {}", worker.id()))?;
+        self.busy.push_back(worker);
         Ok(())
     }
 
@@ -281,6 +467,44 @@ impl SchedulerState {
 
         Ok(handle)
     }
+
+    fn take_capi_transfers(
+        &mut self,
+        source_worker_id: Option<u32>,
+        would_block: bool,
+    ) -> Vec<CapiTransfer> {
+        if !would_block {
+            return Vec::new();
+        }
+        let Some(source_worker_id) = source_worker_id else {
+            return Vec::new();
+        };
+        self.pending_capi_transfers
+            .remove(&source_worker_id)
+            .into_iter()
+            .flat_map(|transfers| transfers.into_iter())
+            .map(|((registry_id, handle), value)| CapiTransfer {
+                registry_id,
+                handle,
+                value,
+            })
+            .collect()
+    }
+
+    fn terminate_wasm_thread(&mut self, task_key: (u32, u32)) {
+        let Some(worker) = self.wasm_workers.remove(&task_key) else {
+            return;
+        };
+        let worker_id = worker.worker_id;
+
+        self.idle.retain(|worker| worker.id() != worker_id);
+        self.busy.retain(|worker| worker.id() != worker_id);
+        self.wasm_workers
+            .retain(|_, worker| worker.worker_id != worker_id);
+        if let Some(completion) = worker.completion {
+            completion.finish();
+        }
+    }
 }
 
 fn move_worker(worker_id: u32, from: &mut VecDeque<WorkerHandle>, to: &mut VecDeque<WorkerHandle>) {
@@ -292,7 +516,9 @@ fn move_worker(worker_id: u32, from: &mut VecDeque<WorkerHandle>, to: &mut VecDe
 
 #[cfg(test)]
 mod tests {
+    use js_sys::{Int32Array, Object, Reflect, WebAssembly};
     use tokio::sync::oneshot;
+    use wasm_bindgen::JsValue;
     use wasm_bindgen_test::wasm_bindgen_test;
 
     use super::*;
@@ -325,5 +551,109 @@ mod tests {
         // Make sure the background thread actually ran something and sent us
         // back a result
         assert_eq!(receiver.await.unwrap(), 42);
+    }
+
+    #[wasm_bindgen_test]
+    fn capi_objects_wait_for_the_source_workers_next_blocking_task() {
+        let (tx, _) = mpsc::unbounded_channel();
+        let tx = unsafe { Scheduler::new(tx, wasmer::js::current_thread_id()) };
+        let mut scheduler = SchedulerState::new(tx);
+        scheduler
+            .pending_capi_transfers
+            .entry(7)
+            .or_default()
+            .insert((3, 11), JsValue::from_str("module"));
+
+        assert!(scheduler.take_capi_transfers(Some(7), false).is_empty());
+        assert!(scheduler.pending_capi_transfers.contains_key(&7));
+
+        let transfers = scheduler.take_capi_transfers(Some(7), true);
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].registry_id, 3);
+        assert_eq!(transfers[0].handle, 11);
+        assert!(!scheduler.pending_capi_transfers.contains_key(&7));
+    }
+
+    #[wasm_bindgen_test]
+    fn forced_thread_completion_uses_memory_after_growth() {
+        let descriptor = Object::new();
+        Reflect::set(&descriptor, &"initial".into(), &1.into()).unwrap();
+        Reflect::set(&descriptor, &"maximum".into(), &2.into()).unwrap();
+        Reflect::set(&descriptor, &"shared".into(), &JsValue::TRUE).unwrap();
+        let memory = WebAssembly::Memory::new(&descriptor).unwrap();
+
+        let start_ptr = 128_u32;
+        let control_block = 65_536_u32 + 128;
+        let before_growth = Int32Array::new(&memory.buffer());
+        js_sys::Atomics::store(
+            &before_growth,
+            start_ptr / 4 + WasmThreadCompletion::THREAD_START_PTHREAD_WORD,
+            control_block as i32,
+        )
+        .unwrap();
+        let completion = WasmThreadCompletion::from_thread_start(&memory, Some(start_ptr.into()))
+            .expect("valid thread-start record");
+
+        assert_eq!(memory.grow(1), 1);
+        let current = Int32Array::new(&memory.buffer());
+        let previous = 256_u32;
+        let next = 512_u32;
+        let control_index = control_block / 4;
+        js_sys::Atomics::store(
+            &current,
+            control_index + WasmThreadCompletion::PTHREAD_PREV_WORD,
+            previous as i32,
+        )
+        .unwrap();
+        js_sys::Atomics::store(
+            &current,
+            control_index + WasmThreadCompletion::PTHREAD_NEXT_WORD,
+            next as i32,
+        )
+        .unwrap();
+        js_sys::Atomics::store(
+            &current,
+            control_index + WasmThreadCompletion::PTHREAD_TID_WORD,
+            42,
+        )
+        .unwrap();
+        js_sys::Atomics::store(
+            &current,
+            control_index + WasmThreadCompletion::PTHREAD_DETACH_STATE_WORD,
+            2,
+        )
+        .unwrap();
+
+        completion.finish();
+
+        assert_eq!(
+            js_sys::Atomics::load(
+                &current,
+                previous / 4 + WasmThreadCompletion::PTHREAD_NEXT_WORD,
+            )
+            .unwrap(),
+            next as i32,
+        );
+        assert_eq!(
+            js_sys::Atomics::load(&current, next / 4 + WasmThreadCompletion::PTHREAD_PREV_WORD,)
+                .unwrap(),
+            previous as i32,
+        );
+        assert_eq!(
+            js_sys::Atomics::load(
+                &current,
+                control_index + WasmThreadCompletion::PTHREAD_TID_WORD,
+            )
+            .unwrap(),
+            0,
+        );
+        assert_eq!(
+            js_sys::Atomics::load(
+                &current,
+                control_index + WasmThreadCompletion::PTHREAD_DETACH_STATE_WORD,
+            )
+            .unwrap(),
+            0,
+        );
     }
 }

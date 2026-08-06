@@ -47,7 +47,7 @@ pub(crate) use self::{
     scheduler::Scheduler,
     scheduler_message::SchedulerMessage,
     thread_pool::ThreadPool,
-    worker_handle::WorkerHandle,
+    worker_handle::{CapiTransfer, WorkerHandle},
     worker_message::WorkerMessage,
 };
 

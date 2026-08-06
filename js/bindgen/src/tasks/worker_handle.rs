@@ -7,6 +7,13 @@ use wasm_bindgen::{JsCast, JsValue, prelude::Closure};
 
 use crate::tasks::{PostMessagePayload, Scheduler, SchedulerMessage, WorkerMessage};
 
+#[derive(Clone, Debug)]
+pub(crate) struct CapiTransfer {
+    pub(crate) registry_id: u32,
+    pub(crate) handle: i32,
+    pub(crate) value: JsValue,
+}
+
 /// A handle to a running [`web_sys::Worker`].
 ///
 /// This provides a structured way to communicate with the worker and will
@@ -61,14 +68,107 @@ impl WorkerHandle {
 
     /// Send a message to the worker.
     pub(crate) fn send(&self, msg: PostMessagePayload) -> Result<(), Error> {
+        self.send_with_capi_transfers(msg, Vec::new())
+    }
+
+    /// Send a task and make its nested WebAssembly objects available before
+    /// the worker starts executing it.
+    pub(crate) fn send_with_capi_transfers(
+        &self,
+        msg: PostMessagePayload,
+        transfers: Vec<CapiTransfer>,
+    ) -> Result<(), Error> {
         tracing::trace!(?msg, worker.id = self.id(), "sending a message to a worker");
-        let js = msg.into_js().map_err(|e| e.into_anyhow())?;
+        let payload = msg.into_js().map_err(|e| e.into_anyhow())?;
+        let js = if transfers.is_empty() {
+            payload
+        } else {
+            capi_dispatch_message(payload, transfers)?
+        };
 
         self.inner
             .post_message(&js)
             .map_err(crate::worker_utils::js_error)?;
 
         Ok(())
+    }
+}
+
+fn capi_dispatch_message(payload: JsValue, transfers: Vec<CapiTransfer>) -> Result<JsValue, Error> {
+    let objects = Array::new();
+    for transfer in transfers {
+        let object = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &object,
+            &JsValue::from_str("registryId"),
+            &JsValue::from(transfer.registry_id),
+        )
+        .map_err(crate::worker_utils::js_error)?;
+        js_sys::Reflect::set(
+            &object,
+            &JsValue::from_str("handle"),
+            &JsValue::from(transfer.handle),
+        )
+        .map_err(crate::worker_utils::js_error)?;
+        js_sys::Reflect::set(&object, &JsValue::from_str("value"), &transfer.value)
+            .map_err(crate::worker_utils::js_error)?;
+        objects.push(&object);
+    }
+
+    let message = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &message,
+        &JsValue::from_str("type"),
+        &JsValue::from_str("wasmer-dispatch"),
+    )
+    .map_err(crate::worker_utils::js_error)?;
+    js_sys::Reflect::set(&message, &JsValue::from_str("payload"), &payload)
+        .map_err(crate::worker_utils::js_error)?;
+    js_sys::Reflect::set(&message, &JsValue::from_str("capiObjects"), &objects)
+        .map_err(crate::worker_utils::js_error)?;
+    Ok(message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    use super::*;
+
+    #[wasm_bindgen_test]
+    fn capi_objects_are_attached_to_the_worker_dispatch() {
+        let payload = js_sys::Object::new();
+        let message = capi_dispatch_message(
+            payload.clone().into(),
+            vec![CapiTransfer {
+                registry_id: 7,
+                handle: 11,
+                value: JsValue::from_str("module"),
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(
+            js_sys::Reflect::get(&message, &JsValue::from_str("type"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("wasmer-dispatch")
+        );
+        assert!(js_sys::Object::is(
+            &js_sys::Reflect::get(&message, &JsValue::from_str("payload")).unwrap(),
+            &payload,
+        ));
+        let objects = js_sys::Array::from(
+            &js_sys::Reflect::get(&message, &JsValue::from_str("capiObjects")).unwrap(),
+        );
+        assert_eq!(objects.length(), 1);
+        assert_eq!(
+            js_sys::Reflect::get(&objects.get(0), &JsValue::from_str("handle"))
+                .unwrap()
+                .as_f64(),
+            Some(11.0)
+        );
     }
 }
 
@@ -85,6 +185,12 @@ fn on_error(msg: web_sys::ErrorEvent, worker_id: u32) {
 
 #[tracing::instrument(level = "trace", skip_all, fields(worker.id=worker_id))]
 fn on_message(msg: web_sys::MessageEvent, sender: &Scheduler, worker_id: u32) {
+    if handle_capi_share(&msg.data(), sender, worker_id) {
+        return;
+    }
+    if handle_capi_delete(&msg.data(), sender, worker_id) {
+        return;
+    }
     if handle_host_rpc(&msg.data()) {
         return;
     }
@@ -110,7 +216,10 @@ fn on_message(msg: web_sys::MessageEvent, sender: &Scheduler, worker_id: u32) {
             let msg = match base_msg {
                 WorkerMessage::MarkBusy => SchedulerMessage::WorkerBusy { worker_id },
                 WorkerMessage::MarkIdle => SchedulerMessage::WorkerIdle { worker_id },
-                WorkerMessage::Scheduler(msg) => msg,
+                WorkerMessage::Scheduler(msg) => SchedulerMessage::FromWorker {
+                    source_worker_id: worker_id,
+                    message: Box::new(msg),
+                },
             };
             sender.send(msg).map_err(|_| Error::msg("Send failed"))
         });
@@ -123,6 +232,52 @@ fn on_message(msg: web_sys::MessageEvent, sender: &Scheduler, worker_id: u32) {
             "Unable to handle a message from the worker",
         );
     }
+}
+
+fn handle_capi_share(data: &JsValue, sender: &Scheduler, worker_id: u32) -> bool {
+    let get = |name: &str| js_sys::Reflect::get(data, &JsValue::from_str(name)).ok();
+    if get("type").and_then(|value| value.as_string()).as_deref() != Some("wasmer-capi-share") {
+        return false;
+    }
+    let Some(registry_id) = get("registryId").and_then(|value| value.as_f64()) else {
+        return true;
+    };
+    let Some(handle) = get("handle").and_then(|value| value.as_f64()) else {
+        return true;
+    };
+    let Some(value) = get("value") else {
+        return true;
+    };
+    if let Err(error) = sender.send(SchedulerMessage::CapiShare {
+        source_worker_id: worker_id,
+        registry_id: registry_id as u32,
+        handle: handle as i32,
+        value,
+    }) {
+        tracing::warn!(%error, "Unable to publish nested WebAssembly object");
+    }
+    true
+}
+
+fn handle_capi_delete(data: &JsValue, sender: &Scheduler, worker_id: u32) -> bool {
+    let get = |name: &str| js_sys::Reflect::get(data, &JsValue::from_str(name)).ok();
+    if get("type").and_then(|value| value.as_string()).as_deref() != Some("wasmer-capi-delete") {
+        return false;
+    }
+    let Some(registry_id) = get("registryId").and_then(|value| value.as_f64()) else {
+        return true;
+    };
+    let Some(handle) = get("handle").and_then(|value| value.as_f64()) else {
+        return true;
+    };
+    if let Err(error) = sender.send(SchedulerMessage::CapiDelete {
+        source_worker_id: worker_id,
+        registry_id: registry_id as u32,
+        handle: handle as i32,
+    }) {
+        tracing::warn!(%error, "Unable to release nested WebAssembly object");
+    }
+    true
 }
 
 /// Give the JavaScript facade first refusal for host-service RPC messages.

@@ -83,7 +83,7 @@ Use `network: { mode: "host" }` when a package needs TCP or DNS:
 
 ```javascript
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["wasmer/edgejs-quickjs@0.1.0"],
+  packages: ["syrusakbary/edgejs-quickjs-wasi@0.1.5"],
   network: { mode: "host" },
 });
 ```
@@ -136,7 +136,7 @@ import { Wasmer } from "@wasmer/sdk2/browser";
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["wasmer/edgejs-quickjs@0.1.1"],
+  packages: ["syrusakbary/edgejs-quickjs-wasi@0.1.5"],
   network: { mode: "wisp", url: "wss://proxy.example/wisp/" },
 });
 

@@ -4,7 +4,7 @@ const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
   packages: [
     "python/python",
-    "wasmer/edgejs-quickjs",
+    "syrusakbary/edgejs-quickjs-wasi@0.1.5",
     "php/php-32",
   ],
 });

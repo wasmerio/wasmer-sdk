@@ -18,7 +18,7 @@ const sandbox = await wasmer.sandboxes.create({
     bashPackage,
     "wasmer/neatvi",
     "python/python",
-    "wasmer/edgejs-quickjs@0.1.3",
+    "syrusakbary/edgejs-quickjs-wasi@0.1.5",
     "php/php-32",
   ],
   files: { ".bashrc": "PS1='wasmer@web:\\w$ '" },
@@ -52,7 +52,7 @@ live preview beside the terminal. The preview stays attached to the guest, so
 absolute URLs and subresources are routed back to the same WASIX server.
 The `node/`, `node-express/`, `next/`, `python/`, and `php/` directories are independent
 examples with their own README files. `node/server.js` is backed by
-`wasmer/edgejs-quickjs`; `python/server.py` uses Python's standard-library
+`syrusakbary/edgejs-quickjs-wasi`; `python/server.py` uses Python's standard-library
 `HTTPServer`. Closing a listener closes its preview automatically.
 
 For an Express application, install the dependency inside the browser sandbox
@@ -167,6 +167,15 @@ WASMER_EDGEJS_WEBC=/absolute/path/to/edgejs-quickjs.webc \
 WASMER_TEST_PNPM=1 \
 WASMER_WISP_URL=ws://127.0.0.1:4000/ \
 npm test
+```
+
+The focused Next.js regression installs the untouched npm SWC WebAssembly
+package, starts the development server, and checks the rendered preview. A cold
+run currently takes about three minutes:
+
+```console
+WASMER_EDGEJS_WEBC=/absolute/path/to/edgejs-quickjs.webc \
+node tests/next-browser.mjs
 ```
 
 ## URL parameters

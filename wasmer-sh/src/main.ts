@@ -16,12 +16,13 @@ import { Terminal } from "@xterm/xterm";
 import { WorkspaceEditor } from "./editor";
 import expressReadme from "../workspace/node-express/README.md?raw";
 import expressPackage from "../workspace/node-express/package.json?raw";
+import expressLockfile from "../workspace/node-express/pnpm-lock.yaml?raw";
 import expressServer from "../workspace/node-express/server.js?raw";
-import nextGlobals from "../workspace/next/app/globals.css?raw";
-import nextLayout from "../workspace/next/app/layout.js?raw";
-import nextPage from "../workspace/next/app/page.js?raw";
-import nextApiHello from "../workspace/next/app/api/hello/route.js?raw";
+import nextPage from "../workspace/next/pages/index.js?raw";
+import nextApiHello from "../workspace/next/pages/api/hello.js?raw";
+import nextNpmrc from "../workspace/next/.npmrc?raw";
 import nextConfig from "../workspace/next/next.config.mjs?raw";
+import nextLockfile from "../workspace/next/pnpm-lock.yaml?raw";
 import nextPackage from "../workspace/next/package.json?raw";
 import nextReadme from "../workspace/next/README.md?raw";
 import nodeReadme from "../workspace/node/README.md?raw";
@@ -31,13 +32,22 @@ import phpInfo from "../workspace/php/phpinfo.php?raw";
 import phpReadme from "../workspace/php/README.md?raw";
 import pythonReadme from "../workspace/python/README.md?raw";
 import pythonServer from "../workspace/python/server.py?raw";
+import vinextApp from "../workspace/vinext/pages/_app.js?raw";
+import vinextPage from "../workspace/vinext/pages/index.js?raw";
+import vinextApiHello from "../workspace/vinext/pages/api/hello.js?raw";
+import vinextNpmrc from "../workspace/vinext/.npmrc?raw";
+import vinextLockfile from "../workspace/vinext/pnpm-lock.yaml?raw";
+import vinextPackage from "../workspace/vinext/package.json?raw";
+import vinextReadme from "../workspace/vinext/README.md?raw";
+import vinextStyles from "../workspace/vinext/styles.css?raw";
+import vinextViteConfig from "../workspace/vinext/vite.config.js?raw";
 import workspaceReadme from "../workspace/README.md?raw";
 
 const DEFAULT_PACKAGE = "wasmer/bash";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "python/python",
-  "wasmer/edgejs-quickjs@0.1.3",
+  "syrusakbary/edgejs-quickjs-wasi@0.1.5",
   "php/php-32",
 ];
 const TRANSCRIPT_LIMIT = 128 * 1024;
@@ -303,7 +313,7 @@ async function start(): Promise<void> {
       : undefined;
     const [mainPackage, ...uses] = await Promise.all(
       packageNames.map(async (name) => {
-        if (name !== "wasmer/edgejs-quickjs@0.1.3" || !edgejsDevelopmentPackage) {
+        if (name !== "syrusakbary/edgejs-quickjs-wasi@0.1.5" || !edgejsDevelopmentPackage) {
           return wasmer.packages.load(name);
         }
         const response = await fetch(edgejsDevelopmentPackage);
@@ -894,14 +904,24 @@ HISTFILE=/workspace/.bash_history
     "node/server.js": nodeServer,
     "node-express/README.md": expressReadme,
     "node-express/package.json": expressPackage,
+    "node-express/pnpm-lock.yaml": expressLockfile,
     "node-express/server.js": expressServer,
     "next/README.md": nextReadme,
+    "next/.npmrc": nextNpmrc,
     "next/package.json": nextPackage,
+    "next/pnpm-lock.yaml": nextLockfile,
     "next/next.config.mjs": nextConfig,
-    "next/app/layout.js": nextLayout,
-    "next/app/page.js": nextPage,
-    "next/app/globals.css": nextGlobals,
-    "next/app/api/hello/route.js": nextApiHello,
+    "next/pages/index.js": nextPage,
+    "next/pages/api/hello.js": nextApiHello,
+    "vinext/README.md": vinextReadme,
+    "vinext/.npmrc": vinextNpmrc,
+    "vinext/package.json": vinextPackage,
+    "vinext/pnpm-lock.yaml": vinextLockfile,
+    "vinext/pages/_app.js": vinextApp,
+    "vinext/pages/index.js": vinextPage,
+    "vinext/pages/api/hello.js": vinextApiHello,
+    "vinext/styles.css": vinextStyles,
+    "vinext/vite.config.js": vinextViteConfig,
     "python/README.md": pythonReadme,
     "python/server.py": pythonServer,
     "php/README.md": phpReadme,

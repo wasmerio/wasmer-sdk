@@ -14,7 +14,7 @@ use wasmer_wasix::{
         TaskWasmRecycle, TaskWasmRun, TaskWasmRunProperties, WasmResumeTrigger,
     },
 };
-use wasmer_wasix_types::wasi::ExitCode;
+use wasmer_wasix_types::{wasi::ExitCode, wasix::ThreadStartType};
 
 use crate::tasks::SchedulerMessage;
 
@@ -34,6 +34,12 @@ pub(crate) fn to_scheduler_message(task: TaskWasm) -> Result<SchedulerMessage, W
         recycle,
         pre_run,
     } = callbacks;
+
+    let task_key = (env.pid().raw(), env.tid().raw());
+    let thread_start_ptr = match env.thread.thread_start_type() {
+        ThreadStartType::MainThread => None,
+        ThreadStartType::ThreadSpawn { start_ptr } => Some(start_ptr),
+    };
 
     let module_bytes = module.serialize().unwrap();
 
@@ -57,6 +63,8 @@ pub(crate) fn to_scheduler_message(task: TaskWasm) -> Result<SchedulerMessage, W
 
     let store_snapshot = globals;
     let spawn_wasm = SpawnWasm {
+        task_key,
+        thread_start_ptr,
         trigger: trigger.map(|trigger| WasmRunTrigger {
             run: trigger,
             memory_ty: memory_ty.expect("triggers must have the a known memory type"),
@@ -101,6 +109,10 @@ struct WasmRunTrigger {
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct SpawnWasm {
+    /// The WASIX process and thread executed by this worker task.
+    task_key: (u32, u32),
+    /// Address of the WASIX thread-start record in guest memory.
+    thread_start_ptr: Option<u64>,
     /// An async callback to perform before running.
     #[derivative(Debug(format_with = "crate::worker_utils::hidden"))]
     pre_run: Option<Box<TaskWasmPreRun>>,
@@ -129,6 +141,13 @@ pub(crate) struct SpawnWasm {
 }
 
 impl SpawnWasm {
+    pub(crate) fn task_key(&self) -> (u32, u32) {
+        self.task_key
+    }
+
+    pub(crate) fn thread_start_ptr(&self) -> Option<u64> {
+        self.thread_start_ptr
+    }
     pub(crate) fn module_bytes(&self) -> Bytes {
         self.module_bytes.clone()
     }
@@ -165,6 +184,8 @@ impl ReadySpawnWasm {
         wasm_memory: JsValue,
     ) -> Result<(), anyhow::Error> {
         let ReadySpawnWasm(SpawnWasm {
+            task_key: _,
+            thread_start_ptr: _,
             pre_run,
             run,
             run_type,
@@ -220,7 +241,7 @@ fn build_ctx_and_store(
     run_type: WasmMemoryType,
     update_layout: bool,
     call_initialize: bool,
-) -> Option<(WasiFunctionEnv, Store)> {
+) -> Result<(WasiFunctionEnv, Store), anyhow::Error> {
     // Compile the web assembly module
     let module: Module = (module, module_bytes).into();
 
@@ -230,13 +251,9 @@ fn build_ctx_and_store(
         WasmMemoryType::CreateMemory => (SpawnMemoryTypeOrStore::New, None),
         WasmMemoryType::CreateMemoryOfType(mem) => (SpawnMemoryTypeOrStore::Type(mem), None),
         WasmMemoryType::AttachMemory(ty) => {
-            let memory = match Memory::from_jsvalue(&mut temp_store, &ty, &memory) {
-                Ok(a) => a,
-                Err(_) => {
-                    tracing::error!("Failed to receive memory for module");
-                    return None;
-                }
-            };
+            let memory = Memory::from_jsvalue(&mut temp_store, &ty, &memory)
+                .map_err(|error| crate::worker_utils::js_error(error.into()))
+                .context("Failed to receive memory for module")?;
             (
                 SpawnMemoryTypeOrStore::StoreAndMemory(temp_store, memory),
                 None,
@@ -248,7 +265,7 @@ fn build_ctx_and_store(
         WasmMemoryType::NewLinkerInstanceGroup(_) => unreachable!(),
     };
 
-    let (ctx, store) = match WasiFunctionEnv::new_with_store(
+    let (ctx, store) = WasiFunctionEnv::new_with_store(
         module,
         env,
         store_snapshot,
@@ -256,15 +273,7 @@ fn build_ctx_and_store(
         update_layout,
         call_initialize,
         instance_group,
-    ) {
-        Ok(a) => a,
-        Err(err) => {
-            tracing::error!(
-                error = &err as &dyn std::error::Error,
-                "Failed to crate wasi context",
-            );
-            return None;
-        }
-    };
-    Some((ctx, store))
+    )
+    .context("Failed to create WASI context")?;
+    Ok((ctx, store))
 }

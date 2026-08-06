@@ -10,7 +10,7 @@ const serverSource = await readFile(
 const port = await reservePort();
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["wasmer/edgejs-quickjs@0.1.0"],
+  packages: ["syrusakbary/edgejs-quickjs-wasi@0.1.5"],
   files: { "server.js": serverSource },
   env: { PORT: String(port) },
   network: { mode: "host" },

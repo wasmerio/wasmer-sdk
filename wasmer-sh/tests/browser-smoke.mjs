@@ -11,9 +11,13 @@ import { createServer } from "vite";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const pnpmTimeout = Number(process.env.WASMER_PNPM_TIMEOUT ?? 120_000);
 const nextTimeout = Number(process.env.WASMER_NEXT_TIMEOUT ?? 240_000);
+const vinextTimeout = Number(process.env.WASMER_VINEXT_TIMEOUT ?? 720_000);
 const edgejsWebc = process.env.WASMER_EDGEJS_WEBC;
 const testPnpm = process.env.WASMER_TEST_PNPM === "1" || Boolean(edgejsWebc);
 const testNext = process.env.WASMER_TEST_NEXT === "1";
+const testNextBuild = process.env.WASMER_TEST_NEXT_BUILD === "1";
+const testVinext = process.env.WASMER_TEST_VINEXT === "1";
+const testVinextDev = process.env.WASMER_TEST_VINEXT_DEV === "1";
 if (edgejsWebc && !process.env.VITE_EDGEJS_WEBC_URL) {
   process.env.VITE_EDGEJS_WEBC_URL = `/@fs/${edgejsWebc}`;
 }
@@ -72,6 +76,14 @@ try {
 
   browser = await chromium.launch({ headless: true });
   page = await browser.newPage();
+  if (testVinext || testVinextDev) {
+    await page.addInitScript(() => {
+      Object.defineProperty(Navigator.prototype, "hardwareConcurrency", {
+        configurable: true,
+        get: () => 4,
+      });
+    });
+  }
   await page.addInitScript(() => {
     globalThis.addEventListener("error", (event) => {
       console.error("[wasmer-sh-debug-error]", event.error?.stack ?? event.message);
@@ -117,6 +129,69 @@ try {
     { timeout: 120_000 },
   );
 
+  if (testVinextDev) {
+    const startedAt = Date.now();
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send(
+        "cd vinext && pnpm install --frozen-lockfile --ignore-scripts && pnpm run dev\r",
+      );
+    });
+    await page.locator("#preview-panel").waitFor({ timeout: 120_000 });
+    const vinextPreview = page
+      .frameLocator("#preview-panel iframe")
+      .frameLocator("iframe");
+    await vinextPreview
+      .getByText("Welcome to Vinext on Wasmer.", { exact: true })
+      .waitFor({ timeout: vinextTimeout });
+    console.log(`wasmer.sh Vinext dev rendered in ${Date.now() - startedAt}ms`);
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("\x03");
+    });
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+      undefined,
+      { timeout: 30_000 },
+    );
+  } else if (testVinext) {
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send(
+        "(cd vinext && pnpm install --frozen-lockfile --ignore-scripts && pnpm build && echo __VINEXT_BUILD_OK__) || echo __VINEXT_BUILD_FAILED__:$?\r",
+      );
+    });
+    await page.waitForFunction(
+      () => /\n__VINEXT_BUILD_(?:OK|FAILED__:\d+)/.test(globalThis.__wasmerShell.snapshot()),
+      undefined,
+      { timeout: vinextTimeout },
+    );
+    assert.doesNotMatch(
+      await page.evaluate(() => globalThis.__wasmerShell.snapshot()),
+      /\n__VINEXT_BUILD_FAILED__:/,
+    );
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+      undefined,
+      { timeout: 30_000 },
+    );
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("cd vinext && pnpm start\r");
+    });
+    await page.locator("#preview-panel").waitFor({ timeout: 120_000 });
+    const vinextPreview = page
+      .frameLocator("#preview-panel iframe")
+      .frameLocator("iframe");
+    await vinextPreview
+      .getByText("Welcome to Vinext on Wasmer.", { exact: true })
+      .waitFor({ timeout: 120_000 });
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("\x03");
+    });
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+      undefined,
+      { timeout: 30_000 },
+    );
+    console.log("wasmer.sh Vinext browser build passed");
+  } else {
   assert.equal(await page.locator("#editor-panel").isHidden(), true);
   await page.locator("#editor-button").click();
   await page.waitForFunction(
@@ -253,7 +328,7 @@ try {
   if (testPnpm) {
     await page.evaluate(async () => {
       await globalThis.__wasmerShell.send(
-        "(cd node-express && pnpm install --ignore-scripts && node -e \"console.log('__PNPM_OK__', require('express/package.json').version)\")\r",
+        "(cd node-express && pnpm install --frozen-lockfile --ignore-scripts && node -e \"console.log('__PNPM_OK__', require('express/package.json').version)\")\r",
       );
     });
     await page.waitForFunction(
@@ -268,13 +343,40 @@ try {
     );
   }
 
-  if (testNext) {
+  if (testNextBuild) {
     await page.evaluate(async () => {
       await globalThis.__wasmerShell.send(
-        "cd next && pnpm install --ignore-scripts && pnpm dev\r",
+        "(cd next && pnpm install --frozen-lockfile --ignore-scripts && pnpm build && echo __NEXT_BUILD_OK__) || echo __NEXT_BUILD_FAILED__:$?\r",
+      );
+    });
+    await page.waitForFunction(
+      () => /\n__NEXT_BUILD_(?:OK|FAILED__:\d+)/.test(globalThis.__wasmerShell.snapshot()),
+      undefined,
+      { timeout: nextTimeout },
+    );
+    assert.doesNotMatch(
+      await page.evaluate(() => globalThis.__wasmerShell.snapshot()),
+      /\n__NEXT_BUILD_FAILED__:/,
+    );
+  } else if (testNext) {
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send(
+        "cd next && pnpm install --frozen-lockfile --ignore-scripts && pnpm dev\r",
       );
     });
     await page.locator("#preview-panel").waitFor({ timeout: nextTimeout });
+    await page.waitForFunction(
+      () => {
+        const transcript = globalThis.__wasmerShell
+          .snapshot()
+          .replace(/\x1b\[[0-9;]*m/g, "");
+        return /(?:^|\n)\s*(?:✓\s*)?Ready in \d+(?:\.\d+)?(?:ms|s)\s*(?:\n|$)/.test(
+          transcript,
+        );
+      },
+      undefined,
+      { timeout: nextTimeout },
+    );
     const nextPreview = page
       .frameLocator("#preview-panel iframe")
       .frameLocator("iframe");
@@ -566,6 +668,7 @@ try {
   });
 
   console.log("wasmer.sh browser smoke test passed");
+  }
 } catch (error) {
   console.error(error);
   if (page) {
@@ -574,7 +677,7 @@ try {
       await page
         .evaluate(() => ({
           state: globalThis.__wasmerShell?.state(),
-          transcript: globalThis.__wasmerShell?.snapshot(),
+          transcriptTail: globalThis.__wasmerShell?.snapshot().slice(-16_000),
           status: document.querySelector("#session-status")?.textContent,
         }))
         .catch(() => undefined),
@@ -585,7 +688,7 @@ try {
     );
   }
   if (diagnostics.length > 0) {
-    console.error(diagnostics.join("\n"));
+    console.error(diagnostics.slice(-100).join("\n"));
   }
   process.exitCode = 1;
 } finally {
