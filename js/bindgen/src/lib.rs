@@ -46,21 +46,9 @@ pub use tasks::ThreadPoolWorker;
 pub(crate) static CUSTOM_WORKER_URL: Lazy<StdMutex<Option<String>>> = Lazy::new(StdMutex::default);
 pub(crate) static CUSTOM_SDK_URL: Lazy<StdMutex<Option<String>>> = Lazy::new(StdMutex::default);
 
-#[wasm_bindgen(inline_js = r#"
-const wasmerSdkHostConsoleError = console.error.bind(console);
-export function wasmer_sdk_host_console_error(message) {
-  wasmerSdkHostConsoleError(message);
-}
-"#)]
-extern "C" {
-    fn wasmer_sdk_host_console_error(message: &str);
-}
-
 #[wasm_bindgen(start)]
 fn initialize() {
-    std::panic::set_hook(Box::new(|info| {
-        wasmer_sdk_host_console_error(&info.to_string());
-    }));
+    console_error_panic_hook::set_once();
 }
 
 #[wasm_bindgen(js_name = setSDKUrl)]

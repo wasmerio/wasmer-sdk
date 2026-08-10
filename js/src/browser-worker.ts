@@ -23,19 +23,18 @@ interface InitMessage {
 }
 
 Error.stackTraceLimit = 50;
-const hostConsoleError = console.error.bind(console);
 installNetworkProxy();
 installCapiObjectBridge((message) => globalThis.postMessage(message));
 let runtimeMemory: WebAssembly.Memory | undefined;
 globalThis.addEventListener("error", (event) => {
-  hostConsoleError(
+  console.error(
     "[wasmer-sdk-worker-error]",
     runtimeMemory?.buffer.byteLength,
     event.error?.stack ?? event.message,
   );
 });
 globalThis.addEventListener("unhandledrejection", (event) => {
-  hostConsoleError("[wasmer-sdk-worker-rejection]", event.reason?.stack ?? event.reason);
+  console.error("[wasmer-sdk-worker-rejection]", event.reason?.stack ?? event.reason);
 });
 
 let worker: WorkerRuntime | undefined;
@@ -43,7 +42,7 @@ const pendingMessages: unknown[] = [];
 
 globalThis.onmessage = ({ data }: MessageEvent<unknown>) => {
   void handleMessage(data).catch((error: unknown) => {
-    hostConsoleError("Wasmer SDK worker failed:", error);
+    console.error("Wasmer SDK worker failed:", error);
   });
 };
 
@@ -76,7 +75,7 @@ async function initialize(data: InitMessage): Promise<void> {
   worker = initialized;
   while (pendingMessages.length > 0) {
     void initialized.handle(pendingMessages.shift()).catch((error: unknown) => {
-      hostConsoleError("Wasmer SDK worker failed:", error);
+      console.error("Wasmer SDK worker failed:", error);
     });
   }
 }

@@ -1,7 +1,6 @@
 use std::{
     fmt::Debug,
     future::Future,
-    num::NonZeroUsize,
     pin::Pin,
     sync::atomic::{AtomicU32, Ordering},
     task::{Context, Poll},
@@ -24,10 +23,6 @@ use crate::{
 #[derive(Debug)]
 pub struct ThreadPool {
     scheduler: Scheduler,
-    // Edge installs Node-compatible globals in the worker realm. Capture the
-    // host value before a guest can replace `navigator` and make this lookup
-    // recursively enter N-API.
-    host_parallelism: Option<NonZeroUsize>,
 }
 
 struct SleepFuture {
@@ -76,12 +71,8 @@ impl ThreadPool {
             );
         }
 
-        let host_parallelism = GlobalScope::current().hardware_concurrency();
         let sender = Scheduler::spawn();
-        ThreadPool {
-            scheduler: sender,
-            host_parallelism,
-        }
+        ThreadPool { scheduler: sender }
     }
 
     /// Run an `async` function to completion on the threadpool.
@@ -215,7 +206,7 @@ impl VirtualTaskManager for ThreadPool {
 
     /// Returns the amount of parallelism that is possible on this platform
     fn thread_parallelism(&self) -> Result<usize, WasiThreadError> {
-        match self.host_parallelism {
+        match GlobalScope::current().hardware_concurrency() {
             Some(n) => Ok(n.get()),
             None => Err(WasiThreadError::Unsupported),
         }

@@ -16,7 +16,6 @@ if (!parentPort) throw new Error("Wasmer SDK worker has no parent port");
 const port: NonNullable<typeof parentPort> = parentPort;
 
 Error.stackTraceLimit = 50;
-const hostConsoleError = console.error.bind(console);
 installNetworkProxy();
 installCacheProxy();
 installCapiObjectBridge((message, transfer = []) => port.postMessage(message, transfer));
@@ -45,7 +44,7 @@ port.on("message", async (data) => {
   try {
     await handleMessage(data);
   } catch (error) {
-    hostConsoleError("Wasmer SDK worker failed:", error);
+    console.error("Wasmer SDK worker failed:", error);
     throw error;
   }
 });

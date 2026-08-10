@@ -555,6 +555,71 @@ fs.promises.readFile(path).then((asyncValue) => {
 );
 
 test(
+  "retains zlib byte ranges through sync continuations and async work",
+  {
+    skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
+    timeout: 30_000,
+  },
+  async () => {
+    const client = new Wasmer({ cache: false });
+    let sandbox;
+    try {
+      await client.ready();
+      const edgejs = await loadEdgejs(client);
+      sandbox = await client.sandboxes.create({
+        packages: [edgejs],
+        files: {
+          "zlib-leases.cjs": `
+const zlib = require('node:zlib');
+
+const storage = Buffer.alloc(256 * 1024 + 64, 0xa5);
+const input = storage.subarray(32, storage.length - 32);
+for (let index = 0; index < input.length; index++) input[index] = index & 0xff;
+
+const compressed = zlib.gzipSync(input);
+const pooled = Buffer.alloc(compressed.length + 46, 0xcc);
+compressed.copy(pooled, 23);
+const compressedRange = pooled.subarray(23, 23 + compressed.length);
+
+// A small output chunk forces processChunkSync() to continue with the same
+// retained input lease many times.
+const syncOutput = zlib.gunzipSync(compressedRange, { chunkSize: 1024 });
+
+zlib.gzip(input, { chunkSize: 1024 }, (gzipError, asyncCompressed) => {
+  if (gzipError) throw gzipError;
+  zlib.gunzip(asyncCompressed, { chunkSize: 1024 }, (gunzipError, asyncOutput) => {
+    if (gunzipError) throw gunzipError;
+    console.log(JSON.stringify({
+      syncMatches: syncOutput.equals(input),
+      asyncMatches: asyncOutput.equals(input),
+      prefixPreserved: storage[31] === 0xa5 && pooled[22] === 0xcc,
+      suffixPreserved: storage[storage.length - 32] === 0xa5 &&
+        pooled[23 + compressed.length] === 0xcc,
+    }));
+  });
+});
+`,
+        },
+      });
+
+      const output = await sandbox
+        .command("node", ["/workspace/zlib-leases.cjs"])
+        .run({ timeoutMs: 15_000, check: false });
+      assert.equal(output.ok, true, output.stderr.text());
+      assert.deepEqual(JSON.parse(output.stdout.text().trim()), {
+        syncMatches: true,
+        asyncMatches: true,
+        prefixPreserved: true,
+        suffixPreserved: true,
+      });
+    } finally {
+      await sandbox?.close();
+      await client.close();
+    }
+  },
+);
+
+test(
   "preserves exact Buffer ranges across native filesystem access",
   {
     skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
