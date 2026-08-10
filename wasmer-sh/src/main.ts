@@ -47,7 +47,7 @@ const DEFAULT_PACKAGE = "wasmer/bash";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "python/python",
-  "syrusakbary/edgejs@0.1.9",
+  "syrusakbary/edgejs@0.1.10",
   "php/php-32",
 ];
 const TRANSCRIPT_LIMIT = 128 * 1024;
@@ -313,7 +313,7 @@ async function start(): Promise<void> {
       : undefined;
     const [mainPackage, ...uses] = await Promise.all(
       packageNames.map(async (name) => {
-        if (name !== "syrusakbary/edgejs@0.1.9" || !edgejsDevelopmentPackage) {
+        if (name !== "syrusakbary/edgejs@0.1.10" || !edgejsDevelopmentPackage) {
           return wasmer.packages.load(name);
         }
         const response = await fetch(edgejsDevelopmentPackage);
