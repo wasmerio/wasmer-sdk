@@ -71,6 +71,50 @@ impl WorkerHandle {
         self.send_with_capi_transfers(msg, Vec::new())
     }
 
+    /// Deliver a host value to a worker that requested it while already
+    /// executing a WASIX thread. Worker.postMessage() performs the structured
+    /// clone; the SDK does not serialize the JavaScript value itself.
+    pub(crate) fn send_capi_transfer(&self, transfer: CapiTransfer) -> Result<(), Error> {
+        let message = js_sys::Object::new();
+        let objects: JsValue = capi_transfers_array([transfer])?.into();
+        js_sys::Reflect::set(
+            &message,
+            &JsValue::from_str("type"),
+            &JsValue::from_str("wasmer-capi-dispatch"),
+        )
+        .map_err(crate::worker_utils::js_error)?;
+        js_sys::Reflect::set(&message, &JsValue::from_str("capiObjects"), &objects)
+            .map_err(crate::worker_utils::js_error)?;
+        self.inner
+            .post_message(&message)
+            .map_err(crate::worker_utils::js_error)
+    }
+
+    pub(crate) fn send_capi_drop(&self, registry_id: u32, handle: i32) -> Result<(), Error> {
+        let message = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &message,
+            &JsValue::from_str("type"),
+            &JsValue::from_str("wasmer-capi-drop"),
+        )
+        .map_err(crate::worker_utils::js_error)?;
+        js_sys::Reflect::set(
+            &message,
+            &JsValue::from_str("registryId"),
+            &JsValue::from(registry_id),
+        )
+        .map_err(crate::worker_utils::js_error)?;
+        js_sys::Reflect::set(
+            &message,
+            &JsValue::from_str("handle"),
+            &JsValue::from(handle),
+        )
+        .map_err(crate::worker_utils::js_error)?;
+        self.inner
+            .post_message(&message)
+            .map_err(crate::worker_utils::js_error)
+    }
+
     /// Send a task and make its nested WebAssembly objects available before
     /// the worker starts executing it.
     pub(crate) fn send_with_capi_transfers(
@@ -95,6 +139,23 @@ impl WorkerHandle {
 }
 
 fn capi_dispatch_message(payload: JsValue, transfers: Vec<CapiTransfer>) -> Result<JsValue, Error> {
+    let objects = capi_transfers_array(transfers)?;
+
+    let message = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &message,
+        &JsValue::from_str("type"),
+        &JsValue::from_str("wasmer-dispatch"),
+    )
+    .map_err(crate::worker_utils::js_error)?;
+    js_sys::Reflect::set(&message, &JsValue::from_str("payload"), &payload)
+        .map_err(crate::worker_utils::js_error)?;
+    js_sys::Reflect::set(&message, &JsValue::from_str("capiObjects"), &objects)
+        .map_err(crate::worker_utils::js_error)?;
+    Ok(message.into())
+}
+
+fn capi_transfers_array(transfers: impl IntoIterator<Item = CapiTransfer>) -> Result<Array, Error> {
     let objects = Array::new();
     for transfer in transfers {
         let object = js_sys::Object::new();
@@ -115,18 +176,7 @@ fn capi_dispatch_message(payload: JsValue, transfers: Vec<CapiTransfer>) -> Resu
         objects.push(&object);
     }
 
-    let message = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &message,
-        &JsValue::from_str("type"),
-        &JsValue::from_str("wasmer-dispatch"),
-    )
-    .map_err(crate::worker_utils::js_error)?;
-    js_sys::Reflect::set(&message, &JsValue::from_str("payload"), &payload)
-        .map_err(crate::worker_utils::js_error)?;
-    js_sys::Reflect::set(&message, &JsValue::from_str("capiObjects"), &objects)
-        .map_err(crate::worker_utils::js_error)?;
-    Ok(message.into())
+    Ok(objects)
 }
 
 #[cfg(test)]
@@ -188,6 +238,9 @@ fn on_message(msg: web_sys::MessageEvent, sender: &Scheduler, worker_id: u32) {
     if handle_capi_share(&msg.data(), sender, worker_id) {
         return;
     }
+    if handle_capi_request(&msg.data(), sender, worker_id) {
+        return;
+    }
     if handle_capi_delete(&msg.data(), sender, worker_id) {
         return;
     }
@@ -232,6 +285,27 @@ fn on_message(msg: web_sys::MessageEvent, sender: &Scheduler, worker_id: u32) {
             "Unable to handle a message from the worker",
         );
     }
+}
+
+fn handle_capi_request(data: &JsValue, sender: &Scheduler, worker_id: u32) -> bool {
+    let get = |name: &str| js_sys::Reflect::get(data, &JsValue::from_str(name)).ok();
+    if get("type").and_then(|value| value.as_string()).as_deref() != Some("wasmer-capi-request") {
+        return false;
+    }
+    let Some(registry_id) = get("registryId").and_then(|value| value.as_f64()) else {
+        return true;
+    };
+    let Some(handle) = get("handle").and_then(|value| value.as_f64()) else {
+        return true;
+    };
+    if let Err(error) = sender.send(SchedulerMessage::CapiRequest {
+        requesting_worker_id: worker_id,
+        registry_id: registry_id as u32,
+        handle: handle as i32,
+    }) {
+        tracing::warn!(%error, "Unable to request nested WebAssembly host value");
+    }
+    true
 }
 
 fn handle_capi_share(data: &JsValue, sender: &Scheduler, worker_id: u32) -> bool {

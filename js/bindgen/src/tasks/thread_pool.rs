@@ -1,8 +1,14 @@
-use std::{fmt::Debug, future::Future, pin::Pin};
+use std::{
+    fmt::Debug,
+    future::Future,
+    num::NonZeroUsize,
+    pin::Pin,
+    sync::atomic::{AtomicU32, Ordering},
+    task::{Context, Poll},
+};
 
 use futures::future::LocalBoxFuture;
 use instant::Duration;
-use wasm_bindgen_futures::JsFuture;
 use wasmer_wasix::{
     VirtualTaskManager, WasiProcessId, WasiThreadError, WasiThreadId,
     runtime::task_manager::TaskWasm,
@@ -18,6 +24,41 @@ use crate::{
 #[derive(Debug)]
 pub struct ThreadPool {
     scheduler: Scheduler,
+    // Edge installs Node-compatible globals in the worker realm. Capture the
+    // host value before a guest can replace `navigator` and make this lookup
+    // recursively enter N-API.
+    host_parallelism: Option<NonZeroUsize>,
+}
+
+struct SleepFuture {
+    sleep_id: u32,
+    receiver: tokio::sync::oneshot::Receiver<()>,
+    scheduler: Scheduler,
+    finished: bool,
+}
+
+impl Future for SleepFuture {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match Pin::new(&mut self.receiver).poll(cx) {
+            Poll::Ready(_) => {
+                self.finished = true;
+                Poll::Ready(())
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for SleepFuture {
+    fn drop(&mut self) {
+        if !self.finished {
+            let _ = self.scheduler.send(SchedulerMessage::CancelSleep {
+                sleep_id: self.sleep_id,
+            });
+        }
+    }
 }
 
 const CROSS_ORIGIN_WARNING: &str = r#"You can only run packages from "Cross-Origin Isolated" websites. For more details, check out https://docs.wasmer.io/javascript-sdk/explainers/troubleshooting#sharedarraybuffer-and-cross-origin-isolation"#;
@@ -35,8 +76,12 @@ impl ThreadPool {
             );
         }
 
+        let host_parallelism = GlobalScope::current().hardware_concurrency();
         let sender = Scheduler::spawn();
-        ThreadPool { scheduler: sender }
+        ThreadPool {
+            scheduler: sender,
+            host_parallelism,
+        }
     }
 
     /// Run an `async` function to completion on the threadpool.
@@ -62,6 +107,20 @@ impl ThreadPool {
     pub fn close(&self) {
         self.scheduler.close();
     }
+
+    // Compatibility entry point retained after this operation left
+    // `VirtualTaskManager`; the scheduler still handles this message.
+    #[allow(dead_code)]
+    pub fn terminate_wasm_thread(
+        &self,
+        pid: WasiProcessId,
+        tid: WasiThreadId,
+    ) -> Result<(), WasiThreadError> {
+        self.send(SchedulerMessage::TerminateWasmThread {
+            pid: pid.raw(),
+            tid: tid.raw(),
+        })
+    }
 }
 
 impl Drop for ThreadPool {
@@ -85,32 +144,43 @@ impl VirtualTaskManager for ThreadPool {
         &self,
         time: Duration,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>> {
+        // WASIX uses a zero timeout for non-blocking poll_oneoff calls. It is
+        // not a timer: scheduling it through the browser would add a
+        // main-worker-wake-worker round trip to every libuv NOWAIT poll. Edge
+        // already performs an explicit JSPI host yield at its event-loop
+        // boundary, so completing the non-blocking poll immediately preserves
+        // both contracts.
+        if time.is_zero() {
+            return Box::pin(std::future::ready(()));
+        }
+
+        static NEXT_SLEEP_ID: AtomicU32 = AtomicU32::new(1);
+
+        let sleep_id = NEXT_SLEEP_ID.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = tokio::sync::oneshot::channel();
 
-        let time = if time.as_millis() < i32::MAX as u128 {
-            time.as_millis() as i32
+        let millis = time.as_millis().max(1);
+        let time = if millis < i32::MAX as u128 {
+            millis as i32
         } else {
             i32::MAX
         };
 
-        // Note: We can't use wasm_bindgen_futures::spawn_local() directly
-        // because we might be invoked from inside a syscall. This causes a
-        // deadlock because the syscall will block block until the future
-        // resolves, but the JsFuture will never get a chance to mark itself as
-        // resolved because the JavaScript VM is still blocked by the syscall.
-        //
-        // If the pool is already shut down, the sender drops immediately and
-        // the returned future resolves at once instead of hanging.
-        let _ = self.task_dedicated(Box::new(move || {
-            wasm_bindgen_futures::spawn_local(async move {
-                let global = GlobalScope::current();
-                let _ = JsFuture::from(global.sleep(time)).await;
-                let _ = tx.send(());
-            })
-        }));
+        // The calling WASM worker cannot service its own JavaScript timer until
+        // the syscall completes. Ask the scheduler realm to arm the timer, but
+        // do not turn the sleep into an execution job: sleeps consume neither
+        // a shared nor a dedicated worker.
+        let _ = self.send(SchedulerMessage::Sleep {
+            sleep_id,
+            millis: time,
+            completion: tx,
+        });
 
-        Box::pin(async move {
-            let _ = rx.await;
+        Box::pin(SleepFuture {
+            sleep_id,
+            receiver: rx,
+            scheduler: self.scheduler.clone(),
+            finished: false,
         })
     }
 
@@ -133,17 +203,6 @@ impl VirtualTaskManager for ThreadPool {
         self.send(msg)
     }
 
-    fn terminate_wasm_thread(
-        &self,
-        pid: WasiProcessId,
-        tid: WasiThreadId,
-    ) -> Result<(), WasiThreadError> {
-        self.send(SchedulerMessage::TerminateWasmThread {
-            pid: pid.raw(),
-            tid: tid.raw(),
-        })
-    }
-
     /// Starts an asynchronous task will will run on a dedicated thread
     /// pulled from the worker pool. It is ok for this task to block execution
     /// and any async futures within its scope
@@ -156,7 +215,7 @@ impl VirtualTaskManager for ThreadPool {
 
     /// Returns the amount of parallelism that is possible on this platform
     fn thread_parallelism(&self) -> Result<usize, WasiThreadError> {
-        match crate::worker_utils::GlobalScope::current().hardware_concurrency() {
+        match self.host_parallelism {
             Some(n) => Ok(n.get()),
             None => Err(WasiThreadError::Unsupported),
         }

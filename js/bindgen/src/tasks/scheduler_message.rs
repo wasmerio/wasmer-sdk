@@ -26,6 +26,20 @@ pub(crate) enum SchedulerMessage {
     SpawnAsync(#[derivative(Debug(format_with = "crate::worker_utils::hidden"))] AsyncTask),
     /// Run a blocking operation on a worker thread.
     SpawnBlocking(#[derivative(Debug(format_with = "crate::worker_utils::hidden"))] BlockingTask),
+    /// Arm a host timer on the scheduler realm without occupying a worker.
+    Sleep {
+        sleep_id: u32,
+        millis: i32,
+        #[derivative(Debug(format_with = "crate::worker_utils::hidden"))]
+        completion: tokio::sync::oneshot::Sender<()>,
+    },
+    /// Cancel a sleep whose future was dropped before its timer fired.
+    CancelSleep { sleep_id: u32 },
+    /// A scheduler-local notification emitted by a host timer callback.
+    SleepReady {
+        source_worker_id: Option<u32>,
+        sleep_id: u32,
+    },
     /// A message sent from a worker thread.
     /// Mark a worker as idle.
     WorkerIdle { worker_id: u32 },
@@ -39,6 +53,14 @@ pub(crate) enum SchedulerMessage {
         registry_id: u32,
         handle: i32,
         value: JsValue,
+    },
+    /// Ask the scheduler to deliver a previously published host value to one
+    /// specific worker. This is used when the destination thread was already
+    /// running when the value was shared.
+    CapiRequest {
+        requesting_worker_id: u32,
+        registry_id: u32,
+        handle: i32,
     },
     /// Release a nested WebAssembly object which has not been attached to a
     /// destination task yet.
@@ -96,6 +118,20 @@ impl SchedulerMessage {
             consts::TYPE_SPAWN_BLOCKING => {
                 let task = unsafe { de.boxed(consts::PTR)? };
                 Ok(SchedulerMessage::SpawnBlocking(task))
+            }
+            consts::TYPE_SLEEP => {
+                let sleep_id = de.serde(consts::SLEEP_ID)?;
+                let millis = de.serde(consts::MILLIS)?;
+                let completion = unsafe { de.boxed(consts::PTR)? };
+                Ok(SchedulerMessage::Sleep {
+                    sleep_id,
+                    millis,
+                    completion,
+                })
+            }
+            consts::TYPE_CANCEL_SLEEP => {
+                let sleep_id = de.serde(consts::SLEEP_ID)?;
+                Ok(SchedulerMessage::CancelSleep { sleep_id })
             }
             consts::TYPE_WORKER_IDLE => {
                 let worker_id = de.serde(consts::WORKER_ID)?;
@@ -164,6 +200,23 @@ impl SchedulerMessage {
             SchedulerMessage::SpawnBlocking(task) => Serializer::new(consts::TYPE_SPAWN_BLOCKING)
                 .boxed(consts::PTR, task)
                 .finish(),
+            SchedulerMessage::Sleep {
+                sleep_id,
+                millis,
+                completion,
+            } => Serializer::new(consts::TYPE_SLEEP)
+                .set(consts::SLEEP_ID, sleep_id)
+                .set(consts::MILLIS, millis)
+                .boxed(consts::PTR, completion)
+                .finish(),
+            SchedulerMessage::CancelSleep { sleep_id } => {
+                Serializer::new(consts::TYPE_CANCEL_SLEEP)
+                    .set(consts::SLEEP_ID, sleep_id)
+                    .finish()
+            }
+            SchedulerMessage::SleepReady { .. } => {
+                Err(anyhow::anyhow!("timer-ready messages are local to the scheduler").into())
+            }
             SchedulerMessage::WorkerIdle { worker_id } => Serializer::new(consts::TYPE_WORKER_IDLE)
                 .set(consts::WORKER_ID, worker_id)
                 .finish(),
@@ -176,7 +229,9 @@ impl SchedulerMessage {
                     .set(consts::TID, tid)
                     .finish()
             }
-            SchedulerMessage::CapiShare { .. } | SchedulerMessage::CapiDelete { .. } => {
+            SchedulerMessage::CapiShare { .. }
+            | SchedulerMessage::CapiRequest { .. }
+            | SchedulerMessage::CapiDelete { .. } => {
                 Err(anyhow::anyhow!("C API messages are local to the scheduler").into())
             }
             SchedulerMessage::FromWorker { .. } => {
@@ -219,6 +274,8 @@ mod consts {
     pub const TYPE_CLOSE: &str = "close";
     pub const TYPE_SPAWN_ASYNC: &str = "spawn-async";
     pub const TYPE_SPAWN_BLOCKING: &str = "spawn-blocking";
+    pub const TYPE_SLEEP: &str = "sleep";
+    pub const TYPE_CANCEL_SLEEP: &str = "cancel-sleep";
     pub const TYPE_WORKER_IDLE: &str = "worker-idle";
     pub const TYPE_WORKER_BUSY: &str = "worker-busy";
     pub const TYPE_TERMINATE_WASM_THREAD: &str = "terminate-wasm-thread";
@@ -232,4 +289,6 @@ mod consts {
     pub const WORKER_ID: &str = "worker-id";
     pub const PID: &str = "pid";
     pub const TID: &str = "tid";
+    pub const MILLIS: &str = "millis";
+    pub const SLEEP_ID: &str = "sleep-id";
 }

@@ -113,8 +113,10 @@ function patchMemory32Glue(path) {
       return `${cache}.buffer !== wasm.memory.buffer || ${cache}.byteLength !== wasm.memory.buffer.byteLength`;
     },
   );
+  const signedReturnPointer =
+    /(getDataViewMemory0\(\)\.set(?:BigInt64|Float64|Int32)\()arg0( \+)/g;
   const patched = patchedViews.replace(
-    /(getDataViewMemory0\(\)\.set(?:BigInt64|Float64|Int32)\()arg0( \+)/g,
+    signedReturnPointer,
     (_match, prefix, suffix) => {
       pointerReplacements += 1;
       return `${prefix}(arg0 >>> 0)${suffix}`;
@@ -125,9 +127,10 @@ function patchMemory32Glue(path) {
       `expected to patch 3 wasm-bindgen memory views, patched ${viewReplacements}`,
     );
   }
-  if (pointerReplacements !== 22) {
+  signedReturnPointer.lastIndex = 0;
+  if (pointerReplacements === 0 || signedReturnPointer.test(patched)) {
     throw new Error(
-      `expected to patch 22 wasm-bindgen return pointers, patched ${pointerReplacements}`,
+      `failed to normalize wasm-bindgen return pointers; patched ${pointerReplacements}`,
     );
   }
   writeFileSync(path, patched);

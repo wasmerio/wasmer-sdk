@@ -14,7 +14,6 @@ crate-type = ["cdylib", "rlib"]
 anyhow = "1"
 async-trait = "0.1"
 bytes = "1.11"
-console_error_panic_hook = "0.1"
 derivative = "2"
 futures = "0.3"
 http = "1.4"
@@ -31,7 +30,7 @@ virtual-mio = { version = "=0.702.1", default-features = false }
 wasm-bindgen = "0.2.120"
 wasm-bindgen-futures = "0.4"
 wasmer = { version = "=7.2.1", default-features = false, features = ["js", "js-default"] }
-wasmer-sdk = { path = "../../rust", default-features = false, features = ["js"] }
+wasmer-sdk = { path = "../../rust", default-features = false, features = ["js-napi"] }
 wasmer-package = { version = "=0.702.1", default-features = false, features = ["execution", "webc-v3"] }
 wasmer-wasix = { version = "=0.702.1", default-features = false, features = ["js", "js-default"] }
 wasmer-wasix-types = "=0.702.1"

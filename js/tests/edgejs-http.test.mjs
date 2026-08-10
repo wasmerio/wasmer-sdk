@@ -12,15 +12,18 @@ const serverSource = await readFile(
 const cacheDirectory = fileURLToPath(
   new URL("../../.wasmer", import.meta.url),
 );
+const edgeJsSource = process.env.WASMER_EDGEJS_WEBC
+  ? new Uint8Array(await readFile(process.env.WASMER_EDGEJS_WEBC))
+  : "syrusakbary/edgejs-quickjs-wasi@0.1.5";
 
-test("serves HTTP from EdgeJS QuickJS through the Node network bridge", async (context) => {
+test("serves HTTP from EdgeJS through the Node network bridge", async (context) => {
   const port = await reservePort();
   const client = new Wasmer({ cache: { directory: cacheDirectory } });
-  const edgejs = await client.packages.load("syrusakbary/edgejs-quickjs-wasi@0.1.5");
+  const edgejs = await client.packages.load(edgeJsSource);
   const sandbox = await client.sandboxes.create({
     packages: [edgejs],
     files: { "server.js": serverSource },
-    env: { PORT: String(port) },
+    env: { PORT: String(port), RESPONSE_BYTES: String(1024 * 1024) },
     network: { mode: "host" },
   });
   const process = await sandbox
@@ -83,7 +86,7 @@ test(
 async function startServer(name) {
   const port = await reservePort();
   const client = new Wasmer({ cache: { directory: cacheDirectory } });
-  const edgejs = await client.packages.load("syrusakbary/edgejs-quickjs-wasi@0.1.5");
+  const edgejs = await client.packages.load(edgeJsSource);
   const source = new TextDecoder()
     .decode(serverSource)
     .replace("Hello from Edge.js!", name);

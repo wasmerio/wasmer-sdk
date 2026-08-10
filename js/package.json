@@ -65,6 +65,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@mercuryworkshop/wisp-js": "^0.4.1"
+    "@mercuryworkshop/wisp-js": "^0.4.1",
+    "acorn": "^8.18.0"
   }
 }

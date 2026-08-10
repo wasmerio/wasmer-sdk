@@ -3,3 +3,5 @@
 /js/node_modules
 /js/dist
 /js/pkg
+.DS_Store
+/packages/edgejs/
