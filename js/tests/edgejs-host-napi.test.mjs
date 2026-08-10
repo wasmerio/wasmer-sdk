@@ -649,6 +649,25 @@ const fs = require('node:fs');
     const written = await handle.write(source, sourceOffset, length, 0);
     const target = Buffer.alloc(1024 * 1024, 0xa5);
     const read = await handle.read(target, targetOffset, length, 0);
+
+    const vectorPath = '/workspace/vectored.bin';
+    const vectorHandle = await fs.promises.open(vectorPath, 'w+');
+    const firstStorage = Buffer.from('x-first-y');
+    const secondStorage = Buffer.from('x-second-y');
+    const vectorWrite = await vectorHandle.writev([
+      firstStorage.subarray(2, 7),
+      secondStorage.subarray(2, 8),
+    ], 0);
+    await vectorHandle.close();
+
+    const syncPath = '/workspace/sync-ranged.bin';
+    const syncFd = fs.openSync(syncPath, 'w+');
+    const syncSource = Buffer.from('x-sync-y');
+    const syncWritten = fs.writeSync(syncFd, syncSource, 2, 4, 0);
+    const syncTarget = Buffer.alloc(10, 0xa5);
+    const syncRead = fs.readSync(syncFd, syncTarget, 3, 4, 0);
+    fs.closeSync(syncFd);
+
     console.log(JSON.stringify({
       written: written.bytesWritten,
       read: read.bytesRead,
@@ -656,6 +675,13 @@ const fs = require('node:fs');
         .equals(source.subarray(sourceOffset, sourceOffset + length)),
       prefixPreserved: target[targetOffset - 1] === 0xa5,
       suffixPreserved: target[targetOffset + length] === 0xa5,
+      vectorWritten: vectorWrite.bytesWritten,
+      vectorMatches: (await fs.promises.readFile(vectorPath)).equals(Buffer.from('firstsecond')),
+      syncWritten,
+      syncRead,
+      syncMatches: syncTarget.subarray(3, 7).equals(Buffer.from('sync')),
+      syncPrefixPreserved: syncTarget[2] === 0xa5,
+      syncSuffixPreserved: syncTarget[7] === 0xa5,
     }));
   } finally {
     await handle.close();
@@ -678,6 +704,13 @@ const fs = require('node:fs');
         rangeMatches: true,
         prefixPreserved: true,
         suffixPreserved: true,
+        vectorWritten: 11,
+        vectorMatches: true,
+        syncWritten: 4,
+        syncRead: 4,
+        syncMatches: true,
+        syncPrefixPreserved: true,
+        syncSuffixPreserved: true,
       });
     } finally {
       await sandbox?.close();
