@@ -613,6 +613,88 @@ console.log(JSON.stringify({
 );
 
 test(
+  "uses scoped crypto leases for exact host-owned ranges",
+  {
+    skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
+    timeout: 30_000,
+  },
+  async () => {
+    const client = new Wasmer({ cache: false });
+    let sandbox;
+    try {
+      await client.ready();
+      const edgejs = await loadEdgejs(client);
+      sandbox = await client.sandboxes.create({
+        packages: [edgejs],
+        files: {
+          "crypto-leases.cjs": `
+const crypto = require('crypto');
+
+const inputStorage = new Uint8Array([0xa5, 0xa5, 97, 98, 99, 0xa5]);
+const saltStorage = new Uint8Array([0xa5, 115, 0xa5]);
+const keyStorage = new Uint8Array(18).fill(0xa5);
+const ivStorage = new Uint8Array(18).fill(0xa5);
+for (let index = 0; index < 16; index += 1) {
+  keyStorage[index + 1] = index;
+  ivStorage[index + 1] = 0x10 + index;
+}
+const input = inputStorage.subarray(2, 5);
+const salt = saltStorage.subarray(1, 2);
+const key = keyStorage.subarray(1, 17);
+const iv = ivStorage.subarray(1, 17);
+const randomStorage = new Uint8Array(8).fill(0xa5);
+crypto.randomFillSync(randomStorage.subarray(2, 5));
+const cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
+const encrypted = Buffer.concat([cipher.update(input), cipher.final()]);
+const generated = crypto.randomBytes(8);
+
+console.log(JSON.stringify({
+  hash: crypto.hash('sha256', input, 'hex'),
+  hmac: crypto.createHmac('sha256', salt).update(input).digest('hex'),
+  pbkdf2: crypto.pbkdf2Sync(input, salt, 2, 8, 'sha256').toString('hex'),
+  scrypt: crypto.scryptSync(input, salt, 8, {
+    N: 1024,
+    r: 8,
+    p: 1,
+    maxmem: 32 * 1024 * 1024,
+  }).toString('hex'),
+  encrypted: encrypted.toString('hex'),
+  generatedLength: generated.length,
+  keyBoundsPreserved: keyStorage[0] === 0xa5 && keyStorage[17] === 0xa5,
+  ivBoundsPreserved: ivStorage[0] === 0xa5 && ivStorage[17] === 0xa5,
+  randomChanged: randomStorage.subarray(2, 5).some((byte) => byte !== 0xa5),
+  prefixPreserved: randomStorage[1] === 0xa5,
+  suffixPreserved: randomStorage[5] === 0xa5,
+}));
+`,
+        },
+      });
+
+      const output = await sandbox
+        .command("node", ["/workspace/crypto-leases.cjs"])
+        .run({ timeoutMs: 10_000, check: false });
+      assert.equal(output.ok, true, output.stderr.text());
+      assert.deepEqual(JSON.parse(output.stdout.text().trim()), {
+        hash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        hmac: "47d920ed90784dc5eae635bfd0824f612d05f09f9a47f60390de873ad37e546b",
+        pbkdf2: "2d79e554aeea1c44",
+        scrypt: "85307e44a91cd186",
+        encrypted: "12502cb082a43c4b029bb67b4f00f5d7",
+        generatedLength: 8,
+        keyBoundsPreserved: true,
+        ivBoundsPreserved: true,
+        randomChanged: true,
+        prefixPreserved: true,
+        suffixPreserved: true,
+      });
+    } finally {
+      await sandbox?.close();
+      await client.close();
+    }
+  },
+);
+
+test(
   "keeps retained host Buffer mirrors coherent across async file reads",
   {
     skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
