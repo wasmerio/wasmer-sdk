@@ -503,6 +503,60 @@ Promise.all([fs.promises.stat('.'), fs.promises.lstat('.')]).then(([stat, lstat]
 );
 
 test(
+  "keeps process and V8 statistics buffers coherent through writable leases",
+  {
+    skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
+    timeout: 30_000,
+  },
+  async () => {
+    const client = new Wasmer({ cache: false });
+    let sandbox;
+    try {
+      await client.ready();
+      const edgejs = await loadEdgejs(client);
+      sandbox = await client.sandboxes.create({ packages: [edgejs] });
+      const output = await sandbox
+        .command("node", [
+          "-e",
+          `const v8 = require('node:v8');
+const cpu = process.cpuUsage();
+const memory = process.memoryUsage();
+const resources = process.resourceUsage();
+const heap = v8.getHeapStatistics();
+const spaces = v8.getHeapSpaceStatistics();
+const code = v8.getHeapCodeStatistics();
+const nonnegativeNumbers = (value) => Object.values(value).every(
+  (entry) => typeof entry === 'number' && Number.isFinite(entry) && entry >= 0,
+);
+console.log(JSON.stringify({
+  hrtime: process.hrtime.bigint() > 0n,
+  cpu: cpu.user >= 0 && cpu.system >= 0,
+  memory: nonnegativeNumbers(memory),
+  resources: resources.userCPUTime >= 0 && resources.systemCPUTime >= 0,
+  heap: nonnegativeNumbers(heap),
+  spaces: Array.isArray(spaces) && spaces.every(nonnegativeNumbers),
+  code: nonnegativeNumbers(code),
+}));`,
+        ])
+        .run({ timeoutMs: 10_000, check: false });
+      assert.equal(output.ok, true, output.stderr.text());
+      assert.deepEqual(JSON.parse(output.stdout.text().trim()), {
+        hrtime: true,
+        cpu: true,
+        memory: true,
+        resources: true,
+        heap: true,
+        spaces: true,
+        code: true,
+      });
+    } finally {
+      await sandbox?.close();
+      await client.close();
+    }
+  },
+);
+
+test(
   "uses provider-owned buffers for unsafe allocation and stream ingress",
   {
     skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
