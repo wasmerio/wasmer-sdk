@@ -41,22 +41,37 @@ impl Scheduler {
         tracing::debug!(thread_id, "Spinning up the scheduler");
         wasm_bindgen_futures::spawn_local(
             async move {
-                let completion = loop {
+                let mut close_completions = Vec::new();
+                loop {
                     let Some(msg) = receiver.recv().await else {
-                        break None;
+                        break;
                     };
                     tracing::trace!(?msg, "Executing a message");
-                    if let SchedulerMessage::Close { completion } = msg {
-                        break completion;
+                    if let SchedulerMessage::Close { completion, drain } = msg {
+                        if let Some(completion) = completion {
+                            close_completions.push(completion);
+                        }
+                        if !drain || scheduler.wasm_tasks_are_idle() {
+                            break;
+                        }
+                        scheduler_diag(format!(
+                            "draining close busy={} wasm={}",
+                            scheduler.busy.len(),
+                            scheduler.wasm_workers.len(),
+                        ));
+                        continue;
                     }
                     if let Err(e) = scheduler.execute(msg) {
                         tracing::error!(error = &*e, "An error occurred while handling a message");
                     }
-                };
+                    if !close_completions.is_empty() && scheduler.wasm_tasks_are_idle() {
+                        break;
+                    }
+                }
 
                 tracing::debug!("Shutting down the scheduler");
                 drop(scheduler);
-                if let Some(completion) = completion {
+                for completion in close_completions {
                     let _ = completion.send(());
                 }
             }
@@ -111,9 +126,10 @@ impl Scheduler {
     }
 
     pub fn close(&self) {
-        let _ = self
-            .channel
-            .send(SchedulerMessage::Close { completion: None });
+        let _ = self.channel.send(SchedulerMessage::Close {
+            completion: None,
+            drain: false,
+        });
     }
 
     pub async fn close_and_wait(&self) {
@@ -122,6 +138,7 @@ impl Scheduler {
             .channel
             .send(SchedulerMessage::Close {
                 completion: Some(completion),
+                drain: true,
             })
             .is_ok()
         {
@@ -199,96 +216,6 @@ impl Debug for ScheduledSleep {
 #[derive(Debug)]
 struct WasmWorker {
     worker_id: u32,
-    completion: Option<WasmThreadCompletion>,
-}
-
-#[derive(Debug)]
-struct WasmThreadCompletion {
-    memory: js_sys::WebAssembly::Memory,
-    control_block: u32,
-}
-
-impl WasmThreadCompletion {
-    const THREAD_START_PTHREAD_WORD: u32 = 4;
-    const PTHREAD_PREV_WORD: u32 = 1;
-    const PTHREAD_NEXT_WORD: u32 = 2;
-    const PTHREAD_TID_WORD: u32 = 5;
-    const PTHREAD_DETACH_STATE_WORD: u32 = 7;
-
-    fn from_thread_start(
-        memory: &js_sys::WebAssembly::Memory,
-        thread_start_ptr: Option<u64>,
-    ) -> Option<Self> {
-        // WASIX libc stores its pthread control block in reserved[0] of the
-        // thread-start record. Its detach-state futex is 28 bytes into that
-        // control block. The scheduler completes this futex after terminating
-        // a browser worker, just as the guest trampoline does on normal exit.
-        let start_ptr: u32 = thread_start_ptr?.try_into().ok()?;
-        if start_ptr % 4 != 0 {
-            return None;
-        }
-        let view = js_sys::Int32Array::new(&memory.buffer());
-        let control_block =
-            js_sys::Atomics::load(&view, start_ptr / 4 + Self::THREAD_START_PTHREAD_WORD).ok()?
-                as u32;
-        let state_address = control_block.checked_add(Self::PTHREAD_DETACH_STATE_WORD * 4)?;
-        if control_block == 0 || state_address % 4 != 0 {
-            return None;
-        }
-        Some(Self {
-            memory: memory.clone(),
-            control_block,
-        })
-    }
-
-    fn finish(self) {
-        // Shared memories can grow after this thread starts. A fresh view is
-        // required to reach pthreads allocated after a grow.
-        let memory = js_sys::Int32Array::new(&self.memory.buffer());
-        let control_index = self.control_block / 4;
-        let previous = js_sys::Atomics::load(&memory, control_index + Self::PTHREAD_PREV_WORD)
-            .ok()
-            .map(|v| v as u32);
-        let next = js_sys::Atomics::load(&memory, control_index + Self::PTHREAD_NEXT_WORD)
-            .ok()
-            .map(|v| v as u32);
-        // A forcibly terminated worker cannot run WASIX libc's pthread-exit
-        // trampoline. Complete the small piece of guest bookkeeping which the
-        // kernel normally owns: unlink the thread, clear its TID, then publish
-        // DT_EXITED. The browser Worker is already gone, so no guest code can
-        // race these writes.
-        if let (Some(previous), Some(next)) = (previous, next)
-            && previous != 0
-            && next != 0
-            && previous % 4 == 0
-            && next % 4 == 0
-        {
-            let _ = js_sys::Atomics::store(
-                &memory,
-                previous / 4 + Self::PTHREAD_NEXT_WORD,
-                next as i32,
-            );
-            let _ = js_sys::Atomics::store(
-                &memory,
-                next / 4 + Self::PTHREAD_PREV_WORD,
-                previous as i32,
-            );
-            let _ = js_sys::Atomics::store(
-                &memory,
-                control_index + Self::PTHREAD_PREV_WORD,
-                self.control_block as i32,
-            );
-            let _ = js_sys::Atomics::store(
-                &memory,
-                control_index + Self::PTHREAD_NEXT_WORD,
-                self.control_block as i32,
-            );
-        }
-        let _ = js_sys::Atomics::store(&memory, control_index + Self::PTHREAD_TID_WORD, 0);
-        let state_index = control_index + Self::PTHREAD_DETACH_STATE_WORD;
-        let _ = js_sys::Atomics::store(&memory, state_index, 0);
-        let _ = js_sys::Atomics::notify(&memory, state_index);
-    }
 }
 
 impl SchedulerState {
@@ -382,9 +309,6 @@ impl SchedulerState {
                     memory.map(|m| m.as_jsvalue(&temp_store).dyn_into().unwrap());
                 let module = JsValue::from(module).dyn_into().unwrap();
                 let task_key = spawn_wasm.task_key();
-                let completion = memory.as_ref().and_then(|memory| {
-                    WasmThreadCompletion::from_thread_start(memory, spawn_wasm.thread_start_ptr())
-                });
 
                 self.post_wasm_message_from(
                     source_worker_id,
@@ -394,7 +318,6 @@ impl SchedulerState {
                         spawn_wasm,
                     }),
                     task_key,
-                    completion,
                 )
             }
             SchedulerMessage::WorkerBusy { worker_id } => {
@@ -612,7 +535,6 @@ impl SchedulerState {
         source_worker_id: Option<u32>,
         msg: PostMessagePayload,
         task_key: (u32, u32),
-        completion: Option<WasmThreadCompletion>,
     ) -> Result<(), Error> {
         let reason = format!("wasm-{}.{}", task_key.0, task_key.1);
         let worker = self.next_available_worker(&reason)?;
@@ -621,7 +543,6 @@ impl SchedulerState {
             task_key,
             WasmWorker {
                 worker_id: worker.id(),
-                completion,
             },
         );
         worker
@@ -786,9 +707,10 @@ impl SchedulerState {
             workers.remove(&worker_id);
             !workers.is_empty()
         });
-        if let Some(completion) = worker.completion {
-            completion.finish();
-        }
+    }
+
+    fn wasm_tasks_are_idle(&self) -> bool {
+        self.wasm_workers.is_empty()
     }
 }
 
@@ -817,7 +739,6 @@ fn move_worker(worker_id: u32, from: &mut VecDeque<WorkerHandle>, to: &mut VecDe
 
 #[cfg(test)]
 mod tests {
-    use js_sys::{Int32Array, Object, Reflect, WebAssembly};
     use tokio::sync::oneshot;
     use wasm_bindgen::JsValue;
     use wasm_bindgen_test::wasm_bindgen_test;
@@ -892,89 +813,6 @@ mod tests {
                 .as_string()
                 .as_deref(),
             Some("module")
-        );
-    }
-
-    #[wasm_bindgen_test]
-    fn forced_thread_completion_uses_memory_after_growth() {
-        let descriptor = Object::new();
-        Reflect::set(&descriptor, &"initial".into(), &1.into()).unwrap();
-        Reflect::set(&descriptor, &"maximum".into(), &2.into()).unwrap();
-        Reflect::set(&descriptor, &"shared".into(), &JsValue::TRUE).unwrap();
-        let memory = WebAssembly::Memory::new(&descriptor).unwrap();
-
-        let start_ptr = 128_u32;
-        let control_block = 65_536_u32 + 128;
-        let before_growth = Int32Array::new(&memory.buffer());
-        js_sys::Atomics::store(
-            &before_growth,
-            start_ptr / 4 + WasmThreadCompletion::THREAD_START_PTHREAD_WORD,
-            control_block as i32,
-        )
-        .unwrap();
-        let completion = WasmThreadCompletion::from_thread_start(&memory, Some(start_ptr.into()))
-            .expect("valid thread-start record");
-
-        assert_eq!(memory.grow(1), 1);
-        let current = Int32Array::new(&memory.buffer());
-        let previous = 256_u32;
-        let next = 512_u32;
-        let control_index = control_block / 4;
-        js_sys::Atomics::store(
-            &current,
-            control_index + WasmThreadCompletion::PTHREAD_PREV_WORD,
-            previous as i32,
-        )
-        .unwrap();
-        js_sys::Atomics::store(
-            &current,
-            control_index + WasmThreadCompletion::PTHREAD_NEXT_WORD,
-            next as i32,
-        )
-        .unwrap();
-        js_sys::Atomics::store(
-            &current,
-            control_index + WasmThreadCompletion::PTHREAD_TID_WORD,
-            42,
-        )
-        .unwrap();
-        js_sys::Atomics::store(
-            &current,
-            control_index + WasmThreadCompletion::PTHREAD_DETACH_STATE_WORD,
-            2,
-        )
-        .unwrap();
-
-        completion.finish();
-
-        assert_eq!(
-            js_sys::Atomics::load(
-                &current,
-                previous / 4 + WasmThreadCompletion::PTHREAD_NEXT_WORD,
-            )
-            .unwrap(),
-            next as i32,
-        );
-        assert_eq!(
-            js_sys::Atomics::load(&current, next / 4 + WasmThreadCompletion::PTHREAD_PREV_WORD,)
-                .unwrap(),
-            previous as i32,
-        );
-        assert_eq!(
-            js_sys::Atomics::load(
-                &current,
-                control_index + WasmThreadCompletion::PTHREAD_TID_WORD,
-            )
-            .unwrap(),
-            0,
-        );
-        assert_eq!(
-            js_sys::Atomics::load(
-                &current,
-                control_index + WasmThreadCompletion::PTHREAD_DETACH_STATE_WORD,
-            )
-            .unwrap(),
-            0,
         );
     }
 }

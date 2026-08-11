@@ -24,6 +24,9 @@ pub(crate) enum SchedulerMessage {
     Close {
         #[derivative(Debug(format_with = "crate::worker_utils::hidden"))]
         completion: Option<tokio::sync::oneshot::Sender<()>>,
+        /// Wait for active WebAssembly tasks to reach their worker-idle
+        /// boundary before terminating the workers.
+        drain: bool,
     },
     /// Run a promise on a worker thread.
     SpawnAsync(#[derivative(Debug(format_with = "crate::worker_utils::hidden"))] AsyncTask),
@@ -113,7 +116,10 @@ impl SchedulerMessage {
         let de = Deserializer::new(value);
 
         match de.ty()?.as_str() {
-            consts::TYPE_CLOSE => Ok(SchedulerMessage::Close { completion: None }),
+            consts::TYPE_CLOSE => Ok(SchedulerMessage::Close {
+                completion: None,
+                drain: false,
+            }),
             consts::TYPE_SPAWN_ASYNC => {
                 let task = unsafe { de.boxed(consts::PTR)? };
                 Ok(SchedulerMessage::SpawnAsync(task))
@@ -196,11 +202,12 @@ impl SchedulerMessage {
 
     pub(crate) fn into_js(self) -> Result<JsValue, Error> {
         match self {
-            SchedulerMessage::Close { completion: None } => {
-                Serializer::new(consts::TYPE_CLOSE).finish()
-            }
+            SchedulerMessage::Close {
+                completion: None, ..
+            } => Serializer::new(consts::TYPE_CLOSE).finish(),
             SchedulerMessage::Close {
                 completion: Some(_),
+                ..
             } => Err(
                 anyhow::anyhow!("acknowledged close messages are local to the scheduler").into(),
             ),

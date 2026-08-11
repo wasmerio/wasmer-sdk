@@ -260,7 +260,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(receiver.await.unwrap(), 2);
-        pool.close();
+        pool.close_and_wait().await;
     }
 
     #[wasm_bindgen_test]
@@ -276,7 +276,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(receiver.await.unwrap(), 42);
-        pool.close();
+        pool.close_and_wait().await;
     }
 
     /// Regression test for wasmer-js#355: a worker must be marked busy before
@@ -296,11 +296,12 @@ mod tests {
         pool.task_dedicated(second_task).unwrap();
         pool.task_dedicated(first_task).unwrap();
 
-        let timeout = JsFuture::from(crate::worker_utils::GlobalScope::current().sleep(1000));
+        let timeout_timer = crate::worker_utils::HostTimer::new(1000);
+        let timeout = JsFuture::from(timeout_timer.promise());
         futures::select! {
             _ = timeout.fuse() => panic!("interdependent blocking tasks deadlocked"),
             _ = receiver_2 => {}
         }
-        pool.close();
+        pool.close_and_wait().await;
     }
 }

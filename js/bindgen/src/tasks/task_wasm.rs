@@ -14,7 +14,7 @@ use wasmer_wasix::{
         TaskWasmRecycle, TaskWasmRun, TaskWasmRunProperties, WasmResumeTrigger,
     },
 };
-use wasmer_wasix_types::{wasi::ExitCode, wasix::ThreadStartType};
+use wasmer_wasix_types::wasi::ExitCode;
 
 use crate::tasks::SchedulerMessage;
 
@@ -36,11 +36,6 @@ pub(crate) fn to_scheduler_message(task: TaskWasm) -> Result<SchedulerMessage, W
     } = callbacks;
 
     let task_key = (env.pid().raw(), env.tid().raw());
-    let thread_start_ptr = match env.thread.thread_start_type() {
-        ThreadStartType::MainThread => None,
-        ThreadStartType::ThreadSpawn { start_ptr } => Some(start_ptr),
-    };
-
     let module_bytes = module.serialize().unwrap();
 
     let (memory_ty, memory, run_type) = match spawn_type {
@@ -64,7 +59,6 @@ pub(crate) fn to_scheduler_message(task: TaskWasm) -> Result<SchedulerMessage, W
     let store_snapshot = globals;
     let spawn_wasm = SpawnWasm {
         task_key,
-        thread_start_ptr,
         trigger: trigger.map(|trigger| WasmRunTrigger {
             run: trigger,
             memory_ty: memory_ty.expect("triggers must have the a known memory type"),
@@ -111,8 +105,6 @@ struct WasmRunTrigger {
 pub(crate) struct SpawnWasm {
     /// The WASIX process and thread executed by this worker task.
     task_key: (u32, u32),
-    /// Address of the WASIX thread-start record in guest memory.
-    thread_start_ptr: Option<u64>,
     /// An async callback to perform before running.
     #[derivative(Debug(format_with = "crate::worker_utils::hidden"))]
     pre_run: Option<Box<TaskWasmPreRun>>,
@@ -145,9 +137,6 @@ impl SpawnWasm {
         self.task_key
     }
 
-    pub(crate) fn thread_start_ptr(&self) -> Option<u64> {
-        self.thread_start_ptr
-    }
     pub(crate) fn module_bytes(&self) -> Bytes {
         self.module_bytes.clone()
     }
@@ -185,7 +174,6 @@ impl ReadySpawnWasm {
     ) -> Result<(), anyhow::Error> {
         let ReadySpawnWasm(SpawnWasm {
             task_key: _,
-            thread_start_ptr: _,
             pre_run,
             run,
             run_type,
