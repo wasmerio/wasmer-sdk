@@ -1,10 +1,4 @@
-use std::{
-    fmt::Debug,
-    future::Future,
-    pin::Pin,
-    sync::atomic::{AtomicU32, Ordering},
-    task::{Context, Poll},
-};
+use std::{fmt::Debug, future::Future, pin::Pin};
 
 use futures::future::LocalBoxFuture;
 use instant::Duration;
@@ -23,37 +17,6 @@ use crate::{
 #[derive(Debug)]
 pub struct ThreadPool {
     scheduler: Scheduler,
-}
-
-struct SleepFuture {
-    sleep_id: u32,
-    receiver: tokio::sync::oneshot::Receiver<()>,
-    scheduler: Scheduler,
-    finished: bool,
-}
-
-impl Future for SleepFuture {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match Pin::new(&mut self.receiver).poll(cx) {
-            Poll::Ready(_) => {
-                self.finished = true;
-                Poll::Ready(())
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-impl Drop for SleepFuture {
-    fn drop(&mut self) {
-        if !self.finished {
-            let _ = self.scheduler.send(SchedulerMessage::CancelSleep {
-                sleep_id: self.sleep_id,
-            });
-        }
-    }
 }
 
 const CROSS_ORIGIN_WARNING: &str = r#"You can only run packages from "Cross-Origin Isolated" websites. For more details, check out https://docs.wasmer.io/javascript-sdk/explainers/troubleshooting#sharedarraybuffer-and-cross-origin-isolation"#;
@@ -145,9 +108,6 @@ impl VirtualTaskManager for ThreadPool {
             return Box::pin(std::future::ready(()));
         }
 
-        static NEXT_SLEEP_ID: AtomicU32 = AtomicU32::new(1);
-
-        let sleep_id = NEXT_SLEEP_ID.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         let millis = time.as_millis().max(1);
@@ -157,21 +117,20 @@ impl VirtualTaskManager for ThreadPool {
             i32::MAX
         };
 
-        // The calling WASM worker cannot service its own JavaScript timer until
-        // the syscall completes. Ask the scheduler realm to arm the timer, but
-        // do not turn the sleep into an execution job: sleeps consume neither
-        // a shared nor a dedicated worker.
-        let _ = self.send(SchedulerMessage::Sleep {
-            sleep_id,
-            millis: time,
-            completion: tx,
-        });
+        // This timer runs on a separate worker because a WASIX syscall may
+        // synchronously block its calling worker. The guest now runs inside an
+        // environment-owned JavaScript global, so this worker's host timer is
+        // no longer exposed to guest mutation.
+        let _ = self.task_dedicated(Box::new(move || {
+            wasm_bindgen_futures::spawn_local(async move {
+                let global = GlobalScope::current();
+                let _ = wasm_bindgen_futures::JsFuture::from(global.sleep(time)).await;
+                let _ = tx.send(());
+            })
+        }));
 
-        Box::pin(SleepFuture {
-            sleep_id,
-            receiver: rx,
-            scheduler: self.scheduler.clone(),
-            finished: false,
+        Box::pin(async move {
+            let _ = rx.await;
         })
     }
 
@@ -296,8 +255,7 @@ mod tests {
         pool.task_dedicated(second_task).unwrap();
         pool.task_dedicated(first_task).unwrap();
 
-        let timeout_timer = crate::worker_utils::HostTimer::new(1000);
-        let timeout = JsFuture::from(timeout_timer.promise());
+        let timeout = JsFuture::from(GlobalScope::current().sleep(1000));
         futures::select! {
             _ = timeout.fuse() => panic!("interdependent blocking tasks deadlocked"),
             _ = receiver_2 => {}

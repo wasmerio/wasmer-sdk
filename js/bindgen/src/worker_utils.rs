@@ -3,69 +3,10 @@ use std::{
     num::NonZeroUsize,
 };
 
-use js_sys::{Array, Function, JsString, Promise};
+use js_sys::{JsString, Promise};
 
-use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Window, WorkerGlobalScope};
-
-#[wasm_bindgen(inline_js = r#"
-const wasmerSdkHostSetTimeout = globalThis.setTimeout.bind(globalThis);
-const wasmerSdkHostClearTimeout = globalThis.clearTimeout.bind(globalThis);
-const wasmerSdkHostPromise = globalThis.Promise;
-
-export function wasmer_sdk_create_host_timer(milliseconds) {
-  let active = true;
-  let handle;
-  let resolveTimer;
-  const promise = new wasmerSdkHostPromise((resolve) => {
-    resolveTimer = resolve;
-    handle = wasmerSdkHostSetTimeout(() => {
-      if (!active) return;
-      active = false;
-      resolve();
-    }, milliseconds);
-  });
-  const cancel = () => {
-    if (!active) return;
-    active = false;
-    wasmerSdkHostClearTimeout(handle);
-    resolveTimer();
-  };
-  return [promise, cancel];
-}
-"#)]
-extern "C" {
-    fn wasmer_sdk_create_host_timer(milliseconds: i32) -> Array;
-}
-
-pub(crate) struct HostTimer {
-    promise: Promise,
-    cancel: Function,
-}
-
-impl HostTimer {
-    pub(crate) fn new(milliseconds: i32) -> Self {
-        let timer = wasmer_sdk_create_host_timer(milliseconds);
-        Self {
-            promise: timer.get(0).unchecked_into(),
-            cancel: timer.get(1).unchecked_into(),
-        }
-    }
-
-    pub(crate) fn promise(&self) -> Promise {
-        self.promise.clone()
-    }
-
-    pub(crate) fn cancel(&self) {
-        let _ = self.cancel.call0(&JsValue::UNDEFINED);
-    }
-}
-
-impl Drop for HostTimer {
-    fn drop(&mut self) {
-        self.cancel();
-    }
-}
 
 /// Try to extract the most appropriate error message from a [`JsValue`],
 /// falling back to a generic error message.
@@ -100,6 +41,35 @@ impl GlobalScope {
                 Err(other) => GlobalScope::Other(other),
             },
         }
+    }
+
+    pub fn sleep(&self, milliseconds: i32) -> Promise {
+        Promise::new(&mut |resolve, reject| match self {
+            GlobalScope::Window(window) => {
+                window
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds)
+                    .unwrap();
+            }
+            GlobalScope::Worker(worker_global_scope) => {
+                worker_global_scope
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds)
+                    .unwrap();
+            }
+            GlobalScope::Other(global) => {
+                match js_sys::Reflect::get(global, &JsValue::from_str("setTimeout"))
+                    .ok()
+                    .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+                {
+                    Some(set_timeout) => {
+                        let _ = set_timeout.call2(global, &resolve, &milliseconds.into());
+                    }
+                    None => {
+                        let error = js_sys::Error::new("Unable to call setTimeout()");
+                        reject.call1(&reject, &error).unwrap();
+                    }
+                }
+            }
+        })
     }
 
     /// The amount of concurrency available on this system.

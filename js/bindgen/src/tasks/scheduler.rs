@@ -9,7 +9,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::{self};
 use tracing::Instrument;
 use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::JsFuture;
 use wasmer::js::AsJs;
 use wasmer_types::ModuleHash;
 
@@ -17,7 +16,6 @@ use crate::tasks::{
     AsyncJob, BlockingJob, CapiTransfer, Notification, PostMessagePayload, SchedulerMessage,
     WorkerHandle, WorkerMessage,
 };
-use crate::worker_utils::HostTimer;
 
 /// A handle for interacting with the threadpool's scheduler.
 #[derive(Debug, Clone)]
@@ -190,27 +188,6 @@ struct SchedulerState {
     capi_origins: BTreeMap<(u32, i32), u32>,
     /// The browser worker executing each WASIX WebAssembly thread.
     wasm_workers: BTreeMap<(u32, u32), WasmWorker>,
-    /// Host timers keyed by the ID allocated in the originating worker.
-    sleeps: BTreeMap<(Option<u32>, u32), ScheduledSleep>,
-    /// A dedicated Web Worker which may safely invoke Rust cross-thread
-    /// wakers. Browser main threads cannot enter the wasm mutex/condvar path
-    /// used by `virtual_mio::block_on`, because that path uses `Atomics.wait`.
-    wake_worker: Option<WorkerHandle>,
-}
-
-struct ScheduledSleep {
-    _timer: HostTimer,
-    source_worker_id: Option<u32>,
-    completion: tokio::sync::oneshot::Sender<()>,
-}
-
-impl Debug for ScheduledSleep {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ScheduledSleep")
-            .field("timer", &"host")
-            .field("source_worker_id", &self.source_worker_id)
-            .finish_non_exhaustive()
-    }
 }
 
 #[derive(Debug)]
@@ -231,8 +208,6 @@ impl SchedulerState {
             capi_recipients: BTreeMap::new(),
             capi_origins: BTreeMap::new(),
             wasm_workers: BTreeMap::new(),
-            sleeps: BTreeMap::new(),
-            wake_worker: None,
         }
     }
 
@@ -260,19 +235,6 @@ impl SchedulerState {
                 source_worker_id,
                 PostMessagePayload::Blocking(BlockingJob::Thunk(task)),
             ),
-            SchedulerMessage::Sleep {
-                sleep_id,
-                millis,
-                completion,
-            } => self.arm_sleep(source_worker_id, sleep_id, millis, completion),
-            SchedulerMessage::CancelSleep { sleep_id } => {
-                self.cancel_sleep(source_worker_id, sleep_id);
-                Ok(())
-            }
-            SchedulerMessage::SleepReady {
-                source_worker_id,
-                sleep_id,
-            } => self.complete_sleep(source_worker_id, sleep_id),
             SchedulerMessage::FromWorker {
                 source_worker_id,
                 message,
@@ -420,84 +382,6 @@ impl SchedulerState {
             }
             SchedulerMessage::Markers { uninhabited, .. } => match uninhabited {},
         }
-    }
-
-    fn arm_sleep(
-        &mut self,
-        source_worker_id: Option<u32>,
-        sleep_id: u32,
-        millis: i32,
-        completion: tokio::sync::oneshot::Sender<()>,
-    ) -> Result<(), Error> {
-        self.cancel_sleep(source_worker_id, sleep_id);
-        scheduler_diag(format!(
-            "sleep arm source={source_worker_id:?} id={sleep_id} millis={millis}"
-        ));
-
-        let timer = HostTimer::new(millis);
-        let promise = timer.promise();
-        let mailbox = self.mailbox.clone();
-        wasm_bindgen_futures::spawn_local(async move {
-            let _ = JsFuture::from(promise).await;
-            let _ = mailbox.send(SchedulerMessage::SleepReady {
-                source_worker_id,
-                sleep_id,
-            });
-        });
-        self.sleeps.insert(
-            (source_worker_id, sleep_id),
-            ScheduledSleep {
-                _timer: timer,
-                source_worker_id,
-                completion,
-            },
-        );
-        Ok(())
-    }
-
-    fn cancel_sleep(&mut self, source_worker_id: Option<u32>, sleep_id: u32) {
-        let Some(_sleep) = self.sleeps.remove(&(source_worker_id, sleep_id)) else {
-            return;
-        };
-        scheduler_diag(format!(
-            "sleep cancel source={source_worker_id:?} id={sleep_id}"
-        ));
-    }
-
-    fn complete_sleep(
-        &mut self,
-        source_worker_id: Option<u32>,
-        sleep_id: u32,
-    ) -> Result<(), Error> {
-        let Some(sleep) = self.sleeps.remove(&(source_worker_id, sleep_id)) else {
-            return Ok(());
-        };
-        scheduler_diag(format!(
-            "sleep ready source={source_worker_id:?} id={sleep_id}"
-        ));
-
-        if sleep.source_worker_id.is_none() {
-            let _ = sleep.completion.send(());
-            return Ok(());
-        }
-
-        if self.wake_worker.is_none() {
-            let worker = self.start_worker()?;
-            scheduler_diag(format!("create wake-worker={}", worker.id()));
-            self.wake_worker = Some(worker);
-        }
-        let worker = self.wake_worker.as_ref().unwrap();
-        let completion = sleep.completion;
-        let task = Box::new(move || {
-            Box::pin(async move {
-                let _ = completion.send(());
-            }) as futures::future::LocalBoxFuture<'static, ()>
-        });
-        scheduler_diag(format!(
-            "sleep deliver wake-worker={} source={source_worker_id:?} id={sleep_id}",
-            worker.id()
-        ));
-        worker.send(PostMessagePayload::Async(AsyncJob::Thunk(task)))
     }
 
     fn post_message_from(
