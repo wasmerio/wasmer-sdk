@@ -556,6 +556,63 @@ fs.createReadStream('/workspace/stream-fixture.txt', { highWaterMark: 5 })
 );
 
 test(
+  "uses scoped encoding leases for host-owned buffers",
+  {
+    skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
+    timeout: 30_000,
+  },
+  async () => {
+    const client = new Wasmer({ cache: false });
+    let sandbox;
+    try {
+      await client.ready();
+      const edgejs = await loadEdgejs(client);
+      sandbox = await client.sandboxes.create({
+        packages: [edgejs],
+        files: {
+          "encoding-leases.cjs": `
+const shared = new SharedArrayBuffer(3);
+new Uint8Array(shared).set([102, 111, 111]);
+
+const sourceStorage = new Uint8Array([0xa5, 0xa5, 104, 195, 169, 0xa5]);
+const destinationStorage = new Uint8Array(8).fill(0xa5);
+const result = new TextEncoder().encodeInto(
+  'hé',
+  destinationStorage.subarray(2, 6),
+);
+
+console.log(JSON.stringify({
+  shared: new TextDecoder().decode(shared),
+  ranged: new TextDecoder().decode(sourceStorage.subarray(2, 5)),
+  result,
+  encoded: Array.from(destinationStorage.subarray(2, 5)),
+  prefixPreserved: destinationStorage[1] === 0xa5,
+  suffixPreserved: destinationStorage[5] === 0xa5,
+}));
+`,
+        },
+      });
+
+      const output = await sandbox
+        .command("node", ["/workspace/encoding-leases.cjs"])
+        .run({ timeoutMs: 10_000, check: false });
+      assert.equal(output.ok, true, output.stderr.text());
+      assert.deepEqual(JSON.parse(output.stdout.text().trim()), {
+        shared: "foo",
+        ranged: "hé",
+        result: { read: 2, written: 3 },
+        encoded: [104, 195, 169],
+        prefixPreserved: true,
+        suffixPreserved: true,
+      });
+    } finally {
+      await sandbox?.close();
+      await client.close();
+    }
+  },
+);
+
+test(
   "keeps retained host Buffer mirrors coherent across async file reads",
   {
     skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
