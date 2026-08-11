@@ -44,10 +44,11 @@ import vinextViteConfig from "../workspace/vinext/vite.config.js?raw";
 import workspaceReadme from "../workspace/README.md?raw";
 
 const DEFAULT_PACKAGE = "wasmer/bash";
+const EDGEJS_PACKAGE = "syrusakbary/edgejs@0.1.12";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "python/python",
-  "syrusakbary/edgejs@0.1.10",
+  EDGEJS_PACKAGE,
   "php/php-32",
 ];
 const TRANSCRIPT_LIMIT = 128 * 1024;
@@ -313,7 +314,7 @@ async function start(): Promise<void> {
       : undefined;
     const [mainPackage, ...uses] = await Promise.all(
       packageNames.map(async (name) => {
-        if (name !== "syrusakbary/edgejs@0.1.10" || !edgejsDevelopmentPackage) {
+        if (name !== EDGEJS_PACKAGE || !edgejsDevelopmentPackage) {
           return wasmer.packages.load(name);
         }
         const response = await fetch(edgejsDevelopmentPackage);
