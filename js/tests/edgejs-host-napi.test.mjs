@@ -576,6 +576,7 @@ new Uint8Array(shared).set([102, 111, 111]);
 
 const sourceStorage = new Uint8Array([0xa5, 0xa5, 104, 195, 169, 0xa5]);
 const destinationStorage = new Uint8Array(8).fill(0xa5);
+const { transcode } = require('node:buffer');
 const result = new TextEncoder().encodeInto(
   'hé',
   destinationStorage.subarray(2, 6),
@@ -584,6 +585,11 @@ const result = new TextEncoder().encodeInto(
 console.log(JSON.stringify({
   shared: new TextDecoder().decode(shared),
   ranged: new TextDecoder().decode(sourceStorage.subarray(2, 5)),
+  transcoded: transcode(
+    sourceStorage.subarray(2, 5),
+    'utf8',
+    'utf16le',
+  ).toString('hex'),
   result,
   encoded: Array.from(destinationStorage.subarray(2, 5)),
   prefixPreserved: destinationStorage[1] === 0xa5,
@@ -600,6 +606,7 @@ console.log(JSON.stringify({
       assert.deepEqual(JSON.parse(output.stdout.text().trim()), {
         shared: "foo",
         ranged: "hé",
+        transcoded: "6800e900",
         result: { read: 2, written: 3 },
         encoded: [104, 195, 169],
         prefixPreserved: true,
