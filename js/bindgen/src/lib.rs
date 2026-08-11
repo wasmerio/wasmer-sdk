@@ -182,8 +182,7 @@ impl JsWasmer {
 
     pub async fn shutdown(&self) -> Result<(), JsValue> {
         self.inner.shutdown().await.map_err(sdk_error)?;
-        self.tasks.close();
-        wasm_bindgen_futures::JsFuture::from(worker_utils::GlobalScope::current().sleep(0)).await?;
+        self.tasks.close_and_wait().await;
         Ok(())
     }
 }

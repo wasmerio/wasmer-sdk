@@ -41,18 +41,24 @@ impl Scheduler {
         tracing::debug!(thread_id, "Spinning up the scheduler");
         wasm_bindgen_futures::spawn_local(
             async move {
-                while let Some(msg) = receiver.recv().await {
+                let completion = loop {
+                    let Some(msg) = receiver.recv().await else {
+                        break None;
+                    };
                     tracing::trace!(?msg, "Executing a message");
-                    if let SchedulerMessage::Close = msg {
-                        break;
+                    if let SchedulerMessage::Close { completion } = msg {
+                        break completion;
                     }
                     if let Err(e) = scheduler.execute(msg) {
                         tracing::error!(error = &*e, "An error occurred while handling a message");
                     }
-                }
+                };
 
                 tracing::debug!("Shutting down the scheduler");
                 drop(scheduler);
+                if let Some(completion) = completion {
+                    let _ = completion.send(());
+                }
             }
             .in_current_span()
             .instrument(tracing::debug_span!("scheduler", thread_id = thread_id)),
@@ -105,7 +111,22 @@ impl Scheduler {
     }
 
     pub fn close(&self) {
-        let _ = self.channel.send(SchedulerMessage::Close);
+        let _ = self
+            .channel
+            .send(SchedulerMessage::Close { completion: None });
+    }
+
+    pub async fn close_and_wait(&self) {
+        let (completion, receiver) = tokio::sync::oneshot::channel();
+        if self
+            .channel
+            .send(SchedulerMessage::Close {
+                completion: Some(completion),
+            })
+            .is_ok()
+        {
+            let _ = receiver.await;
+        }
     }
 
     pub fn is_closed(&self) -> bool {
@@ -298,7 +319,7 @@ impl SchedulerState {
         message: SchedulerMessage,
     ) -> Result<(), Error> {
         match message {
-            SchedulerMessage::Close => {
+            SchedulerMessage::Close { .. } => {
                 // Unreachable in practice: the receive loop breaks on Close
                 // before calling execute(), and dropping the state terminates
                 // every worker via WorkerHandle::drop.

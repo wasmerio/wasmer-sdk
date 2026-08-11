@@ -102,35 +102,6 @@ impl GlobalScope {
         }
     }
 
-    pub fn sleep(&self, milliseconds: i32) -> Promise {
-        Promise::new(&mut |resolve, reject| match self {
-            GlobalScope::Window(window) => {
-                window
-                    .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds)
-                    .unwrap();
-            }
-            GlobalScope::Worker(worker_global_scope) => {
-                worker_global_scope
-                    .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds)
-                    .unwrap();
-            }
-            GlobalScope::Other(global) => {
-                match js_sys::Reflect::get(global, &JsValue::from_str("setTimeout"))
-                    .ok()
-                    .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
-                {
-                    Some(set_timeout) => {
-                        let _ = set_timeout.call2(global, &resolve, &milliseconds.into());
-                    }
-                    None => {
-                        let error = js_sys::Error::new("Unable to call setTimeout()");
-                        reject.call1(&reject, &error).unwrap();
-                    }
-                }
-            }
-        })
-    }
-
     /// The amount of concurrency available on this system.
     ///
     /// Returns `None` if unable to determine the available concurrency.

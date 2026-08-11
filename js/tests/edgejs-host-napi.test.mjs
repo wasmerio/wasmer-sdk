@@ -503,6 +503,59 @@ Promise.all([fs.promises.stat('.'), fs.promises.lstat('.')]).then(([stat, lstat]
 );
 
 test(
+  "uses provider-owned buffers for unsafe allocation and stream ingress",
+  {
+    skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
+    timeout: 30_000,
+  },
+  async () => {
+    const client = new Wasmer({ cache: false });
+    let sandbox;
+    try {
+      await client.ready();
+      const edgejs = await loadEdgejs(client);
+      sandbox = await client.sandboxes.create({
+        packages: [edgejs],
+        files: {
+          "stream-fixture.txt": "provider-owned-stream-data",
+          "stream-buffer.cjs": `
+const fs = require('node:fs');
+const expected = Buffer.from('provider-owned-stream-data');
+const unsafe = Buffer.allocUnsafe(64);
+unsafe.fill(0xa5);
+
+const chunks = [];
+fs.createReadStream('/workspace/stream-fixture.txt', { highWaterMark: 5 })
+  .on('data', (chunk) => chunks.push(chunk))
+  .on('end', () => {
+    const received = Buffer.concat(chunks);
+    console.log(JSON.stringify({
+      unsafeLength: unsafe.length,
+      received: received.toString(),
+      matches: received.equals(expected),
+    }));
+  });
+`,
+        },
+      });
+
+      const output = await sandbox
+        .command("node", ["/workspace/stream-buffer.cjs"])
+        .run({ timeoutMs: 10_000, check: false });
+      assert.equal(output.ok, true, output.stderr.text());
+      assert.deepEqual(JSON.parse(output.stdout.text().trim()), {
+        unsafeLength: 64,
+        received: "provider-owned-stream-data",
+        matches: true,
+      });
+    } finally {
+      await sandbox?.close();
+      await client.close();
+    }
+  },
+);
+
+test(
   "keeps retained host Buffer mirrors coherent across async file reads",
   {
     skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",

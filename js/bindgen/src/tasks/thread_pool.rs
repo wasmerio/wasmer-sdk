@@ -95,8 +95,8 @@ impl ThreadPool {
         })
     }
 
-    pub fn close(&self) {
-        self.scheduler.close();
+    pub async fn close_and_wait(&self) {
+        self.scheduler.close_and_wait().await;
     }
 
     // Compatibility entry point retained after this operation left
