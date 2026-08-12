@@ -119,6 +119,52 @@ import('./entry.mjs').catch((error) => {
 );
 
 test(
+  "does not lend the CommonJS loader to an indirect eval dynamic import",
+  {
+    skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
+    timeout: 60_000,
+  },
+  async () => {
+    const client = new Wasmer({ cache: false });
+    let sandbox;
+    try {
+      await client.ready();
+      const edgejs = await loadEdgejs(client);
+      sandbox = await client.sandboxes.create({ packages: [edgejs] });
+      const output = await sandbox
+        .command("node", [
+          "-e",
+          `
+process.nextTick(() => {});
+Promise.resolve('import("node:fs")').then(eval).then(
+  () => {
+    console.error('__INDIRECT_EVAL_UNEXPECTED_SUCCESS__');
+    process.exitCode = 1;
+  },
+  (error) => {
+    console.log('__INDIRECT_EVAL_ERROR__', error && error.code);
+  },
+);
+`,
+        ])
+        .run({ timeoutMs: 30_000, check: false });
+      assert.equal(
+        output.ok,
+        true,
+        `exit=${output.exitCode} reason=${output.reason}\nstdout:\n${output.stdout.text()}\nstderr:\n${output.stderr.text()}`,
+      );
+      assert.match(
+        output.stdout.text(),
+        /__INDIRECT_EVAL_ERROR__ ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING/,
+      );
+    } finally {
+      await sandbox?.close();
+      await client.close();
+    }
+  },
+);
+
+test(
   "routes Edge queueMicrotask through the host microtask queue once",
   {
     skip: edgejsAvailable ? false : "set WASMER_EDGEJS_WEBC or WASMER_EDGEJS_PACKAGE",
