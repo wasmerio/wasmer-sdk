@@ -66,7 +66,7 @@ globalThis.addEventListener("message", (event: MessageEvent<unknown>) => {
   else if (message.action === "forward") child.history.forward();
   else if (message.action === "refresh") {
     reportLoading();
-    frame.src = frame.src;
+    child.location.reload();
   }
   else if (message.action === "navigate" && typeof message.url === "string") {
     const url = new URL(message.url, location.origin);
@@ -137,5 +137,5 @@ function refreshWithKeyboard(event: KeyboardEvent): void {
   event.preventDefault();
   event.stopImmediatePropagation();
   reportLoading();
-  frame.src = frame.src;
+  frame.contentWindow?.location.reload();
 }
