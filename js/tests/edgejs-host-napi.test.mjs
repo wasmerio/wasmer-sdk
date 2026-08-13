@@ -580,7 +580,8 @@ console.log(JSON.stringify({
   memory: nonnegativeNumbers(memory),
   resources: resources.userCPUTime >= 0 && resources.systemCPUTime >= 0,
   heap: nonnegativeNumbers(heap),
-  spaces: Array.isArray(spaces) && spaces.every(nonnegativeNumbers),
+  spaces: Array.isArray(spaces) && spaces.every(({ space_name, ...statistics }) =>
+    typeof space_name === 'string' && nonnegativeNumbers(statistics)),
   code: nonnegativeNumbers(code),
 }));`,
         ])
