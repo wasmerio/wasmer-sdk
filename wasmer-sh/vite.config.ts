@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vite";
@@ -8,6 +8,10 @@ const crossOriginIsolationHeaders = {
   "Cross-Origin-Embedder-Policy": "require-corp",
 };
 const root = fileURLToPath(new URL(".", import.meta.url));
+const edgejsWebcUrl = process.env.VITE_EDGEJS_WEBC_URL;
+const edgejsWebcPath = edgejsWebcUrl?.startsWith("/@fs/")
+  ? decodeURIComponent(edgejsWebcUrl.slice("/@fs".length))
+  : undefined;
 
 export default defineConfig({
   cacheDir: resolve(root, "node_modules/.vite/app"),
@@ -19,6 +23,7 @@ export default defineConfig({
         fileURLToPath(new URL(".", import.meta.url)),
         fileURLToPath(new URL("../js", import.meta.url)),
         fileURLToPath(new URL("../fixtures", import.meta.url)),
+        ...(edgejsWebcPath ? [dirname(edgejsWebcPath)] : []),
       ],
     },
   },
