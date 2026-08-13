@@ -311,6 +311,22 @@ try {
 
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send(
+      `node -e 'const v8=require("v8"),spaces=v8.getHeapSpaceStatistics(),stats=v8.getHeapStatistics();console.log(spaces.length>0&&stats.heap_size_limit>0?"__V8_HEAP_STATS_OK__":"__V8_HEAP_STATS_FAILED__")'\r`,
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("\n__V8_HEAP_STATS_OK__"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
       `node -e 'const fs=require("fs"),{fork}=require("child_process"),path="/workspace/.wasmer-test/fork-child.js";fs.writeFileSync(path,"process.send(\\"ready\\");process.on(\\"message\\",m=>{if(m===\\"finish\\")process.exit(0)})");const child=fork(path);child.on("message",m=>{if(m==="ready")child.send("finish")});child.on("exit",code=>console.log(code===0?"__FORK_IPC_OK__":"__FORK_IPC_FAILED__"))'\r`,
     );
   });
@@ -361,7 +377,7 @@ try {
   } else if (testNext) {
     await page.evaluate(async () => {
       await globalThis.__wasmerShell.send(
-        "cd next && pnpm install --frozen-lockfile --ignore-scripts && pnpm dev\r",
+        "(cd next && pnpm install --frozen-lockfile --ignore-scripts && exec pnpm dev)\r",
       );
     });
     await page.locator("#preview-panel").waitFor({ timeout: nextTimeout });
