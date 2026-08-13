@@ -28,6 +28,7 @@ const localWasmerPatches = localWasmer
       ["wasmer", "lib/api"],
       ["wasmer-c-api-imports", "lib/c-api-imports"],
       ["wasmer-config", "lib/config"],
+      ["wasmer-napi", "lib/napi"],
       ["wasmer-package", "lib/package"],
       ["wasmer-types", "lib/types"],
       ["wasmer-wasix", "lib/wasix"],

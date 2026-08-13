@@ -19,6 +19,7 @@ virtual-net = { path = "/Users/syrusakbary/Development/wasmer/lib/virtual-net" }
 wasmer = { path = "/Users/syrusakbary/Development/wasmer/lib/api" }
 wasmer-c-api-imports = { path = "/Users/syrusakbary/Development/wasmer/lib/c-api-imports" }
 wasmer-config = { path = "/Users/syrusakbary/Development/wasmer/lib/config" }
+wasmer-napi = { path = "/Users/syrusakbary/Development/wasmer/lib/napi" }
 wasmer-package = { path = "/Users/syrusakbary/Development/wasmer/lib/package" }
 wasmer-types = { path = "/Users/syrusakbary/Development/wasmer/lib/types" }
 wasmer-wasix = { path = "/Users/syrusakbary/Development/wasmer/lib/wasix" }
