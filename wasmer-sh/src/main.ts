@@ -44,7 +44,7 @@ import vinextViteConfig from "../workspace/vinext/vite.config.js?raw";
 import workspaceReadme from "../workspace/README.md?raw";
 
 const DEFAULT_PACKAGE = "wasmer/bash";
-const EDGEJS_PACKAGE = "syrusakbary/edgejs@0.1.15";
+const EDGEJS_PACKAGE = "syrusakbary/edgejs@0.1.16";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "python/python",
@@ -137,7 +137,10 @@ const elements = {
 };
 
 const config = readConfig(new URLSearchParams(window.location.search));
-const wasmer = new Wasmer({ cache: { namespace: "wasmer.sh" } });
+const wasmer = new Wasmer({
+  cache: { namespace: "wasmer.sh" },
+  parallelism: 4,
+});
 const terminal = new Terminal({
   allowProposedApi: false,
   convertEol: true,

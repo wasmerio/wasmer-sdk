@@ -65,6 +65,7 @@ pub fn set_worker_url(url: String) {
 #[serde(rename_all = "camelCase")]
 struct ClientOptions {
     output_bytes: Option<f64>,
+    parallelism: Option<f64>,
     cache: Option<ClientCacheOptions>,
 }
 
@@ -98,7 +99,12 @@ impl JsWasmer {
         } else {
             serde_wasm_bindgen::from_value(options).map_err(js_error)?
         };
-        let tasks = Arc::new(tasks::ThreadPool::new());
+        let parallelism = options
+            .parallelism
+            .map(|value| validate_usize("parallelism", value, 1))
+            .transpose()?
+            .and_then(std::num::NonZeroUsize::new);
+        let tasks = Arc::new(tasks::ThreadPool::new(parallelism));
         let mut runtime = PluggableRuntime::new(Arc::clone(&tasks) as Arc<_>);
         runtime.set_tty(Arc::new(DefaultTty::default()));
         if let Some(bridge) = node_network {

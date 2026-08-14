@@ -295,6 +295,22 @@ try {
 
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send(
+      `node -e 'const {execSync}=require("node:child_process"),registry=execSync("pnpm config get registry",{encoding:"utf8"}).trim();console.log("__EDGE_EXECSYNC_OK__",registry)'\r`,
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("\n__EDGE_EXECSYNC_OK__"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
       "mkdir -p .wasmer-test/bin .wasmer-test/pkg && printf '%s\\n' '#!/usr/bin/env node' 'console.log(\"__SYMLINK_SHEBANG_OK__\")' > .wasmer-test/pkg/next && ln -sf ../pkg/next .wasmer-test/bin/next && .wasmer-test/bin/next\r",
     );
   });
