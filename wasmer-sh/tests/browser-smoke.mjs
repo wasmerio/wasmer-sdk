@@ -394,17 +394,51 @@ try {
   if (testNextBuild) {
     await page.evaluate(async () => {
       await globalThis.__wasmerShell.send(
-        "(cd next && pnpm install --frozen-lockfile --ignore-scripts && pnpm build && echo __NEXT_BUILD_OK__) || echo __NEXT_BUILD_FAILED__:$?\r",
+        "(cd next && pnpm install --frozen-lockfile --ignore-scripts && pnpm build && test -f .next/BUILD_ID && echo __NEXT_BUILD_OK__) || echo __NEXT_BUILD_FAILED__:$?\r",
       );
     });
     await page.waitForFunction(
-      () => /\n__NEXT_BUILD_(?:OK|FAILED__:\d+)/.test(globalThis.__wasmerShell.snapshot()),
+      () => {
+        const lines = globalThis.__wasmerShell
+          .snapshot()
+          .replace(/\x1b\[[0-9;]*m/g, "")
+          .replace(/\r/g, "")
+          .split("\n")
+          .map((line) => line.trim());
+        return lines.includes("__NEXT_BUILD_OK__") ||
+          lines.some((line) => line.startsWith("__NEXT_BUILD_FAILED__:"));
+      },
       undefined,
       { timeout: nextTimeout },
     );
-    assert.doesNotMatch(
-      await page.evaluate(() => globalThis.__wasmerShell.snapshot()),
-      /\n__NEXT_BUILD_FAILED__:/,
+    const nextBuildLines = await page.evaluate(() =>
+      globalThis.__wasmerShell
+        .snapshot()
+        .replace(/\x1b\[[0-9;]*m/g, "")
+        .replace(/\r/g, "")
+        .split("\n")
+        .map((line) => line.trim()),
+    );
+    assert.ok(nextBuildLines.includes("__NEXT_BUILD_OK__"));
+    assert.ok(!nextBuildLines.some((line) => line.startsWith("__NEXT_BUILD_FAILED__:")));
+    assert.ok(!nextBuildLines.some((line) => line.includes("Program recieved")));
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("cd next && pnpm start\r");
+    });
+    await page.locator("#preview-panel").waitFor({ timeout: nextTimeout });
+    const nextPreview = page
+      .frameLocator("#preview-panel iframe")
+      .frameLocator("iframe");
+    await nextPreview
+      .getByText("Welcome to Next.js on Wasmer.", { exact: true })
+      .waitFor({ timeout: nextTimeout });
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("\x03");
+    });
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+      undefined,
+      { timeout: 30_000 },
     );
   } else if (testNext) {
     await page.evaluate(async () => {

@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@next/swc-wasm-nodejs':
-        specifier: 16.3.0
-        version: 16.3.0
       next:
         specifier: 16.3.0
         version: 16.3.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -230,9 +227,6 @@ packages:
     cpu: [x64]
     os: [linux]
     libc: [musl]
-
-  '@next/swc-wasm-nodejs@16.3.0':
-    resolution: {integrity: sha512-fkF1rDfao0RWc5KojvpO8MQlPWdbcWnA8Np9dTtziGlZHePOEeycyLfyKSTQI04prd2UMY0AIqLWs2YrKat0wQ==}
 
   '@next/swc-win32-arm64-msvc@16.3.0':
     resolution: {integrity: sha512-C5JSgiO54wURdaxdEUIXqkz04uMqC9UmPX1gtDrV/5Tf1UowdWYI8uA5hfFbPolTlp0q4KZ60xlHePNibf0VIw==}
@@ -476,8 +470,6 @@ snapshots:
 
   '@next/swc-linux-x64-musl@16.3.0':
     optional: true
-
-  '@next/swc-wasm-nodejs@16.3.0': {}
 
   '@next/swc-win32-arm64-msvc@16.3.0':
     optional: true
