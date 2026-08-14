@@ -275,6 +275,22 @@ try {
 
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send(
+      "curl --version >/dev/null && echo __CURL_PRELOADED_OK__\r",
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("\n__CURL_PRELOADED_OK__"),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
       "sh -c 'node -e \"console.log(\\\"__NESTED_NODE_OK__\\\", process.env.PATH)\"'\r",
     );
   });
