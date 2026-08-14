@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "NEXT_TELEMETRY_DISABLED=1 WATCHPACK_POLLING=true next dev --webpack -H 0.0.0.0 -p 3000",
-    "build": "NEXT_TELEMETRY_DISABLED=1 next build --webpack",
+    "dev": "WATCHPACK_POLLING=true next dev --webpack",
+    "build": "next build --webpack",
     "start": "next start -H 0.0.0.0 -p 3000"
   },
   "dependencies": {
