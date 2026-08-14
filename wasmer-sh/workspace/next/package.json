@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "NEXT_TELEMETRY_DISABLED=1 NEXT_TEST_WASM_DIR=/workspace/next/node_modules/@next/swc-wasm-nodejs WATCHPACK_POLLING=true node node_modules/next/dist/bin/next dev --webpack -H 0.0.0.0 -p 3000",
-    "build": "NEXT_TELEMETRY_DISABLED=1 NEXT_TEST_WASM_DIR=/workspace/next/node_modules/@next/swc-wasm-nodejs node node_modules/next/dist/bin/next build --webpack",
-    "start": "NEXT_TEST_WASM_DIR=/workspace/next/node_modules/@next/swc-wasm-nodejs node node_modules/next/dist/bin/next start -H 0.0.0.0 -p 3000"
+    "dev": "NEXT_TELEMETRY_DISABLED=1 NEXT_TEST_WASM_DIR=/workspace/next/node_modules/@next/swc-wasm-nodejs WATCHPACK_POLLING=true next dev --webpack -H 0.0.0.0 -p 3000",
+    "build": "NEXT_TELEMETRY_DISABLED=1 NEXT_TEST_WASM_DIR=/workspace/next/node_modules/@next/swc-wasm-nodejs next build --webpack",
+    "start": "NEXT_TEST_WASM_DIR=/workspace/next/node_modules/@next/swc-wasm-nodejs next start -H 0.0.0.0 -p 3000"
   },
   "dependencies": {
     "@next/swc-wasm-nodejs": "16.3.0",

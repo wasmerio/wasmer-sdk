@@ -3,7 +3,7 @@
 Install the declared dependency and start the server:
 
 ```sh
-cd /workspace/node-express && pnpm i && node server.js
+cd /workspace/node-express && pnpm i && pnpm run start
 ```
 
 The example serves HTML at `/`, JSON at `/api/hello`, and a readiness response
