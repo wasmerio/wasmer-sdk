@@ -66,10 +66,7 @@ impl ThreadPool {
         self.scheduler.close_and_wait().await;
     }
 
-    // Compatibility entry point retained after this operation left
-    // `VirtualTaskManager`; the scheduler still handles this message.
-    #[allow(dead_code)]
-    pub fn terminate_wasm_thread(
+    fn terminate_worker(
         &self,
         pid: WasiProcessId,
         tid: WasiThreadId,
@@ -155,6 +152,14 @@ impl VirtualTaskManager for ThreadPool {
     fn task_wasm(&self, task: TaskWasm) -> Result<(), WasiThreadError> {
         let msg = crate::tasks::task_wasm::to_scheduler_message(task)?;
         self.send(msg)
+    }
+
+    fn terminate_wasm_thread(
+        &self,
+        pid: WasiProcessId,
+        tid: WasiThreadId,
+    ) -> Result<(), WasiThreadError> {
+        self.terminate_worker(pid, tid)
     }
 
     /// Starts an asynchronous task will will run on a dedicated thread

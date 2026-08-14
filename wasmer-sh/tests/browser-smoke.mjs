@@ -401,7 +401,7 @@ try {
       () => {
         const lines = globalThis.__wasmerShell
           .snapshot()
-          .replace(/\x1b\[[0-9;]*m/g, "")
+          .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
           .replace(/\r/g, "")
           .split("\n")
           .map((line) => line.trim());
@@ -414,7 +414,7 @@ try {
     const nextBuildLines = await page.evaluate(() =>
       globalThis.__wasmerShell
         .snapshot()
-        .replace(/\x1b\[[0-9;]*m/g, "")
+        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
         .replace(/\r/g, "")
         .split("\n")
         .map((line) => line.trim()),
@@ -423,7 +423,7 @@ try {
     assert.ok(!nextBuildLines.some((line) => line.startsWith("__NEXT_BUILD_FAILED__:")));
     assert.ok(!nextBuildLines.some((line) => line.includes("Program recieved")));
     await page.evaluate(async () => {
-      await globalThis.__wasmerShell.send("cd next && pnpm start\r");
+      await globalThis.__wasmerShell.send("(cd next && exec pnpm start)\r");
     });
     await page.locator("#preview-panel").waitFor({ timeout: nextTimeout });
     const nextPreview = page
