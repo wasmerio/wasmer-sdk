@@ -475,7 +475,7 @@ impl JsSandbox {
 
     /// Browser HTTP ingress ports currently owned by guest listeners.
     #[wasm_bindgen(js_name = httpListeningPorts)]
-    pub fn http_listening_ports(&self) -> Result<Vec<u16>, JsValue> {
+    pub fn http_listening_ports(&self) -> Result<Option<Vec<u16>>, JsValue> {
         let handler = self.browser_http.as_ref().ok_or_else(|| {
             custom_error(
                 "CAPABILITY_UNAVAILABLE",

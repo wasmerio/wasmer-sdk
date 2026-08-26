@@ -1,5 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,6 +96,7 @@ run(wasmBindgen, [
   "--remove-name-section",
   "--remove-producers-section",
 ]);
+vendorWasmBindgenDependencies(join(packageRoot, "pkg", "snippets"));
 patchMemory32Glue(join(packageRoot, "pkg", "wasmer_sdk_js.js"));
 
 run(wasmOpt, [
@@ -102,6 +109,48 @@ run(wasmOpt, [
   optimizedWasmOutput,
 ]);
 renameSync(optimizedWasmOutput, wasmOutput);
+
+function vendorWasmBindgenDependencies(snippetsRoot) {
+  const acornModule = join(
+    packageRoot,
+    "node_modules",
+    "acorn",
+    "dist",
+    "acorn.mjs",
+  );
+  const acornLicense = join(packageRoot, "node_modules", "acorn", "LICENSE");
+  let patchedImports = 0;
+
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
+
+      const source = readFileSync(path, "utf8");
+      const patched = source.replace(
+        /import \{ parse as wasmerNapiParse \} from ['"]acorn['"];/g,
+        "import { parse as wasmerNapiParse } from './acorn.mjs';",
+      );
+      if (patched === source) continue;
+
+      writeFileSync(path, patched);
+      copyFileSync(acornModule, join(directory, "acorn.mjs"));
+      copyFileSync(acornLicense, join(directory, "acorn.LICENSE"));
+      patchedImports += 1;
+    }
+  };
+
+  visit(snippetsRoot);
+  if (patchedImports !== 1) {
+    throw new Error(
+      `expected to vendor one wasm-bindgen acorn import, patched ${patchedImports}`,
+    );
+  }
+}
 
 function patchMemory32Glue(path) {
   const source = readFileSync(path, "utf8");

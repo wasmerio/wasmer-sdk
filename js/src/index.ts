@@ -759,7 +759,12 @@ export class Ports {
     const poll = () => {
       if (!active) return;
       try {
-        const current = new Set<number>(this.#core.httpListeningPorts());
+        const ports = this.#core.httpListeningPorts();
+        if (ports === undefined) {
+          timer = setTimeout(poll, intervalMs);
+          return;
+        }
+        const current = new Set<number>(ports);
         for (const port of current) {
           if (!observed.has(port)) listener(port);
         }

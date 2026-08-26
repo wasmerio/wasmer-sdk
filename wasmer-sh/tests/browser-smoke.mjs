@@ -18,6 +18,7 @@ const testNext = process.env.WASMER_TEST_NEXT === "1";
 const testNextBuild = process.env.WASMER_TEST_NEXT_BUILD === "1";
 const testVinext = process.env.WASMER_TEST_VINEXT === "1";
 const testVinextDev = process.env.WASMER_TEST_VINEXT_DEV === "1";
+const testPython = process.env.WASMER_TEST_PYTHON !== "0";
 if (edgejsWebc && !process.env.VITE_EDGEJS_WEBC_URL) {
   process.env.VITE_EDGEJS_WEBC_URL = `/@fs/${edgejsWebc}`;
 }
@@ -522,35 +523,37 @@ try {
     { timeout: 30_000 },
   );
 
-  await page.waitForFunction(
-    () => document.querySelector("#session-status")?.textContent === "Ready",
-    undefined,
-    { timeout: 30_000 },
-  );
-  await page.evaluate(async () => {
-    await globalThis.__wasmerShell.send("python\r");
-  });
-  await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().includes(">>> "),
-    undefined,
-    { timeout: 120_000 },
-  );
-  await page.evaluate(async () => {
-    await globalThis.__wasmerShell.send("print('PYTHON_' + 'STDIN_OK')\r");
-  });
-  await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().includes("PYTHON_STDIN_OK"),
-    undefined,
-    { timeout: 120_000 },
-  );
-  await page.evaluate(async () => {
-    await globalThis.__wasmerShell.send("exit()\r");
-  });
-  await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
-    undefined,
-    { timeout: 30_000 },
-  );
+  if (testPython) {
+    await page.waitForFunction(
+      () => document.querySelector("#session-status")?.textContent === "Ready",
+      undefined,
+      { timeout: 30_000 },
+    );
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("python\r");
+    });
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().includes(">>> "),
+      undefined,
+      { timeout: 120_000 },
+    );
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("print('PYTHON_' + 'STDIN_OK')\r");
+    });
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().includes("PYTHON_STDIN_OK"),
+      undefined,
+      { timeout: 120_000 },
+    );
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("exit()\r");
+    });
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+      undefined,
+      { timeout: 30_000 },
+    );
+  }
 
   await page.evaluate(async () => {
     await globalThis.__wasmerShell.send("edge\r");
@@ -725,34 +728,36 @@ try {
     timeout: 30_000,
   });
 
-  await page.evaluate(async () => {
-    await globalThis.__wasmerShell.send("python python/server.py\r");
-  });
-  await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
-  const pythonPreview = page
-    .frameLocator("#preview-panel iframe")
-    .frameLocator("iframe");
-  await pythonPreview.locator("#python-preview").waitFor({ timeout: 60_000 });
-  assert.equal(
-    await pythonPreview.locator("#python-preview").textContent(),
-    "Hello from Python!",
-  );
-  await pythonPreview
-    .locator("#python-health")
-    .filter({ hasText: "/health is ready" })
-    .waitFor({ timeout: 30_000 });
-  await page.evaluate(async () => {
-    await globalThis.__wasmerShell.send("\x03");
-  });
-  await page.waitForFunction(
-    () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
-    undefined,
-    { timeout: 30_000 },
-  );
-  await page.locator("#preview-panel").waitFor({
-    state: "hidden",
-    timeout: 30_000,
-  });
+  if (testPython) {
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("python python/server.py\r");
+    });
+    await page.locator("#preview-panel").waitFor({ timeout: 60_000 });
+    const pythonPreview = page
+      .frameLocator("#preview-panel iframe")
+      .frameLocator("iframe");
+    await pythonPreview.locator("#python-preview").waitFor({ timeout: 60_000 });
+    assert.equal(
+      await pythonPreview.locator("#python-preview").textContent(),
+      "Hello from Python!",
+    );
+    await pythonPreview
+      .locator("#python-health")
+      .filter({ hasText: "/health is ready" })
+      .waitFor({ timeout: 30_000 });
+    await page.evaluate(async () => {
+      await globalThis.__wasmerShell.send("\x03");
+    });
+    await page.waitForFunction(
+      () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
+      undefined,
+      { timeout: 30_000 },
+    );
+    await page.locator("#preview-panel").waitFor({
+      state: "hidden",
+      timeout: 30_000,
+    });
+  }
 
   console.log("wasmer.sh browser smoke test passed");
   }

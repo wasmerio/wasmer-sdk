@@ -83,11 +83,11 @@ jobs:
 
       - uses: ./.github/actions/cache-sdk
         with:
-          cargo-profile: native-1.94-release
+          cargo-profile: native-1.95-release
 
       - name: Install Rust
         shell: bash
-        run: rustup toolchain install 1.94.0 --profile minimal --no-self-update
+        run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
 
       - name: Validate Python release metadata
         shell: bash
@@ -98,7 +98,7 @@ jobs:
       - name: Build native module and wheel
         shell: bash
         env:
-          RUSTUP_TOOLCHAIN: 1.94.0
+          RUSTUP_TOOLCHAIN: 1.95.0
         run: |
           python -m pip install --upgrade build
           python python/scripts/build.py --release

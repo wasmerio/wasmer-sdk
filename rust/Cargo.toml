@@ -2,7 +2,7 @@
 name = "wasmer-sdk"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.95"
 description = "A portable, package-first sandbox SDK powered by Wasmer"
 license = "MIT"
 repository = "https://github.com/wasmerio/wasmer-sdk"

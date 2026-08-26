@@ -7,7 +7,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr},
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex, TryLockError, Weak},
     task::{Context, Poll, Waker},
 };
 
@@ -72,22 +72,30 @@ impl BrowserHttpNetworking {
 
 impl BrowserHttpRequestHandler {
     pub(crate) fn has_listener(&self, port: u16) -> bool {
-        let mut state = self.state.lock().expect("browser HTTP network poisoned");
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(TryLockError::WouldBlock) => return false,
+            Err(TryLockError::Poisoned(_)) => panic!("browser HTTP network poisoned"),
+        };
         state
             .listeners
             .retain(|_, listener| listener.strong_count() > 0);
         state.listeners.keys().any(|address| address.port() == port)
     }
 
-    pub(crate) fn listening_ports(&self) -> Vec<u16> {
-        let mut state = self.state.lock().expect("browser HTTP network poisoned");
+    pub(crate) fn listening_ports(&self) -> Option<Vec<u16>> {
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(TryLockError::WouldBlock) => return None,
+            Err(TryLockError::Poisoned(_)) => panic!("browser HTTP network poisoned"),
+        };
         state
             .listeners
             .retain(|_, listener| listener.strong_count() > 0);
         let mut ports: Vec<_> = state.listeners.keys().map(SocketAddr::port).collect();
         ports.sort_unstable();
         ports.dedup();
-        ports
+        Some(ports)
     }
 
     pub(crate) async fn handle(
@@ -849,6 +857,19 @@ mod tests {
     use std::{mem::MaybeUninit, task::Waker};
 
     use super::*;
+
+    #[test]
+    fn listener_observers_never_block_on_network_mutation() {
+        let networking = BrowserHttpNetworking::new();
+        let handler = networking.request_handler();
+        let _mutation = networking
+            .state
+            .lock()
+            .expect("browser HTTP network poisoned");
+
+        assert!(!handler.has_listener(8000));
+        assert_eq!(handler.listening_ports(), None);
+    }
 
     #[test]
     fn exhausted_request_stays_open_for_an_async_response() {

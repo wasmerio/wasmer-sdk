@@ -58,6 +58,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.1.0",
+    "acorn": "^8.18.0",
     "binaryen": "131.0.0",
     "playwright": "^1.62.0",
     "typescript": "^5.9.2"
@@ -66,7 +67,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@mercuryworkshop/wisp-js": "^0.4.1",
-    "acorn": "^8.18.0"
+    "@mercuryworkshop/wisp-js": "^0.4.1"
   }
 }

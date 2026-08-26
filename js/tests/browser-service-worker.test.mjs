@@ -261,7 +261,8 @@ async function startHttpHost() {
 function contentType(file) {
   switch (extname(file)) {
     case ".html": return "text/html; charset=utf-8";
-    case ".js": return "text/javascript; charset=utf-8";
+    case ".js":
+    case ".mjs": return "text/javascript; charset=utf-8";
     case ".wasm": return "application/wasm";
     default: return "application/octet-stream";
   }
