@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "An interactive browser shell powered by Wasmer, WASIX, and the Wasmer JavaScript SDK",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
     "dev": "node scripts/run-servers.mjs dev",

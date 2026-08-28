@@ -8,7 +8,8 @@ version = "0.1.2"
 description = "Python bindings for the Wasmer sandbox SDK"
 readme = "README.md"
 requires-python = ">=3.9"
-license = "MIT"
+license = "LicenseRef-Wasmer-Modified-MIT"
+license-files = ["LICENSE"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",

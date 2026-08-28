@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 description = "wasm-bindgen facade for wasmer-sdk"
-license = "MIT"
+license-file = "LICENSE"
 publish = false
 
 [lib]

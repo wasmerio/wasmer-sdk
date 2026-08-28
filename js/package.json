@@ -3,7 +3,7 @@
   "version": "0.1.2",
   "description": "A portable, package-first sandbox SDK powered by Wasmer",
   "type": "module",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wasmerio/wasmer-sdk.git",
