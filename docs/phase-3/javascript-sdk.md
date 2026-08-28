@@ -259,7 +259,7 @@ wasm-bindgen SDK's Node network bridge with the host's standard `psql`. It
 contains no PostgreSQL protocol proxy.
 
 The EdgeJS test serves a real HTTP response from
-`wasmer/edgejs-quickjs`. The PostgreSQL test starts the WASIX PostgreSQL
+`syrusakbary/edgejs-quickjs-wasi`. The PostgreSQL test starts the WASIX PostgreSQL
 process through the SDK, waits for its TCP listener, and runs the host's normal
 `psql` binary against it. Both are end-to-end regression tests for the worker
 and network architecture.

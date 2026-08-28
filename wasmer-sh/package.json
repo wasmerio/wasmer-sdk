@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "An interactive browser shell powered by Wasmer, WASIX, and the Wasmer JavaScript SDK",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
     "dev": "node scripts/run-servers.mjs dev",
@@ -13,7 +14,7 @@
     "test": "node tests/browser-smoke.mjs"
   },
   "dependencies": {
-    "@wasmer/sdk2": "file:../js",
+    "@wasmer/sdk2": "link:../js",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "monaco-editor": "0.56.0"

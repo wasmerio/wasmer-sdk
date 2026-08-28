@@ -29,21 +29,21 @@ jobs:
 
       - uses: ./.github/actions/cache-sdk
         with:
-          cargo-profile: native-1.94
+          cargo-profile: native-1.95
 
       - name: Install Rust
-        run: rustup toolchain install 1.94.0 --profile minimal --no-self-update
+        run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
 
       - name: Test the Rust SDK
-        run: cargo +1.94.0 test --locked -p wasmer-sdk --all-targets
+        run: cargo +1.95.0 test --locked -p wasmer-sdk --all-targets
 
       - name: Test and build UniFFI
         run: |
-          cargo +1.94.0 test --locked -p wasmer-sdk-uniffi --lib
-          cargo +1.94.0 build --locked -p wasmer-sdk-uniffi --features bindgen-cli
+          cargo +1.95.0 test --locked -p wasmer-sdk-uniffi --lib
+          cargo +1.95.0 build --locked -p wasmer-sdk-uniffi --features bindgen-cli
 
       - name: Verify the Rust source package
-        run: cargo +1.94.0 package --locked -p wasmer-sdk --no-verify
+        run: cargo +1.95.0 package --locked -p wasmer-sdk --no-verify
 
   javascript:
     name: JavaScript
@@ -152,13 +152,13 @@ jobs:
 
       - uses: ./.github/actions/cache-sdk
         with:
-          cargo-profile: native-1.94-release
+          cargo-profile: native-1.95-release
 
       - name: Check release metadata
         run: python .github/scripts/check-release-version.py
 
       - name: Install Rust
-        run: rustup toolchain install 1.94.0 --profile minimal --no-self-update
+        run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
 
       - name: Build the UniFFI Python module
         run: python python/scripts/build.py --release

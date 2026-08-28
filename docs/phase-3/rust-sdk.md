@@ -47,7 +47,7 @@ This phase implements the semantic Rust core beneath the UniFFI and
 - A native adapter from the stable SDK provider API to Wasmer's VFS.
 - `NetworkPolicy::Disabled` backed by an unsupported virtual network.
 - Explicit `NetworkPolicy::Host` for unrestricted native guest sockets.
-- WebAssembly C API host imports used by `wasmer/edgejs-quickjs`.
+- WebAssembly C API host imports used by `syrusakbary/edgejs-quickjs-wasi`.
 - Network-free integration tests that create and execute a local Wasmer
   package.
 
@@ -55,7 +55,7 @@ This phase implements the semantic Rust core beneath the UniFFI and
 
 The native implementation pins the coherent Wasmer 7.2.1 / WASIX 0.702.1
 family and enables Cranelift. This family also supplies the WebAssembly C API
-host imports required by `wasmer/edgejs-quickjs`.
+host imports required by `syrusakbary/edgejs-quickjs-wasi`.
 
 The current resolved compiler dependencies require Rust 1.94 or newer.
 
@@ -153,7 +153,7 @@ PostgreSQL 18.4 command through `wasmer-sdk` with a writable `PGDATA`; the WASIX
 guest binds a loopback TCP socket, and a native standard `psql` connects
 directly to it. No protocol proxy is involved.
 
-`rust/examples/edgejs_http.rs` loads `wasmer/edgejs-quickjs`, seeds a small
+`rust/examples/edgejs_http.rs` loads `syrusakbary/edgejs-quickjs-wasi`, seeds a small
 Node-compatible HTTP server into `/workspace`, enables guest host networking,
 starts the package entrypoint as a live process, and verifies the response from
 the native host before terminating the server.

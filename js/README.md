@@ -20,7 +20,7 @@ import { Wasmer } from "@wasmer/sdk2/node";
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@3.13.5"],
+  packages: ["python/python@3.13.17"],
   files: {
     "main.py": "print(sum(number * number for number in range(10)))",
   },
@@ -83,7 +83,7 @@ Use `network: { mode: "host" }` when a package needs TCP or DNS:
 
 ```javascript
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["wasmer/edgejs-quickjs@0.1.0"],
+  packages: ["syrusakbary/edgejs-quickjs-wasi@0.1.5"],
   network: { mode: "host" },
 });
 ```
@@ -111,7 +111,7 @@ import { Wasmer } from "@wasmer/sdk2/browser";
 const httpHost = "https://http.example.com";
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@3.13.5"],
+  packages: ["python/python@3.13.17"],
 });
 const output = await sandbox
   .command("python", ["-c", "print('Hello from the browser')"])
@@ -136,7 +136,7 @@ import { Wasmer } from "@wasmer/sdk2/browser";
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["wasmer/edgejs-quickjs@0.1.1"],
+  packages: ["syrusakbary/edgejs-quickjs-wasi@0.1.5"],
   network: { mode: "wisp", url: "wss://proxy.example/wisp/" },
 });
 

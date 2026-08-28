@@ -61,7 +61,7 @@ interface WorkerScope {
 
 const scope = globalThis as unknown as WorkerScope;
 let activeRoute: Route | undefined;
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 300_000;
 
 scope.addEventListener("install", ((event: ServiceWorkerLifecycleEvent) => {
   event.waitUntil(scope.skipWaiting());
@@ -147,7 +147,12 @@ async function forwardRequest(
   } catch (error) {
     return new Response(error instanceof Error ? error.message : String(error), {
       status: 502,
-      headers: { "content-type": "text/plain; charset=utf-8" },
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "cross-origin-embedder-policy": "require-corp",
+        "cross-origin-opener-policy": "same-origin",
+        "cross-origin-resource-policy": "cross-origin",
+      },
     });
   }
 }

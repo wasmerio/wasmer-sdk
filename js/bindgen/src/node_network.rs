@@ -118,8 +118,8 @@ impl NodeNetworking {
         let handlers: HandlerMap = Arc::new(Mutex::new(HashMap::new()));
         let callback_handlers = Arc::clone(&handlers);
         let callback = Closure::wrap(Box::new(move |id: u32, event: String| {
-            notify_handler(&callback_handlers, id, &event);
-        }) as Box<dyn FnMut(u32, String)>);
+            notify_handler(&callback_handlers, id, &event)
+        }) as Box<dyn FnMut(u32, String) -> bool>);
         bridge.set_wake_callback(callback.as_ref().unchecked_ref());
         callback.forget();
         Self {
@@ -129,7 +129,7 @@ impl NodeNetworking {
     }
 }
 
-fn notify_handler(handlers: &HandlerMap, id: u32, event: &str) {
+fn notify_handler(handlers: &HandlerMap, id: u32, event: &str) -> bool {
     let interest = match event {
         "readable" | "connection" => InterestType::Readable,
         "writable" | "drain" => InterestType::Writable,
@@ -137,9 +137,16 @@ fn notify_handler(handlers: &HandlerMap, id: u32, event: &str) {
         _ => InterestType::Error,
     };
     let wakers = {
-        let mut handlers = handlers.lock().expect("network handler lock poisoned");
+        // Browser callbacks execute on the main thread, where contended atomics
+        // may not block. Let the JavaScript bridge retry on a later task rather
+        // than entering Mutex::lock(), which uses Atomics.wait under wasm.
+        let mut handlers = match handlers.try_lock() {
+            Ok(handlers) => handlers,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return false,
+        };
         let Some(state) = handlers.get_mut(&id) else {
-            return;
+            return true;
         };
         if let Some(handler) = state.handler.as_mut() {
             handler.push_interest(interest);
@@ -157,6 +164,7 @@ fn notify_handler(handlers: &HandlerMap, id: u32, event: &str) {
     for waker in wakers {
         waker.wake();
     }
+    true
 }
 
 fn register_handler(
@@ -352,8 +360,7 @@ impl VirtualNetworking for NodeNetworking {
 
 fn has_global_function(name: &str) -> bool {
     let global = js_sys::global();
-    Reflect::get(&global, &JsValue::from_str(name))
-        .is_ok_and(|value| value.is_function())
+    Reflect::get(&global, &JsValue::from_str(name)).is_ok_and(|value| value.is_function())
 }
 
 fn call_global_sync(name: &str, args: &[JsValue]) -> Result<JsValue, JsValue> {

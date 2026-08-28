@@ -37,9 +37,13 @@ frame.src = initialUrl.href;
 let observedNavigation: NavigationState | undefined;
 
 frame.addEventListener("load", () => {
-  const child = frame.contentWindow;
-  child?.removeEventListener("keydown", refreshWithKeyboard, true);
-  child?.addEventListener("keydown", refreshWithKeyboard, true);
+  try {
+    const child = frame.contentWindow;
+    child?.removeEventListener("keydown", refreshWithKeyboard, true);
+    child?.addEventListener("keydown", refreshWithKeyboard, true);
+  } catch {
+    // Some frameworks isolate their document from the preview wrapper.
+  }
   observeNavigation();
   reportState();
 });
@@ -79,20 +83,32 @@ function observeNavigation(): void {
 }
 
 function getNavigation(): NavigationState | undefined {
-  return (frame.contentWindow as (Window & { navigation?: NavigationState }) | null)
-    ?.navigation;
+  try {
+    return (frame.contentWindow as (Window & { navigation?: NavigationState }) | null)
+      ?.navigation;
+  } catch {
+    return undefined;
+  }
 }
 
 function reportState(): void {
   const child = frame.contentWindow;
   if (!child) return;
   const navigation = getNavigation();
+  let url = frame.src;
+  let canGoBack = false;
+  try {
+    url = navigation?.currentEntry?.url ?? child.location.href;
+    canGoBack = navigation?.canGoBack ?? child.history.length > 1;
+  } catch {
+    // The URL loaded by the wrapper remains authoritative cross-origin.
+  }
   parent.postMessage(
     {
       type: "wasmer-sh:preview-state",
       previewId,
-      url: navigation?.currentEntry?.url ?? child.location.href,
-      canGoBack: navigation?.canGoBack ?? child.history.length > 1,
+      url,
+      canGoBack,
       canGoForward: navigation?.canGoForward ?? false,
     },
     parentOrigin,

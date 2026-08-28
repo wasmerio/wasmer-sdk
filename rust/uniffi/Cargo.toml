@@ -2,9 +2,9 @@
 name = "wasmer-sdk-uniffi"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.95"
 description = "UniFFI facade for wasmer-sdk"
-license = "MIT"
+license-file = "LICENSE"
 repository = "https://github.com/wasmerio/wasmer-sdk"
 
 [lib]

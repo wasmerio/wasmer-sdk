@@ -40,6 +40,13 @@ test("wasm facade rejects invalid retention values from direct callers", async (
     );
   }
 
+  for (const value of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () => WasmerCore.create({ parallelism: value }),
+      (error) => error?.code === "INVALID_ARGUMENT",
+    );
+  }
+
   const client = WasmerCore.create({});
   const sandbox = await client.sandbox().start();
   try {
@@ -83,6 +90,13 @@ test("client output retention rejects unsafe JavaScript numbers", () => {
     isInvalidArgument,
   );
   assert.doesNotThrow(() => new Wasmer({ outputBytes: UINT32_MAX }));
+});
+
+test("client parallelism must be a positive integer", () => {
+  for (const value of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(() => new Wasmer({ parallelism: value }), isInvalidArgument);
+  }
+  assert.doesNotThrow(() => new Wasmer({ parallelism: 1 }));
 });
 
 test("command options are validated before constructing the wasm command", async () => {

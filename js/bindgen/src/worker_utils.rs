@@ -143,13 +143,13 @@ impl From<Error> for JsValue {
         match error {
             Error::JavaScript(e) => e,
             Error::Rust(error) => {
-                let message = error.to_string();
+                let message = format!("{error:#}");
                 let js_error = js_sys::Error::new(&message);
 
                 let _ = js_sys::Reflect::set(
                     &js_error,
                     &JsString::from("message"),
-                    &JsString::from(error.to_string()),
+                    &JsString::from(message),
                 );
 
                 let _ = js_sys::Reflect::set(

@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
 use crate::tasks::{AsyncJob, BlockingJob, Notification, PostMessagePayload, WorkerMessage};
@@ -7,20 +9,40 @@ use crate::tasks::{AsyncJob, BlockingJob, Notification, PostMessagePayload, Work
 #[derive(Debug)]
 pub struct ThreadPoolWorker {
     id: u32,
+    active_blocking_jobs: Cell<u32>,
 }
 
 impl ThreadPoolWorker {
-    fn busy(&self) -> impl Drop {
-        struct BusyGuard;
-        impl Drop for BusyGuard {
+    fn busy(&self) -> impl Drop + '_ {
+        struct BusyGuard<'a>(&'a ThreadPoolWorker);
+
+        impl Drop for BusyGuard<'_> {
             fn drop(&mut self) {
-                let _ = WorkerMessage::MarkIdle.emit();
+                let worker = self.0;
+                let active = worker.active_blocking_jobs.get();
+                let remaining = active
+                    .checked_sub(1)
+                    .expect("blocking job count should never underflow");
+                worker.active_blocking_jobs.set(remaining);
+
+                if remaining == 0 {
+                    let _ = WorkerMessage::MarkIdle.emit();
+                }
             }
         }
 
-        let _ = WorkerMessage::MarkBusy.emit();
+        let active = self.active_blocking_jobs.get();
+        self.active_blocking_jobs.set(
+            active
+                .checked_add(1)
+                .expect("too many active blocking jobs"),
+        );
 
-        BusyGuard
+        if active == 0 {
+            let _ = WorkerMessage::MarkBusy.emit();
+        }
+
+        BusyGuard(self)
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(worker.id = self.id))]
@@ -80,7 +102,10 @@ impl ThreadPoolWorker {
 impl ThreadPoolWorker {
     #[wasm_bindgen(constructor)]
     pub fn new(id: u32) -> ThreadPoolWorker {
-        ThreadPoolWorker { id }
+        ThreadPoolWorker {
+            id,
+            active_blocking_jobs: Cell::new(0),
+        }
     }
 
     #[wasm_bindgen(js_name = "handle")]

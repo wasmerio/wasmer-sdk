@@ -2,9 +2,9 @@
 name = "wasmer-sdk"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.95"
 description = "A portable, package-first sandbox SDK powered by Wasmer"
-license = "MIT"
+license-file = "LICENSE"
 repository = "https://github.com/wasmerio/wasmer-sdk"
 
 [features]
@@ -19,6 +19,13 @@ js = [
   "dep:web-sys",
   "wasmer-wasix/js",
   "virtual-fs/js",
+]
+js-napi = [
+  "js",
+  "dep:wasmer-napi",
+  "wasmer/experimental-async",
+  "wasmer-napi/js",
+  "wasmer-napi/wasix",
 ]
 
 [dependencies]
@@ -42,6 +49,7 @@ tokio = { version = "1.49", features = ["fs", "rt-multi-thread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3", features = ["Window"], optional = true }
+wasmer-napi = { version = "=0.702.1", optional = true, default-features = false }
 
 [dev-dependencies]
 http = "1.4"

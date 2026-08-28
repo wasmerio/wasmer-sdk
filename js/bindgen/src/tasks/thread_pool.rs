@@ -1,9 +1,11 @@
-use std::{fmt::Debug, future::Future, pin::Pin};
+use std::{fmt::Debug, future::Future, num::NonZeroUsize, pin::Pin};
 
 use futures::future::LocalBoxFuture;
 use instant::Duration;
-use wasm_bindgen_futures::JsFuture;
-use wasmer_wasix::{VirtualTaskManager, WasiThreadError, runtime::task_manager::TaskWasm};
+use wasmer_wasix::{
+    VirtualTaskManager, WasiProcessId, WasiThreadError, WasiThreadId,
+    runtime::task_manager::TaskWasm,
+};
 
 use crate::{
     tasks::{Scheduler, SchedulerMessage},
@@ -15,12 +17,13 @@ use crate::{
 #[derive(Debug)]
 pub struct ThreadPool {
     scheduler: Scheduler,
+    parallelism: Option<NonZeroUsize>,
 }
 
 const CROSS_ORIGIN_WARNING: &str = r#"You can only run packages from "Cross-Origin Isolated" websites. For more details, check out https://docs.wasmer.io/javascript-sdk/explainers/troubleshooting#sharedarraybuffer-and-cross-origin-isolation"#;
 
 impl ThreadPool {
-    pub fn new() -> Self {
+    pub fn new(parallelism: Option<NonZeroUsize>) -> Self {
         if let Some(cross_origin_isolated) =
             crate::worker_utils::GlobalScope::current().cross_origin_isolated()
         {
@@ -33,7 +36,10 @@ impl ThreadPool {
         }
 
         let sender = Scheduler::spawn();
-        ThreadPool { scheduler: sender }
+        ThreadPool {
+            scheduler: sender,
+            parallelism,
+        }
     }
 
     /// Run an `async` function to completion on the threadpool.
@@ -56,8 +62,19 @@ impl ThreadPool {
         })
     }
 
-    pub fn close(&self) {
-        self.scheduler.close();
+    pub async fn close_and_wait(&self) {
+        self.scheduler.close_and_wait().await;
+    }
+
+    fn terminate_worker(
+        &self,
+        pid: WasiProcessId,
+        tid: WasiThreadId,
+    ) -> Result<(), WasiThreadError> {
+        self.send(SchedulerMessage::TerminateWasmThread {
+            pid: pid.raw(),
+            tid: tid.raw(),
+        })
     }
 }
 
@@ -82,26 +99,33 @@ impl VirtualTaskManager for ThreadPool {
         &self,
         time: Duration,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>> {
+        // WASIX uses a zero timeout for non-blocking poll_oneoff calls. It is
+        // not a timer: scheduling it through the browser would add a
+        // main-worker-wake-worker round trip to every libuv NOWAIT poll. Edge
+        // already performs an explicit JSPI host yield at its event-loop
+        // boundary, so completing the non-blocking poll immediately preserves
+        // both contracts.
+        if time.is_zero() {
+            return Box::pin(std::future::ready(()));
+        }
+
         let (tx, rx) = tokio::sync::oneshot::channel();
 
-        let time = if time.as_millis() < i32::MAX as u128 {
-            time.as_millis() as i32
+        let millis = time.as_millis().max(1);
+        let time = if millis < i32::MAX as u128 {
+            millis as i32
         } else {
             i32::MAX
         };
 
-        // Note: We can't use wasm_bindgen_futures::spawn_local() directly
-        // because we might be invoked from inside a syscall. This causes a
-        // deadlock because the syscall will block block until the future
-        // resolves, but the JsFuture will never get a chance to mark itself as
-        // resolved because the JavaScript VM is still blocked by the syscall.
-        //
-        // If the pool is already shut down, the sender drops immediately and
-        // the returned future resolves at once instead of hanging.
+        // This timer runs on a separate worker because a WASIX syscall may
+        // synchronously block its calling worker. The guest now runs inside an
+        // environment-owned JavaScript global, so this worker's host timer is
+        // no longer exposed to guest mutation.
         let _ = self.task_dedicated(Box::new(move || {
             wasm_bindgen_futures::spawn_local(async move {
                 let global = GlobalScope::current();
-                let _ = JsFuture::from(global.sleep(time)).await;
+                let _ = wasm_bindgen_futures::JsFuture::from(global.sleep(time)).await;
                 let _ = tx.send(());
             })
         }));
@@ -130,6 +154,14 @@ impl VirtualTaskManager for ThreadPool {
         self.send(msg)
     }
 
+    fn terminate_wasm_thread(
+        &self,
+        pid: WasiProcessId,
+        tid: WasiThreadId,
+    ) -> Result<(), WasiThreadError> {
+        self.terminate_worker(pid, tid)
+    }
+
     /// Starts an asynchronous task will will run on a dedicated thread
     /// pulled from the worker pool. It is ok for this task to block execution
     /// and any async futures within its scope
@@ -142,7 +174,10 @@ impl VirtualTaskManager for ThreadPool {
 
     /// Returns the amount of parallelism that is possible on this platform
     fn thread_parallelism(&self) -> Result<usize, WasiThreadError> {
-        match crate::worker_utils::GlobalScope::current().hardware_concurrency() {
+        if let Some(parallelism) = self.parallelism {
+            return Ok(parallelism.get());
+        }
+        match GlobalScope::current().hardware_concurrency() {
             Some(n) => Ok(n.get()),
             None => Err(WasiThreadError::Unsupported),
         }
@@ -184,7 +219,7 @@ mod tests {
                 .dyn_into()
                 .unwrap();
         let module = wasmer::Module::from((module, bytes::Bytes::from_static(TEST_WASM)));
-        let pool = ThreadPool::new();
+        let pool = ThreadPool::new(None);
 
         let (sender, receiver) = oneshot::channel();
         pool.spawn_with_module(
@@ -196,12 +231,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(receiver.await.unwrap(), 2);
-        pool.close();
+        pool.close_and_wait().await;
     }
 
     #[wasm_bindgen_test]
     async fn spawned_tasks_can_communicate_with_the_main_thread() {
-        let pool = ThreadPool::new();
+        let pool = ThreadPool::new(None);
         let (sender, receiver) = oneshot::channel();
 
         pool.task_shared(Box::new(move || {
@@ -212,7 +247,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(receiver.await.unwrap(), 42);
-        pool.close();
+        pool.close_and_wait().await;
     }
 
     /// Regression test for wasmer-js#355: a worker must be marked busy before
@@ -221,7 +256,7 @@ mod tests {
     async fn spawn_interdependent_blocking_tasks_out_of_order() {
         let (sender_1, receiver_1) = oneshot::channel();
         let (sender_2, mut receiver_2) = oneshot::channel();
-        let pool = ThreadPool::new();
+        let pool = ThreadPool::new(None);
 
         let first_task = Box::new(move || sender_1.send(()).unwrap());
         let second_task = Box::new(move || {
@@ -232,11 +267,11 @@ mod tests {
         pool.task_dedicated(second_task).unwrap();
         pool.task_dedicated(first_task).unwrap();
 
-        let timeout = JsFuture::from(crate::worker_utils::GlobalScope::current().sleep(1000));
+        let timeout = JsFuture::from(GlobalScope::current().sleep(1000));
         futures::select! {
             _ = timeout.fuse() => panic!("interdependent blocking tasks deadlocked"),
             _ = receiver_2 => {}
         }
-        pool.close();
+        pool.close_and_wait().await;
     }
 }

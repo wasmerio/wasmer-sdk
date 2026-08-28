@@ -21,7 +21,13 @@ use crate::{
 #[derivative(Debug)]
 pub(crate) enum SchedulerMessage {
     /// Close the scheduler.
-    Close,
+    Close {
+        #[derivative(Debug(format_with = "crate::worker_utils::hidden"))]
+        completion: Option<tokio::sync::oneshot::Sender<()>>,
+        /// Wait for active WebAssembly tasks to reach their worker-idle
+        /// boundary before terminating the workers.
+        drain: bool,
+    },
     /// Run a promise on a worker thread.
     SpawnAsync(#[derivative(Debug(format_with = "crate::worker_utils::hidden"))] AsyncTask),
     /// Run a blocking operation on a worker thread.
@@ -31,6 +37,36 @@ pub(crate) enum SchedulerMessage {
     WorkerIdle { worker_id: u32 },
     /// Mark a worker as busy.
     WorkerBusy { worker_id: u32 },
+    /// Terminate the browser worker executing a WASIX thread.
+    TerminateWasmThread { pid: u32, tid: u32 },
+    /// Publish a nested WebAssembly object to the other browser workers.
+    CapiShare {
+        source_worker_id: u32,
+        registry_id: u32,
+        handle: i32,
+        value: JsValue,
+    },
+    /// Ask the scheduler to deliver a previously published host value to one
+    /// specific worker. This is used when the destination thread was already
+    /// running when the value was shared.
+    CapiRequest {
+        requesting_worker_id: u32,
+        registry_id: u32,
+        handle: i32,
+    },
+    /// Release a nested WebAssembly object which has not been attached to a
+    /// destination task yet.
+    CapiDelete {
+        source_worker_id: u32,
+        registry_id: u32,
+        handle: i32,
+    },
+    /// A scheduler message emitted by a worker. Keeping its source ID lets
+    /// nested WebAssembly transfers and the task consuming them stay together.
+    FromWorker {
+        source_worker_id: u32,
+        message: Box<SchedulerMessage>,
+    },
     /// Tell all workers to cache a WebAssembly module.
     #[allow(dead_code)]
     CacheModule {
@@ -66,7 +102,10 @@ impl SchedulerMessage {
         let de = Deserializer::new(value);
 
         match de.ty()?.as_str() {
-            consts::TYPE_CLOSE => Ok(SchedulerMessage::Close),
+            consts::TYPE_CLOSE => Ok(SchedulerMessage::Close {
+                completion: None,
+                drain: false,
+            }),
             consts::TYPE_SPAWN_ASYNC => {
                 let task = unsafe { de.boxed(consts::PTR)? };
                 Ok(SchedulerMessage::SpawnAsync(task))
@@ -82,6 +121,11 @@ impl SchedulerMessage {
             consts::TYPE_WORKER_BUSY => {
                 let worker_id = de.serde(consts::WORKER_ID)?;
                 Ok(SchedulerMessage::WorkerBusy { worker_id })
+            }
+            consts::TYPE_TERMINATE_WASM_THREAD => {
+                let pid = de.serde(consts::PID)?;
+                let tid = de.serde(consts::TID)?;
+                Ok(SchedulerMessage::TerminateWasmThread { pid, tid })
             }
             consts::TYPE_CACHE_MODULE => {
                 let hash = de.string(consts::MODULE_HASH)?;
@@ -130,7 +174,15 @@ impl SchedulerMessage {
 
     pub(crate) fn into_js(self) -> Result<JsValue, Error> {
         match self {
-            SchedulerMessage::Close => Serializer::new(consts::TYPE_CLOSE).finish(),
+            SchedulerMessage::Close {
+                completion: None, ..
+            } => Serializer::new(consts::TYPE_CLOSE).finish(),
+            SchedulerMessage::Close {
+                completion: Some(_),
+                ..
+            } => Err(
+                anyhow::anyhow!("acknowledged close messages are local to the scheduler").into(),
+            ),
             SchedulerMessage::SpawnAsync(task) => Serializer::new(consts::TYPE_SPAWN_ASYNC)
                 .boxed(consts::PTR, task)
                 .finish(),
@@ -143,6 +195,20 @@ impl SchedulerMessage {
             SchedulerMessage::WorkerBusy { worker_id } => Serializer::new(consts::TYPE_WORKER_BUSY)
                 .set(consts::WORKER_ID, worker_id)
                 .finish(),
+            SchedulerMessage::TerminateWasmThread { pid, tid } => {
+                Serializer::new(consts::TYPE_TERMINATE_WASM_THREAD)
+                    .set(consts::PID, pid)
+                    .set(consts::TID, tid)
+                    .finish()
+            }
+            SchedulerMessage::CapiShare { .. }
+            | SchedulerMessage::CapiRequest { .. }
+            | SchedulerMessage::CapiDelete { .. } => {
+                Err(anyhow::anyhow!("C API messages are local to the scheduler").into())
+            }
+            SchedulerMessage::FromWorker { .. } => {
+                Err(anyhow::anyhow!("worker-origin messages are local to the scheduler").into())
+            }
             SchedulerMessage::CacheModule { hash, module } => {
                 Serializer::new(consts::TYPE_CACHE_MODULE)
                     .set(consts::MODULE_HASH, hash.to_string())
@@ -182,6 +248,7 @@ mod consts {
     pub const TYPE_SPAWN_BLOCKING: &str = "spawn-blocking";
     pub const TYPE_WORKER_IDLE: &str = "worker-idle";
     pub const TYPE_WORKER_BUSY: &str = "worker-busy";
+    pub const TYPE_TERMINATE_WASM_THREAD: &str = "terminate-wasm-thread";
     pub const TYPE_CACHE_MODULE: &str = "cache-module";
     pub const TYPE_SPAWN_WITH_MODULE: &str = "spawn-with-module";
     pub const TYPE_SPAWN_WITH_MODULE_AND_MEMORY: &str = "spawn-with-module-and-memory";
@@ -190,4 +257,6 @@ mod consts {
     pub const MODULE: &str = "module";
     pub const PTR: &str = "ptr";
     pub const WORKER_ID: &str = "worker-id";
+    pub const PID: &str = "pid";
+    pub const TID: &str = "tid";
 }

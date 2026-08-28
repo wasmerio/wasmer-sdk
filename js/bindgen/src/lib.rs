@@ -65,6 +65,7 @@ pub fn set_worker_url(url: String) {
 #[serde(rename_all = "camelCase")]
 struct ClientOptions {
     output_bytes: Option<f64>,
+    parallelism: Option<f64>,
     cache: Option<ClientCacheOptions>,
 }
 
@@ -98,7 +99,12 @@ impl JsWasmer {
         } else {
             serde_wasm_bindgen::from_value(options).map_err(js_error)?
         };
-        let tasks = Arc::new(tasks::ThreadPool::new());
+        let parallelism = options
+            .parallelism
+            .map(|value| validate_usize("parallelism", value, 1))
+            .transpose()?
+            .and_then(std::num::NonZeroUsize::new);
+        let tasks = Arc::new(tasks::ThreadPool::new(parallelism));
         let mut runtime = PluggableRuntime::new(Arc::clone(&tasks) as Arc<_>);
         runtime.set_tty(Arc::new(DefaultTty::default()));
         if let Some(bridge) = node_network {
@@ -182,8 +188,7 @@ impl JsWasmer {
 
     pub async fn shutdown(&self) -> Result<(), JsValue> {
         self.inner.shutdown().await.map_err(sdk_error)?;
-        self.tasks.close();
-        wasm_bindgen_futures::JsFuture::from(worker_utils::GlobalScope::current().sleep(0)).await?;
+        self.tasks.close_and_wait().await;
         Ok(())
     }
 }
@@ -470,7 +475,7 @@ impl JsSandbox {
 
     /// Browser HTTP ingress ports currently owned by guest listeners.
     #[wasm_bindgen(js_name = httpListeningPorts)]
-    pub fn http_listening_ports(&self) -> Result<Vec<u16>, JsValue> {
+    pub fn http_listening_ports(&self) -> Result<Option<Vec<u16>>, JsValue> {
         let handler = self.browser_http.as_ref().ok_or_else(|| {
             custom_error(
                 "CAPABILITY_UNAVAILABLE",

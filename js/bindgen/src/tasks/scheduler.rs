@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::Debug,
     sync::atomic::{AtomicU32, Ordering},
 };
@@ -13,8 +13,8 @@ use wasmer::js::AsJs;
 use wasmer_types::ModuleHash;
 
 use crate::tasks::{
-    AsyncJob, BlockingJob, Notification, PostMessagePayload, SchedulerMessage, WorkerHandle,
-    WorkerMessage,
+    AsyncJob, BlockingJob, CapiTransfer, Notification, PostMessagePayload, SchedulerMessage,
+    WorkerHandle, WorkerMessage,
 };
 
 /// A handle for interacting with the threadpool's scheduler.
@@ -39,18 +39,39 @@ impl Scheduler {
         tracing::debug!(thread_id, "Spinning up the scheduler");
         wasm_bindgen_futures::spawn_local(
             async move {
-                while let Some(msg) = receiver.recv().await {
-                    tracing::trace!(?msg, "Executing a message");
-                    if let SchedulerMessage::Close = msg {
+                let mut close_completions = Vec::new();
+                loop {
+                    let Some(msg) = receiver.recv().await else {
                         break;
+                    };
+                    tracing::trace!(?msg, "Executing a message");
+                    if let SchedulerMessage::Close { completion, drain } = msg {
+                        if let Some(completion) = completion {
+                            close_completions.push(completion);
+                        }
+                        if !drain || scheduler.wasm_tasks_are_idle() {
+                            break;
+                        }
+                        scheduler_diag(format!(
+                            "draining close busy={} wasm={}",
+                            scheduler.busy.len(),
+                            scheduler.wasm_workers.len(),
+                        ));
+                        continue;
                     }
                     if let Err(e) = scheduler.execute(msg) {
                         tracing::error!(error = &*e, "An error occurred while handling a message");
+                    }
+                    if !close_completions.is_empty() && scheduler.wasm_tasks_are_idle() {
+                        break;
                     }
                 }
 
                 tracing::debug!("Shutting down the scheduler");
                 drop(scheduler);
+                for completion in close_completions {
+                    let _ = completion.send(());
+                }
             }
             .in_current_span()
             .instrument(tracing::debug_span!("scheduler", thread_id = thread_id)),
@@ -103,7 +124,24 @@ impl Scheduler {
     }
 
     pub fn close(&self) {
-        let _ = self.channel.send(SchedulerMessage::Close);
+        let _ = self.channel.send(SchedulerMessage::Close {
+            completion: None,
+            drain: false,
+        });
+    }
+
+    pub async fn close_and_wait(&self) {
+        let (completion, receiver) = tokio::sync::oneshot::channel();
+        if self
+            .channel
+            .send(SchedulerMessage::Close {
+                completion: Some(completion),
+                drain: true,
+            })
+            .is_ok()
+        {
+            let _ = receiver.await;
+        }
     }
 
     pub fn is_closed(&self) -> bool {
@@ -132,6 +170,29 @@ struct SchedulerState {
     /// A channel that can be used to send messages to this scheduler.
     mailbox: Scheduler,
     cached_modules: BTreeMap<ModuleHash, js_sys::WebAssembly::Module>,
+    /// Nested WebAssembly objects waiting to travel with the next blocking
+    /// task emitted by their source worker.
+    pending_capi_transfers: BTreeMap<u32, BTreeMap<(u32, i32), JsValue>>,
+    /// Published host values retained until the native owner releases its
+    /// handle. This lifetime registry is deliberately separate from the
+    /// one-shot task attachment queue above.
+    capi_values: BTreeMap<(u32, i32), JsValue>,
+    /// Workers waiting for a host value which was not attached to their
+    /// original task dispatch. Requests may race ahead of publication.
+    pending_capi_requests: BTreeMap<(u32, i32), BTreeSet<u32>>,
+    /// Workers which received each host value, used to discard unused copies
+    /// when the actual consumer releases the handle.
+    capi_recipients: BTreeMap<(u32, i32), BTreeSet<u32>>,
+    /// The worker which originally published each value. This survives task
+    /// attachment so a later delete can release the source worker's copy.
+    capi_origins: BTreeMap<(u32, i32), u32>,
+    /// The browser worker executing each WASIX WebAssembly thread.
+    wasm_workers: BTreeMap<(u32, u32), WasmWorker>,
+}
+
+#[derive(Debug)]
+struct WasmWorker {
+    worker_id: u32,
 }
 
 impl SchedulerState {
@@ -141,23 +202,43 @@ impl SchedulerState {
             busy: VecDeque::new(),
             mailbox,
             cached_modules: BTreeMap::new(),
+            pending_capi_transfers: BTreeMap::new(),
+            capi_values: BTreeMap::new(),
+            pending_capi_requests: BTreeMap::new(),
+            capi_recipients: BTreeMap::new(),
+            capi_origins: BTreeMap::new(),
+            wasm_workers: BTreeMap::new(),
         }
     }
 
     fn execute(&mut self, message: SchedulerMessage) -> Result<(), Error> {
+        self.execute_from(None, message)
+    }
+
+    fn execute_from(
+        &mut self,
+        source_worker_id: Option<u32>,
+        message: SchedulerMessage,
+    ) -> Result<(), Error> {
         match message {
-            SchedulerMessage::Close => {
+            SchedulerMessage::Close { .. } => {
                 // Unreachable in practice: the receive loop breaks on Close
                 // before calling execute(), and dropping the state terminates
                 // every worker via WorkerHandle::drop.
                 Ok(())
             }
-            SchedulerMessage::SpawnAsync(task) => {
-                self.post_message(PostMessagePayload::Async(AsyncJob::Thunk(task)))
-            }
-            SchedulerMessage::SpawnBlocking(task) => {
-                self.post_message(PostMessagePayload::Blocking(BlockingJob::Thunk(task)))
-            }
+            SchedulerMessage::SpawnAsync(task) => self.post_message_from(
+                source_worker_id,
+                PostMessagePayload::Async(AsyncJob::Thunk(task)),
+            ),
+            SchedulerMessage::SpawnBlocking(task) => self.post_message_from(
+                source_worker_id,
+                PostMessagePayload::Blocking(BlockingJob::Thunk(task)),
+            ),
+            SchedulerMessage::FromWorker {
+                source_worker_id,
+                message,
+            } => self.execute_from(Some(source_worker_id), *message),
             SchedulerMessage::CacheModule { hash, module } => {
                 let module: js_sys::WebAssembly::Module = JsValue::from(module).unchecked_into();
                 self.cached_modules.insert(hash, module.clone());
@@ -173,28 +254,33 @@ impl SchedulerState {
 
                 Ok(())
             }
-            SchedulerMessage::SpawnWithModule { module, task } => {
-                self.post_message(PostMessagePayload::Blocking(BlockingJob::SpawnWithModule {
+            SchedulerMessage::SpawnWithModule { module, task } => self.post_message_from(
+                source_worker_id,
+                PostMessagePayload::Blocking(BlockingJob::SpawnWithModule {
                     module: JsValue::from(module).unchecked_into(),
                     task,
-                }))
-            }
+                }),
+            ),
             SchedulerMessage::SpawnWithModuleAndMemory {
                 module,
                 memory,
                 spawn_wasm,
             } => {
                 let temp_store = wasmer::Store::default();
-                let memory = memory.map(|m| m.as_jsvalue(&temp_store).dyn_into().unwrap());
+                let memory: Option<js_sys::WebAssembly::Memory> =
+                    memory.map(|m| m.as_jsvalue(&temp_store).dyn_into().unwrap());
                 let module = JsValue::from(module).dyn_into().unwrap();
+                let task_key = spawn_wasm.task_key();
 
-                self.post_message(PostMessagePayload::Blocking(
-                    BlockingJob::SpawnWithModuleAndMemory {
+                self.post_wasm_message_from(
+                    source_worker_id,
+                    PostMessagePayload::Blocking(BlockingJob::SpawnWithModuleAndMemory {
                         module,
                         memory,
                         spawn_wasm,
-                    },
-                ))
+                    }),
+                    task_key,
+                )
             }
             SchedulerMessage::WorkerBusy { worker_id } => {
                 move_worker(worker_id, &mut self.idle, &mut self.busy);
@@ -206,28 +292,117 @@ impl SchedulerState {
                 );
                 Ok(())
             }
+            SchedulerMessage::TerminateWasmThread { pid, tid } => {
+                scheduler_diag(format!("terminate wasm={pid}.{tid}"));
+                self.terminate_wasm_thread((pid, tid));
+                Ok(())
+            }
             SchedulerMessage::WorkerIdle { worker_id } => {
                 move_worker(worker_id, &mut self.busy, &mut self.idle);
+                self.wasm_workers
+                    .retain(|_, worker| worker.worker_id != worker_id);
                 tracing::trace!(
                     worker.id=worker_id,
                     idle_workers=?self.idle.iter().map(|w| w.id()).collect::<Vec<_>>(),
                     busy_workers=?self.busy.iter().map(|w| w.id()).collect::<Vec<_>>(),
                     "Worker marked as idle",
                 );
+                scheduler_diag(format!(
+                    "idle worker={} busy={} idle={} wasm={}",
+                    worker_id,
+                    self.busy.len(),
+                    self.idle.len(),
+                    self.wasm_workers.len(),
+                ));
+                Ok(())
+            }
+            SchedulerMessage::CapiShare {
+                source_worker_id,
+                registry_id,
+                handle,
+                value,
+            } => {
+                let key = (registry_id, handle);
+                scheduler_diag(format!(
+                    "capi share source={} registry={} handle={}",
+                    source_worker_id, registry_id, handle,
+                ));
+                self.capi_origins.insert(key, source_worker_id);
+                self.capi_values.insert(key, value.clone());
+                self.pending_capi_transfers
+                    .entry(source_worker_id)
+                    .or_default()
+                    .insert(key, value);
+                self.fulfill_capi_requests(key)?;
+                Ok(())
+            }
+            SchedulerMessage::CapiRequest {
+                requesting_worker_id,
+                registry_id,
+                handle,
+            } => {
+                let key = (registry_id, handle);
+                scheduler_diag(format!(
+                    "capi request worker={} registry={} handle={} available={}",
+                    requesting_worker_id,
+                    registry_id,
+                    handle,
+                    self.pending_capi_value(key).is_some(),
+                ));
+                self.pending_capi_requests
+                    .entry(key)
+                    .or_default()
+                    .insert(requesting_worker_id);
+                self.fulfill_capi_requests(key)?;
+                Ok(())
+            }
+            SchedulerMessage::CapiDelete {
+                source_worker_id,
+                registry_id,
+                handle,
+            } => {
+                let key = (registry_id, handle);
+                scheduler_diag(format!(
+                    "capi delete source={} registry={} handle={}",
+                    source_worker_id, registry_id, handle,
+                ));
+                self.remove_pending_capi_value(key);
+                self.pending_capi_requests.remove(&key);
+                let mut workers_to_drop = self.capi_recipients.remove(&key).unwrap_or_default();
+                if let Some(origin_worker_id) = self.capi_origins.remove(&key) {
+                    workers_to_drop.insert(origin_worker_id);
+                }
+                workers_to_drop.remove(&source_worker_id);
+                for worker_id in workers_to_drop {
+                    if let Some(worker) = self.worker(worker_id) {
+                        worker.send_capi_drop(registry_id, handle)?;
+                    }
+                }
                 Ok(())
             }
             SchedulerMessage::Markers { uninhabited, .. } => match uninhabited {},
         }
     }
 
-    /// Send a task to one of the worker threads, preferring workers that aren't
-    /// running synchronous work.
-    fn post_message(&mut self, msg: PostMessagePayload) -> Result<(), Error> {
-        let worker = self.next_available_worker()?;
-
+    fn post_message_from(
+        &mut self,
+        source_worker_id: Option<u32>,
+        msg: PostMessagePayload,
+    ) -> Result<(), Error> {
         let would_block = msg.would_block();
+        let reason = match &msg {
+            PostMessagePayload::Async(_) => "async",
+            PostMessagePayload::Blocking(BlockingJob::Thunk(_)) => "blocking-thunk",
+            PostMessagePayload::Blocking(BlockingJob::SpawnWithModule { .. }) => "blocking-module",
+            PostMessagePayload::Blocking(BlockingJob::SpawnWithModuleAndMemory { .. }) => {
+                "blocking-wasm"
+            }
+            PostMessagePayload::Notification(_) => "notification",
+        };
+        let worker = self.next_available_worker(reason)?;
+        let transfers = self.take_capi_transfers(source_worker_id, would_block, Some(worker.id()));
         worker
-            .send(msg)
+            .send_with_capi_transfers(msg, transfers)
             .with_context(|| format!("Unable to send a message to worker {}", worker.id()))?;
 
         if would_block {
@@ -239,7 +414,29 @@ impl SchedulerState {
         Ok(())
     }
 
-    fn next_available_worker(&mut self) -> Result<WorkerHandle, Error> {
+    fn post_wasm_message_from(
+        &mut self,
+        source_worker_id: Option<u32>,
+        msg: PostMessagePayload,
+        task_key: (u32, u32),
+    ) -> Result<(), Error> {
+        let reason = format!("wasm-{}.{}", task_key.0, task_key.1);
+        let worker = self.next_available_worker(&reason)?;
+        let transfers = self.take_capi_transfers(source_worker_id, true, Some(worker.id()));
+        self.wasm_workers.insert(
+            task_key,
+            WasmWorker {
+                worker_id: worker.id(),
+            },
+        );
+        worker
+            .send_with_capi_transfers(msg, transfers)
+            .with_context(|| format!("Unable to send a message to worker {}", worker.id()))?;
+        self.busy.push_back(worker);
+        Ok(())
+    }
+
+    fn next_available_worker(&mut self, reason: &str) -> Result<WorkerHandle, Error> {
         // First, try to send the message to an idle worker
         if let Some(worker) = self.idle.pop_front() {
             tracing::trace!(
@@ -253,6 +450,14 @@ impl SchedulerState {
         // let's spawn a new worker
 
         let worker = self.start_worker()?;
+        scheduler_diag(format!(
+            "create worker={} reason={} busy={} idle={} wasm={}",
+            worker.id(),
+            reason,
+            self.busy.len(),
+            self.idle.len(),
+            self.wasm_workers.len(),
+        ));
         tracing::trace!(
             worker.id = worker.id(),
             "Sending the message to a new worker"
@@ -281,6 +486,132 @@ impl SchedulerState {
 
         Ok(handle)
     }
+
+    fn take_capi_transfers(
+        &mut self,
+        source_worker_id: Option<u32>,
+        would_block: bool,
+        destination_worker_id: Option<u32>,
+    ) -> Vec<CapiTransfer> {
+        if !would_block {
+            return Vec::new();
+        }
+        let Some(source_worker_id) = source_worker_id else {
+            return Vec::new();
+        };
+        let transfers: Vec<CapiTransfer> = self
+            .pending_capi_transfers
+            .remove(&source_worker_id)
+            .into_iter()
+            .flat_map(|transfers| transfers.into_iter())
+            .map(|((registry_id, handle), value)| CapiTransfer {
+                registry_id,
+                handle,
+                value,
+            })
+            .collect();
+        for transfer in &transfers {
+            let key = (transfer.registry_id, transfer.handle);
+            if let Some(worker_id) = destination_worker_id {
+                self.capi_recipients
+                    .entry(key)
+                    .or_default()
+                    .insert(worker_id);
+            }
+        }
+        transfers
+    }
+
+    fn fulfill_capi_requests(&mut self, key: (u32, i32)) -> Result<(), Error> {
+        let Some(value) = self.pending_capi_value(key) else {
+            return Ok(());
+        };
+        let Some(requesting_workers) = self.pending_capi_requests.remove(&key) else {
+            return Ok(());
+        };
+
+        for worker_id in requesting_workers {
+            let Some(worker) = self.worker(worker_id) else {
+                tracing::warn!(
+                    worker.id = worker_id,
+                    "C API value requester is no longer running"
+                );
+                continue;
+            };
+            worker.send_capi_transfer(CapiTransfer {
+                registry_id: key.0,
+                handle: key.1,
+                value: value.clone(),
+            })?;
+            self.capi_recipients
+                .entry(key)
+                .or_default()
+                .insert(worker_id);
+        }
+        Ok(())
+    }
+
+    fn pending_capi_value(&self, key: (u32, i32)) -> Option<JsValue> {
+        self.capi_values.get(&key).cloned()
+    }
+
+    fn remove_pending_capi_value(&mut self, key: (u32, i32)) -> Option<JsValue> {
+        let empty_sources: Vec<u32> = self
+            .pending_capi_transfers
+            .iter_mut()
+            .filter_map(|(&source, values)| {
+                values.remove(&key);
+                values.is_empty().then_some(source)
+            })
+            .collect();
+        for source in empty_sources {
+            self.pending_capi_transfers.remove(&source);
+        }
+        self.capi_values.remove(&key)
+    }
+
+    fn worker(&self, worker_id: u32) -> Option<&WorkerHandle> {
+        self.idle
+            .iter()
+            .chain(self.busy.iter())
+            .find(|worker| worker.id() == worker_id)
+    }
+
+    fn terminate_wasm_thread(&mut self, task_key: (u32, u32)) {
+        let Some(worker) = self.wasm_workers.remove(&task_key) else {
+            return;
+        };
+        let worker_id = worker.worker_id;
+
+        self.idle.retain(|worker| worker.id() != worker_id);
+        self.busy.retain(|worker| worker.id() != worker_id);
+        self.wasm_workers
+            .retain(|_, worker| worker.worker_id != worker_id);
+        self.pending_capi_requests.retain(|_, workers| {
+            workers.remove(&worker_id);
+            !workers.is_empty()
+        });
+    }
+
+    fn wasm_tasks_are_idle(&self) -> bool {
+        self.wasm_workers.is_empty()
+    }
+}
+
+fn scheduler_diagnostics_enabled() -> bool {
+    js_sys::Reflect::get(
+        &js_sys::global(),
+        &JsValue::from_str("__wasmerSchedulerDiagnostics"),
+    )
+    .ok()
+    .and_then(|value| value.as_bool())
+    .unwrap_or(false)
+}
+
+fn scheduler_diag(message: String) {
+    if scheduler_diagnostics_enabled() {
+        web_sys::console::error_1(&format!("[wasmer-scheduler] {message}").into());
+    }
 }
 
 fn move_worker(worker_id: u32, from: &mut VecDeque<WorkerHandle>, to: &mut VecDeque<WorkerHandle>) {
@@ -293,6 +624,7 @@ fn move_worker(worker_id: u32, from: &mut VecDeque<WorkerHandle>, to: &mut VecDe
 #[cfg(test)]
 mod tests {
     use tokio::sync::oneshot;
+    use wasm_bindgen::JsValue;
     use wasm_bindgen_test::wasm_bindgen_test;
 
     use super::*;
@@ -325,5 +657,46 @@ mod tests {
         // Make sure the background thread actually ran something and sent us
         // back a result
         assert_eq!(receiver.await.unwrap(), 42);
+    }
+
+    #[wasm_bindgen_test]
+    fn capi_objects_attach_once_but_remain_available_until_release() {
+        let (tx, _) = mpsc::unbounded_channel();
+        let tx = unsafe { Scheduler::new(tx, wasmer::js::current_thread_id()) };
+        let mut scheduler = SchedulerState::new(tx);
+        scheduler
+            .pending_capi_transfers
+            .entry(7)
+            .or_default()
+            .insert((3, 11), JsValue::from_str("module"));
+        scheduler
+            .capi_values
+            .insert((3, 11), JsValue::from_str("module"));
+
+        assert!(
+            scheduler
+                .take_capi_transfers(Some(7), false, Some(8))
+                .is_empty()
+        );
+        assert!(scheduler.pending_capi_transfers.contains_key(&7));
+
+        let transfers = scheduler.take_capi_transfers(Some(7), true, Some(8));
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].registry_id, 3);
+        assert_eq!(transfers[0].handle, 11);
+        assert!(!scheduler.pending_capi_transfers.contains_key(&7));
+        assert!(
+            scheduler
+                .take_capi_transfers(Some(7), true, Some(9))
+                .is_empty()
+        );
+        assert_eq!(
+            scheduler
+                .pending_capi_value((3, 11))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("module")
+        );
     }
 }

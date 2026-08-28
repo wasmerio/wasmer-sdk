@@ -14,8 +14,7 @@ body {
   margin: 0;
   display: grid;
   place-items: center;
-  background:
-    radial-gradient(circle at 50% 20%, #30303b 0, transparent 38%),
+  background: radial-gradient(circle at 50% 20%, #30303b 0, transparent 38%),
     #09090d;
 }
 
@@ -41,7 +40,7 @@ h1 {
 }
 
 .lede {
-  max-width: 540px;
+  max-width: 560px;
   margin: 28px 0;
   color: #aaa8b2;
   font-size: 18px;
@@ -60,10 +59,9 @@ a {
   border-radius: 9px;
   color: inherit;
   text-decoration: none;
-  transition: border-color 140ms ease, background 140ms ease;
 }
 
 a:hover {
-  border-color: #686873;
-  background: #ffffff0a;
+  background: #18181f;
+  border-color: #555560;
 }

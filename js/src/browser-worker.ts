@@ -3,6 +3,12 @@ import {
   NETWORK_RPC_CONTROL_BYTES,
   networkResponseBufferBytes,
 } from "./node-network-rpc.js";
+import {
+  installCapiObjectBridge,
+  isCapiDispatchHandled,
+  receiveCapiDispatch,
+  setCapiMessageWorkerId,
+} from "./capi-worker-bridge.js";
 
 interface WorkerRuntime {
   handle(message: unknown): Promise<void>;
@@ -18,6 +24,18 @@ interface InitMessage {
 
 Error.stackTraceLimit = 50;
 installNetworkProxy();
+installCapiObjectBridge((message) => globalThis.postMessage(message));
+let runtimeMemory: WebAssembly.Memory | undefined;
+globalThis.addEventListener("error", (event) => {
+  console.error(
+    "[wasmer-sdk-worker-error]",
+    runtimeMemory?.buffer.byteLength,
+    event.error?.stack ?? event.message,
+  );
+});
+globalThis.addEventListener("unhandledrejection", (event) => {
+  console.error("[wasmer-sdk-worker-rejection]", event.reason?.stack ?? event.reason);
+});
 
 let worker: WorkerRuntime | undefined;
 const pendingMessages: unknown[] = [];
@@ -25,30 +43,41 @@ const pendingMessages: unknown[] = [];
 globalThis.onmessage = ({ data }: MessageEvent<unknown>) => {
   void handleMessage(data).catch((error: unknown) => {
     console.error("Wasmer SDK worker failed:", error);
-    throw error;
   });
 };
 
 async function handleMessage(data: unknown): Promise<void> {
+  data = receiveCapiDispatch(data);
+  if (isCapiDispatchHandled(data)) return;
   if (isInitMessage(data)) {
-    const sdk = (await import(data.sdkUrl)) as {
-      default(options: {
-        module_or_path: WebAssembly.Module;
-        memory: WebAssembly.Memory;
-      }): Promise<unknown>;
-      ThreadPoolWorker: new (id: number) => WorkerRuntime;
-    };
-    await sdk.default({ module_or_path: data.module, memory: data.memory });
-    const initialized = new sdk.ThreadPoolWorker(data.id);
-    while (pendingMessages.length > 0) {
-      await initialized.handle(pendingMessages.shift());
-    }
-    worker = initialized;
+    runtimeMemory = data.memory;
+    await initialize(data);
     return;
   }
 
-  if (worker) await worker.handle(data);
+  if (worker) {
+    await worker.handle(data);
+  }
   else pendingMessages.push(data);
+}
+
+async function initialize(data: InitMessage): Promise<void> {
+  setCapiMessageWorkerId(data.id);
+  const sdk = (await import(/* @vite-ignore */ data.sdkUrl)) as {
+    default(options: {
+      module_or_path: WebAssembly.Module;
+      memory: WebAssembly.Memory;
+    }): Promise<unknown>;
+    ThreadPoolWorker: new (id: number) => WorkerRuntime;
+  };
+  await sdk.default({ module_or_path: data.module, memory: data.memory });
+  const initialized = new sdk.ThreadPoolWorker(data.id);
+  worker = initialized;
+  while (pendingMessages.length > 0) {
+    void initialized.handle(pendingMessages.shift()).catch((error: unknown) => {
+      console.error("Wasmer SDK worker failed:", error);
+    });
+  }
 }
 
 function installNetworkProxy(): void {

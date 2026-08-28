@@ -7,7 +7,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr},
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex, TryLockError, Weak},
     task::{Context, Poll, Waker},
 };
 
@@ -72,22 +72,30 @@ impl BrowserHttpNetworking {
 
 impl BrowserHttpRequestHandler {
     pub(crate) fn has_listener(&self, port: u16) -> bool {
-        let mut state = self.state.lock().expect("browser HTTP network poisoned");
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(TryLockError::WouldBlock) => return false,
+            Err(TryLockError::Poisoned(_)) => panic!("browser HTTP network poisoned"),
+        };
         state
             .listeners
             .retain(|_, listener| listener.strong_count() > 0);
         state.listeners.keys().any(|address| address.port() == port)
     }
 
-    pub(crate) fn listening_ports(&self) -> Vec<u16> {
-        let mut state = self.state.lock().expect("browser HTTP network poisoned");
+    pub(crate) fn listening_ports(&self) -> Option<Vec<u16>> {
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(TryLockError::WouldBlock) => return None,
+            Err(TryLockError::Poisoned(_)) => panic!("browser HTTP network poisoned"),
+        };
         state
             .listeners
             .retain(|_, listener| listener.strong_count() > 0);
         let mut ports: Vec<_> = state.listeners.keys().map(SocketAddr::port).collect();
         ports.sort_unstable();
         ports.dedup();
-        ports
+        Some(ports)
     }
 
     pub(crate) async fn handle(
@@ -515,9 +523,17 @@ impl VirtualIoSource for BrowserHttpSocket {
     }
 
     fn poll_read_ready(&mut self, _context: &mut Context<'_>) -> Poll<NetworkResult<usize>> {
-        Poll::Ready(Ok(Self::readable_bytes(
-            &self.state.lock().expect("browser HTTP socket poisoned"),
-        )))
+        let readable =
+            Self::readable_bytes(&self.state.lock().expect("browser HTTP socket poisoned"));
+        if readable > 0 {
+            Poll::Ready(Ok(readable))
+        } else {
+            // The browser-side request is complete, but its connection remains
+            // open while the guest prepares the response. Reporting zero here
+            // would be interpreted as EOF and Node would close the writable
+            // half of the accepted socket before asynchronous handlers can run.
+            Poll::Pending
+        }
     }
 
     fn poll_write_ready(&mut self, _context: &mut Context<'_>) -> Poll<NetworkResult<usize>> {
@@ -600,7 +616,7 @@ impl VirtualConnectedSocket for BrowserHttpSocket {
     ) -> NetworkResult<usize> {
         let mut state = self.state.lock().expect("browser HTTP socket poisoned");
         let Some(request) = state.request.as_mut() else {
-            return Ok(0);
+            return Err(NetworkError::WouldBlock);
         };
         let available = &request.bytes[request.offset..];
         let count = available.len().min(buffer.len());
@@ -833,5 +849,60 @@ fn decode_chunked(mut bytes: &[u8]) -> NetworkResult<Option<Vec<u8>>> {
             return Err(NetworkError::InvalidData);
         }
         bytes = &bytes[size + 2..];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{mem::MaybeUninit, task::Waker};
+
+    use super::*;
+
+    #[test]
+    fn listener_observers_never_block_on_network_mutation() {
+        let networking = BrowserHttpNetworking::new();
+        let handler = networking.request_handler();
+        let _mutation = networking
+            .state
+            .lock()
+            .expect("browser HTTP network poisoned");
+
+        assert!(!handler.has_listener(8000));
+        assert_eq!(handler.listening_ports(), None);
+    }
+
+    #[test]
+    fn exhausted_request_stays_open_for_an_async_response() {
+        let (response, _receiver) = oneshot::channel();
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri("/")
+            .body(Bytes::new())
+            .unwrap();
+        let address = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8000);
+        let mut socket = BrowserHttpSocket::new(
+            address,
+            ActiveRequest {
+                request,
+                peer_addr: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 50_000),
+                response,
+            },
+        );
+
+        let request_len = BrowserHttpSocket::readable_bytes(
+            &socket.state.lock().expect("browser HTTP socket poisoned"),
+        );
+        let mut buffer = vec![MaybeUninit::uninit(); request_len];
+        assert_eq!(socket.try_recv(&mut buffer, false).unwrap(), request_len);
+        assert!(matches!(
+            socket.try_recv(&mut buffer, false),
+            Err(NetworkError::WouldBlock)
+        ));
+
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(matches!(
+            socket.poll_read_ready(&mut context),
+            Poll::Pending
+        ));
     }
 }

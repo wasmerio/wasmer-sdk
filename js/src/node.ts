@@ -52,6 +52,7 @@ export class Wasmer extends BrowserWasmer {
       const client = core.WasmerCore.create(
         {
           outputBytes: options.outputBytes,
+          parallelism: options.parallelism,
           cache: {
             mode:
               options.cache === false

@@ -333,7 +333,7 @@ Selecting a package without an entrypoint fails with
 `PACKAGE_HAS_NO_ENTRYPOINT`; callers never need a non-null assertion:
 
 ```ts
-const edgejs = await wasmer.packages.load("wasmer/edgejs-quickjs@0.0.3");
+const edgejs = await wasmer.packages.load("syrusakbary/edgejs-quickjs-wasi@0.1.5");
 await sandbox.command(edgejs, ["main.js"]).run();
 ```
 
@@ -1583,7 +1583,7 @@ Running JavaScript through EdgeJS QuickJS is the same:
 
 ```ts
 const edgejs = await wasmer.packages.load(
-  "wasmer/edgejs-quickjs@0.0.3",
+  "syrusakbary/edgejs-quickjs-wasi@0.1.5",
 );
 await using sandbox = await wasmer.sandboxes.create({
   packages: [edgejs],

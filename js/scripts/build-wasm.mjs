@@ -1,5 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { renameSync } from "node:fs";
+import {
+  copyFileSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +25,25 @@ const wasmOpt =
   join(packageRoot, "node_modules", ".bin", `wasm-opt${executableSuffix}`);
 const wasmOutput = join(packageRoot, "pkg", "wasmer_sdk_js_bg.wasm");
 const optimizedWasmOutput = `${wasmOutput}.optimized`;
+const localWasmer = process.env.WASMER_REPO;
+const localWasmerPatches = localWasmer
+  ? [
+      ["virtual-fs", "lib/virtual-fs"],
+      ["virtual-mio", "lib/virtual-io"],
+      ["virtual-net", "lib/virtual-net"],
+      ["wasmer", "lib/api"],
+      ["wasmer-c-api-imports", "lib/c-api-imports"],
+      ["wasmer-config", "lib/config"],
+      ["wasmer-napi", "lib/napi"],
+      ["wasmer-package", "lib/package"],
+      ["wasmer-types", "lib/types"],
+      ["wasmer-wasix", "lib/wasix"],
+      ["wasmer-wasix-types", "lib/wasi-types"],
+    ].flatMap(([name, path]) => [
+      "--config",
+      `patch.crates-io.${name}.path=${JSON.stringify(join(localWasmer, path))}`,
+    ])
+  : [];
 
 const rustflags = [
   "-Ctarget-feature=+atomics,+bulk-memory,+mutable-globals",
@@ -40,7 +65,8 @@ run(
     "build",
     "-Z",
     "build-std=std,panic_abort",
-    "--locked",
+    ...(localWasmer ? [] : ["--locked"]),
+    ...localWasmerPatches,
     "-p",
     "wasmer-sdk-js",
     "--target",
@@ -70,6 +96,8 @@ run(wasmBindgen, [
   "--remove-name-section",
   "--remove-producers-section",
 ]);
+vendorWasmBindgenDependencies(join(packageRoot, "pkg", "snippets"));
+patchMemory32Glue(join(packageRoot, "pkg", "wasmer_sdk_js.js"));
 
 run(wasmOpt, [
   wasmOutput,
@@ -81,6 +109,82 @@ run(wasmOpt, [
   optimizedWasmOutput,
 ]);
 renameSync(optimizedWasmOutput, wasmOutput);
+
+function vendorWasmBindgenDependencies(snippetsRoot) {
+  const acornModule = join(
+    packageRoot,
+    "node_modules",
+    "acorn",
+    "dist",
+    "acorn.mjs",
+  );
+  const acornLicense = join(packageRoot, "node_modules", "acorn", "LICENSE");
+  let patchedImports = 0;
+
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
+
+      const source = readFileSync(path, "utf8");
+      const patched = source.replace(
+        /import \{ parse as wasmerNapiParse \} from ['"]acorn['"];/g,
+        "import { parse as wasmerNapiParse } from './acorn.mjs';",
+      );
+      if (patched === source) continue;
+
+      writeFileSync(path, patched);
+      copyFileSync(acornModule, join(directory, "acorn.mjs"));
+      copyFileSync(acornLicense, join(directory, "acorn.LICENSE"));
+      patchedImports += 1;
+    }
+  };
+
+  visit(snippetsRoot);
+  if (patchedImports !== 1) {
+    throw new Error(
+      `expected to vendor one wasm-bindgen acorn import, patched ${patchedImports}`,
+    );
+  }
+}
+
+function patchMemory32Glue(path) {
+  const source = readFileSync(path, "utf8");
+  let viewReplacements = 0;
+  let pointerReplacements = 0;
+  const patchedViews = source.replace(
+    /(cached(?:DataView|Uint16Array|Uint8Array)Memory0)\.buffer !== wasm\.memory\.buffer/g,
+    (_match, cache) => {
+      viewReplacements += 1;
+      return `${cache}.buffer !== wasm.memory.buffer || ${cache}.byteLength !== wasm.memory.buffer.byteLength`;
+    },
+  );
+  const signedReturnPointer =
+    /(getDataViewMemory0\(\)\.set(?:BigInt64|Float64|Int32)\()arg0( \+)/g;
+  const patched = patchedViews.replace(
+    signedReturnPointer,
+    (_match, prefix, suffix) => {
+      pointerReplacements += 1;
+      return `${prefix}(arg0 >>> 0)${suffix}`;
+    },
+  );
+  if (viewReplacements !== 3) {
+    throw new Error(
+      `expected to patch 3 wasm-bindgen memory views, patched ${viewReplacements}`,
+    );
+  }
+  signedReturnPointer.lastIndex = 0;
+  if (pointerReplacements === 0 || signedReturnPointer.test(patched)) {
+    throw new Error(
+      `failed to normalize wasm-bindgen return pointers; patched ${pointerReplacements}`,
+    );
+  }
+  writeFileSync(path, patched);
+}
 
 function run(command, args, environment = {}) {
   const result = spawnSync(command, args, {

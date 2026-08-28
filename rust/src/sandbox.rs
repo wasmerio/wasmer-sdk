@@ -473,8 +473,8 @@ async fn probe_tcp(
     .await
 }
 
-/// Build the per-sandbox runtime once: policy networking plus the WebAssembly
-/// C API host-import hooks. Every spawn reuses this runtime.
+/// Build the per-sandbox runtime once: policy networking plus the enabled
+/// host-import hooks. Every spawn reuses this runtime.
 fn build_sandbox_runtime(
     client: &Wasmer,
     networking: DynVirtualNetworking,
@@ -488,7 +488,29 @@ fn build_sandbox_runtime(
             resolve_capi_module(runtime_for_resolver.as_ref(), bytes)
         });
 
-    Arc::new(OverriddenRuntime::new(runtime).with_instantiation_hook(hooks))
+    let runtime: Arc<dyn Runtime + Send + Sync> =
+        Arc::new(OverriddenRuntime::new(runtime).with_instantiation_hook(hooks));
+
+    #[cfg(all(target_arch = "wasm32", feature = "js-napi"))]
+    let runtime: Arc<dyn Runtime + Send + Sync> = Arc::new(
+        OverriddenRuntime::new(runtime)
+            // This hook returns no imports for packages that do not use N-API.
+            .with_instantiation_hook(wasmer_napi::NapiCtx::default().runtime_hooks()),
+    );
+
+    runtime
+}
+
+#[cfg(all(test, target_arch = "wasm32", feature = "js-napi"))]
+mod napi_hook_tests {
+    use wasmer_wasix::runtime::InstantiationHook;
+
+    #[test]
+    fn napi_runtime_hooks_implement_the_wasix_hook_contract() {
+        fn assert_hook<T: InstantiationHook>() {}
+
+        assert_hook::<wasmer_napi::NapiRuntimeHooks>();
+    }
 }
 
 #[cfg(feature = "sys")]

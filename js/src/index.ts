@@ -10,6 +10,12 @@ import init, {
 
 export interface WasmerOptions {
   outputBytes?: number;
+  /**
+   * Parallelism advertised to WASIX guests. Browser workers carry a complete
+   * WebAssembly runtime, so browsers default to 2 instead of exposing the
+   * host's raw logical CPU count. Node defaults to the host-reported value.
+   */
+  parallelism?: number;
   wasm?: Parameters<typeof init>[0];
   /**
    * Persistent package and registry caching. Browsers use an origin-scoped
@@ -267,6 +273,10 @@ export class Wasmer {
         options.outputBytes === undefined
           ? undefined
           : validateOutputBytes(options.outputBytes),
+      parallelism:
+        options.parallelism === undefined
+          ? undefined
+          : validateParallelism(options.parallelism),
     };
     this.packages = new PackagesService((source) => this.#loadPackage(source));
     this.sandboxes = new SandboxesService((options) =>
@@ -306,6 +316,7 @@ export class Wasmer {
     setWorkerUrl(new URL("./browser-worker.js", import.meta.url).href);
     return WasmerCore.create({
       outputBytes: options.outputBytes,
+      parallelism: options.parallelism ?? 2,
       cache: browserCacheOptions(options.cache),
     });
   }
@@ -748,7 +759,12 @@ export class Ports {
     const poll = () => {
       if (!active) return;
       try {
-        const current = new Set<number>(this.#core.httpListeningPorts());
+        const ports = this.#core.httpListeningPorts();
+        if (ports === undefined) {
+          timer = setTimeout(poll, intervalMs);
+          return;
+        }
+        const current = new Set<number>(ports);
         for (const port of current) {
           if (!observed.has(port)) listener(port);
         }
@@ -1405,6 +1421,10 @@ function validateTimeoutMs(value: number, name = "timeoutMs"): number {
 
 function validateOutputBytes(value: number): number {
   return validateInteger("outputBytes", value, 0, MAX_WASM32_SIZE);
+}
+
+function validateParallelism(value: number): number {
+  return validateInteger("parallelism", value, 1, MAX_WASM32_SIZE);
 }
 
 function validateTerminalOptions(

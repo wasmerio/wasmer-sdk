@@ -14,7 +14,7 @@ import { Wasmer } from "@wasmer/sdk2/node";
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@3.13.5"],
+  packages: ["python/python@3.13.17"],
   files: { "hello.py": "print('Hello from Wasmer')" },
 });
 
