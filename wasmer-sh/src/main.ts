@@ -48,7 +48,7 @@ const EDGEJS_PACKAGE = "syrusakbary/edgejs@0.1.24";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "curl/curl",
-  "python/python",
+  "python/python@3.13.17",
   EDGEJS_PACKAGE,
   "php/php-32",
 ];

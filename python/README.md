@@ -25,7 +25,7 @@ from wasmer_sdk import Wasmer
 async def main() -> None:
     wasmer = Wasmer()
     sandbox = await wasmer.sandboxes.create(
-        packages=["python/python@3.13.5"],
+        packages=["python/python@=3.13.5"],
         files={
             "main.py": "print(sum(n * n for n in range(10)))",
         },
@@ -47,7 +47,7 @@ long-lived applications and tests, use `async with` for deterministic cleanup:
 async def main() -> None:
     async with Wasmer() as wasmer:
         sandbox = await wasmer.sandboxes.create(
-            packages=["python/python@3.13.5"],
+            packages=["python/python@=3.13.5"],
         )
         async with sandbox:
             output = await sandbox.command(
