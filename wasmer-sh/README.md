@@ -121,7 +121,8 @@ cross-tab channels used by third-party iframes.
 `pnpm dev` starts two independent servers. The shell runs at
 `http://127.0.0.1:5173`, while a small static HTTP host runs at
 `http://127.0.0.1:5174`. The latter owns the service worker and all guest HTTP
-URLs, so guest routes never overlap Vite routes.
+URLs, so guest routes never overlap Vite routes. The launcher sets
+`VITE_WASMER_SERVICE_WORKER_ORIGIN=http://127.0.0.1:5174` for the shell process.
 
 To run that standalone service-worker host through AnyBuild and Wasmer instead
 of Vite, install [AnyBuild](https://www.anybuild.run/docs/installation/). From
@@ -161,10 +162,12 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-Build both static applications with:
+Production builds use `https://default.local.wasmer.site/` as the service-worker
+origin by default. To target a different independently deployed HTTP host,
+override it while building:
 
 ```console
-VITE_WASMER_SERVICE_WORKER_ORIGIN=https://http.wasmer.sh pnpm build
+VITE_WASMER_SERVICE_WORKER_ORIGIN=https://http.example.com pnpm build
 ```
 
 The shell is emitted to `dist/`; the standalone service-worker host is emitted
@@ -174,9 +177,9 @@ shell build with `VITE_WASMER_SERVICE_WORKER_ORIGIN`. The HTTP host must serve
 does this automatically. A wildcard production setup can point the configured
 origin at the domain responsible for guest HTTP traffic.
 
-For a local production preview, build with
-`VITE_WASMER_SERVICE_WORKER_ORIGIN=http://127.0.0.1:4174` and run
-`pnpm preview`; it starts the two outputs on ports 4173 and 4174.
+For a local production preview, run `pnpm preview`; its launcher sets
+`VITE_WASMER_SERVICE_WORKER_ORIGIN=http://127.0.0.1:4174` and starts the two
+outputs on ports 4173 and 4174.
 
 ## Browser smoke test
 

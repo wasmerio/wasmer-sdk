@@ -179,7 +179,15 @@ on the next outbound network operation.
 ### Run a web server in an iframe
 
 Browser sandboxes expose one HTTP listener at the root of a dedicated static
-origin. That origin needs two small SDK entrypoints. Serve the worker as
+origin. By default, `ports.expose()` uses Wasmer's managed HTTP host at
+`https://default.local.wasmer.site/`, so applications do not need to configure
+or deploy one:
+
+```javascript
+const server = await sandbox.ports.expose(8080);
+```
+
+To operate a custom HTTP host, serve the worker as
 `/wasmer-service-worker.js`:
 
 ```javascript
@@ -192,8 +200,9 @@ Serve a control document at `/.wasmer/host.html` which imports:
 import "@wasmer/sdk/service-worker-host";
 ```
 
-The application itself stays on a different origin. Start the guest server,
-then pass the static HTTP-host origin to `ports.expose()`:
+The application itself stays on a different origin. Start the guest server;
+omit the second argument to use the managed host, or pass `serviceWorker` to
+override it:
 
 ```javascript
 import { Wasmer } from "@wasmer/sdk/browser";
@@ -209,9 +218,7 @@ const php = await sandbox
   .command("php", ["-S", "0.0.0.0:8080", "-t", "/workspace"])
   .spawn({ stdout: "capture", stderr: "capture" });
 
-const server = await sandbox.ports.expose(8080, {
-  serviceWorker: httpHost,
-});
+const server = await sandbox.ports.expose(8080);
 document.body.append(server.createIframe({ title: "PHP preview" }));
 ```
 
@@ -221,7 +228,7 @@ advance:
 ```javascript
 const stopWatching = sandbox.ports.onListen((port) => {
   void sandbox.ports
-    .expose(port, { serviceWorker: httpHost })
+    .expose(port)
     .then((server) => document.body.append(server.createIframe()));
 }, {
   onClose: (port) => console.log(`server on ${port} closed`),
@@ -234,6 +241,14 @@ One service worker exposes exactly one guest server. A second call using the
 same origin fails until the first `BrowserServer` is closed. To serve guests
 concurrently, assign each one its own origin (for example with wildcard
 subdomains).
+
+Pass a custom host explicitly when needed:
+
+```javascript
+const server = await sandbox.ports.expose(8080, {
+  serviceWorker: "https://http.example.com",
+});
+```
 
 See `wasmer-sh/service-worker` in this repository for a complete static Vite
 build. The relay transfers the route directly to its local service worker; the

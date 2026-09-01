@@ -8,10 +8,28 @@ if (mode !== "dev" && mode !== "preview") {
 const appPort = mode === "dev" ? "5173" : "4173";
 const httpPort = mode === "dev" ? "5174" : "4174";
 const baseArgs = mode === "dev" ? [] : ["preview"];
+const appEnvironment = {
+  ...process.env,
+  VITE_WASMER_SERVICE_WORKER_ORIGIN:
+    process.env.VITE_WASMER_SERVICE_WORKER_ORIGIN ??
+    `http://127.0.0.1:${httpPort}`,
+};
 const children = [
-  spawn("vite", [...baseArgs, "--host", "127.0.0.1", "--port", appPort], {
-    stdio: "inherit",
-  }),
+  spawn(
+    "vite",
+    [
+      ...baseArgs,
+      "--host",
+      "127.0.0.1",
+      "--port",
+      appPort,
+      "--strictPort",
+    ],
+    {
+      stdio: "inherit",
+      env: appEnvironment,
+    },
+  ),
   spawn(
     "vite",
     [
@@ -22,6 +40,7 @@ const children = [
       "127.0.0.1",
       "--port",
       httpPort,
+      "--strictPort",
     ],
     { stdio: "inherit" },
   ),

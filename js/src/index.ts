@@ -127,11 +127,16 @@ export interface DirectoryEntry extends FileStat {
   name: string;
 }
 
+/** Managed HTTP host used by browser port exposure when no origin is supplied. */
+export const DEFAULT_SERVICE_WORKER_ORIGIN =
+  "https://default.local.wasmer.site/";
+
 export interface ExposePortOptions {
   /**
-   * The origin of a standalone Wasmer HTTP host.
+   * The origin of a standalone Wasmer HTTP host. Defaults to
+   * {@link DEFAULT_SERVICE_WORKER_ORIGIN}.
    */
-  serviceWorker: string | URL;
+  serviceWorker?: string | URL;
   /** Time allowed for the guest to begin listening. Defaults to 30 seconds. */
   timeoutMs?: number;
 }
@@ -716,7 +721,7 @@ export class Ports {
    */
   async expose(
     port: number,
-    options: ExposePortOptions,
+    options: ExposePortOptions = {},
   ): Promise<BrowserServer> {
     if (typeof window === "undefined" || typeof MessageChannel === "undefined") {
       throw new WasmerError(
@@ -724,15 +729,12 @@ export class Ports {
         "CAPABILITY_UNAVAILABLE",
       );
     }
-    if (!options?.serviceWorker) {
-      throw new WasmerError(
-        "ports.expose() requires an HTTP host origin",
-        "INVALID_ARGUMENT",
-      );
-    }
     const validPort = validateInteger("port", port, 1, 65_535);
-    const timeoutMs = validateTimeoutMs(options.timeoutMs ?? 30_000);
-    const target = await resolveServiceWorker(options.serviceWorker, timeoutMs);
+    const timeoutMs = validateTimeoutMs(options?.timeoutMs ?? 30_000);
+    const target = await resolveServiceWorker(
+      options?.serviceWorker ?? DEFAULT_SERVICE_WORKER_ORIGIN,
+      timeoutMs,
+    );
     await waitForHttpListener(this.#core, validPort, timeoutMs);
 
     const id = createBrowserServerId();

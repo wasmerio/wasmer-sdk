@@ -7,6 +7,7 @@ import initCore, {
 } from "../pkg/wasmer_sdk_js.js";
 import {
   Command,
+  DEFAULT_SERVICE_WORKER_ORIGIN,
   Ports,
   Process,
   Wasmer,
@@ -14,6 +15,13 @@ import {
 } from "../dist/index.js";
 
 const UINT32_MAX = 0xffff_ffff;
+
+test("browser port exposure has a managed HTTP-host default", () => {
+  assert.equal(
+    DEFAULT_SERVICE_WORKER_ORIGIN,
+    "https://default.local.wasmer.site/",
+  );
+});
 
 test("client exposes package and sandbox services synchronously", () => {
   const wasmer = new Wasmer();

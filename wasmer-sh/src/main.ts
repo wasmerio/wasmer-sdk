@@ -61,6 +61,7 @@ const WISP_STORAGE_KEY = "wasmer.sh:wisp-url";
 const WISP_AUTOCONFIGURE_CHANNEL = "wisp-autoconfigure";
 const WISP_AUTOCONFIGURE_PATH = "/wisp-autoconfigure/index.html";
 const DEFAULT_WISP_URL = "ws://localhost:4000/";
+const DEFAULT_SERVICE_WORKER_ORIGIN = "https://default.local.wasmer.site/";
 const LOCAL_WISP_COMMAND = "wasmer run wasmer/wisp-server --net";
 
 type WispSetupMode = "deploy" | "local";
@@ -951,7 +952,7 @@ function readConfig(params: URLSearchParams): ShellConfig {
     serviceWorkerOrigin:
       params.get("httpOrigin")?.trim() ||
       import.meta.env.VITE_WASMER_SERVICE_WORKER_ORIGIN?.trim() ||
-      (import.meta.env.DEV ? "http://127.0.0.1:5174" : undefined),
+      DEFAULT_SERVICE_WORKER_ORIGIN,
   };
 }
 
