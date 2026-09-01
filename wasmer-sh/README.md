@@ -1,7 +1,7 @@
 # wasmer.sh
 
 A fast, browser-native command shell powered by Wasmer, WASIX, and the new
-[`@wasmer/sdk2`](../js) sandbox API.
+[`@wasmer/sdk2`](https://www.npmjs.com/package/@wasmer/sdk2) sandbox API.
 
 The application loads `wasmer/bash`, creates one persistent sandbox, and
 connects xterm to one long-lived interactive Bash process. Bash owns the
