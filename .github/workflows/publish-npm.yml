@@ -2,6 +2,12 @@ name: Publish JavaScript to npm
 
 on:
   workflow_dispatch:
+    inputs:
+      sync_only:
+        description: Synchronize wasmer-sh after an existing npm publication
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: publish-npm
@@ -13,7 +19,7 @@ env:
 jobs:
   build:
     name: Build @wasmer/sdk2
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.sync_only != true
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -79,6 +85,7 @@ jobs:
   publish:
     name: Publish @wasmer/sdk2
     needs: build
+    if: inputs.sync_only != true
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: npm
@@ -101,3 +108,80 @@ jobs:
 
       - name: Publish with npm trusted publishing
         run: npm publish ./npm-package/*.tgz --access public
+
+  sync-wasmer-sh:
+    name: Update wasmer-sh to the published SDK
+    needs:
+      - build
+      - publish
+    if: >-
+      always() &&
+      (needs.publish.result == 'success' || inputs.sync_only == true)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Install pnpm
+        run: npm install --global pnpm@11.19.0
+
+      - name: Update wasmer-sh package manifests
+        run: node .github/scripts/sync-wasmer-sh-sdk-version.mjs
+
+      - name: Regenerate dependency lockfiles
+        run: |
+          npm --prefix wasmer-sh install --package-lock-only --ignore-scripts
+          npm --prefix wasmer-sh/service-worker install \
+            --package-lock-only --ignore-scripts
+          pnpm --dir wasmer-sh install --lockfile-only --ignore-scripts
+
+      - name: Validate the published dependency
+        run: node .github/scripts/sync-wasmer-sh-sdk-version.mjs --check
+
+      - name: Build wasmer-sh from clean installs
+        run: |
+          npm --prefix wasmer-sh ci --ignore-scripts
+          npm --prefix wasmer-sh/service-worker ci --ignore-scripts
+          npm --prefix wasmer-sh run build
+
+      - name: Commit the synchronized dependency
+        id: commit
+        shell: bash
+        run: |
+          git add \
+            wasmer-sh/package.json \
+            wasmer-sh/package-lock.json \
+            wasmer-sh/pnpm-lock.yaml \
+            wasmer-sh/service-worker/package.json \
+            wasmer-sh/service-worker/package-lock.json
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          sdk_version="$(node --print \
+            "require('./js/package.json').version")"
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m \
+            "Use @wasmer/sdk2 ${sdk_version} in wasmer-sh"
+          git push origin HEAD:main
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Run CI for the synchronized commit
+        if: steps.commit.outputs.changed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref main
