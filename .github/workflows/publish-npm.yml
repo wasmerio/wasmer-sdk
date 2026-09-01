@@ -143,7 +143,10 @@ jobs:
           npm --prefix wasmer-sh install --package-lock-only --ignore-scripts
           npm --prefix wasmer-sh/service-worker install \
             --package-lock-only --ignore-scripts
-          pnpm --dir wasmer-sh install --lockfile-only --ignore-scripts
+          # This exact SDK version was trusted-published by the preceding job,
+          # so it must be exempt from pnpm's default 24-hour quarantine here.
+          pnpm --dir wasmer-sh --config.minimum-release-age=0 install \
+            --lockfile-only --ignore-scripts
 
       - name: Validate the published dependency
         run: node .github/scripts/sync-wasmer-sh-sdk-version.mjs --check
