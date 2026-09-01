@@ -1,0 +1,8 @@
+[general]
+cache-control-headers = false
+
+[advanced]
+
+[[advanced.headers]]
+source = "**/*"
+headers = { Cross-Origin-Opener-Policy = "same-origin", Cross-Origin-Embedder-Policy = "require-corp" }
