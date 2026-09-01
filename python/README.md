@@ -39,6 +39,9 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+The `@=` package-version syntax is an exact pin. Use it when a sandbox must
+resolve the same Wasmer package version on every run.
+
 Constructing `Wasmer()` is synchronous. Operations that perform I/O are
 awaited. A `wasmer` instance can be reused across multiple sandboxes. For
 long-lived applications and tests, use `async with` for deterministic cleanup:
