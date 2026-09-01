@@ -10,7 +10,7 @@ import {
   type WritableBytes,
   Wasmer,
   type WispConnectionRequest,
-} from "@wasmer/sdk2/browser";
+} from "@wasmer/sdk/browser";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 

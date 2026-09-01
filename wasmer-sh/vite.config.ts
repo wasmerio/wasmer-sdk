@@ -19,7 +19,7 @@ const edgejsWebcPath = edgejsWebcUrl?.startsWith("/@fs/")
 // package-owned companion modules at the relative paths the entrypoints use.
 function sdkRuntimeAssets(): Plugin {
   const sdkDist = dirname(
-    fileURLToPath(import.meta.resolve("@wasmer/sdk2/browser")),
+    fileURLToPath(import.meta.resolve("@wasmer/sdk/browser")),
   );
   const dependencies = ["node-network-rpc.js", "capi-worker-bridge.js"];
 
@@ -77,7 +77,7 @@ export default defineConfig({
   },
   optimizeDeps: {
     // Keep the SDK's worker and wasm-bindgen module URLs intact in development.
-    exclude: ["@wasmer/sdk2"],
+    exclude: ["@wasmer/sdk"],
   },
   worker: {
     format: "es",

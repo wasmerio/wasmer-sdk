@@ -1,1 +1,1 @@
-import "@wasmer/sdk2/service-worker-host";
+import "@wasmer/sdk/service-worker-host";

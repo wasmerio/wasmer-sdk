@@ -1,4 +1,4 @@
-import type { Sandbox } from "@wasmer/sdk2/browser";
+import type { Sandbox } from "@wasmer/sdk/browser";
 import type * as Monaco from "monaco-editor/editor/editor.api.js";
 
 interface OpenFile {
