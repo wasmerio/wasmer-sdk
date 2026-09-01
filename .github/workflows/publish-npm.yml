@@ -18,7 +18,7 @@ env:
 
 jobs:
   build:
-    name: Build @wasmer/sdk2
+    name: Build @wasmer/sdk
     if: github.ref == 'refs/heads/main' && inputs.sync_only != true
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -31,6 +31,9 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+
+      - name: Install npm with trusted-publishing support
+        run: npm install --global npm@11.19.1
 
       - uses: ./.github/actions/cache-sdk
         with:
@@ -51,11 +54,11 @@ jobs:
       - name: Validate package identity
         working-directory: js
         run: |
-          test "$(node --print "require('./package.json').name")" = "@wasmer/sdk2"
+          test "$(node --print "require('./package.json').name")" = "@wasmer/sdk"
           sdk_npm_version="$(node --print "require('./package.json').version")"
-          echo "Publishing @wasmer/sdk2@${sdk_npm_version}"
-          if npm view "@wasmer/sdk2@${sdk_npm_version}" version >/dev/null 2>&1; then
-            echo "::error::@wasmer/sdk2@${sdk_npm_version} is already published"
+          echo "Publishing @wasmer/sdk@${sdk_npm_version}"
+          if npm view "@wasmer/sdk@${sdk_npm_version}" version >/dev/null 2>&1; then
+            echo "::error::@wasmer/sdk@${sdk_npm_version} is already published"
             exit 1
           fi
           npm --version
@@ -77,13 +80,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wasmer-sdk2-${{ github.sha }}
+          name: wasmer-sdk-${{ github.sha }}
           path: npm-package/*.tgz
           if-no-files-found: error
           retention-days: 1
 
   publish:
-    name: Publish @wasmer/sdk2
+    name: Publish @wasmer/sdk
     needs: build
     if: inputs.sync_only != true
     runs-on: ubuntu-24.04
@@ -101,9 +104,12 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
+      - name: Install npm with trusted-publishing support
+        run: npm install --global npm@11.19.1
+
       - uses: actions/download-artifact@v4
         with:
-          name: wasmer-sdk2-${{ github.sha }}
+          name: wasmer-sdk-${{ github.sha }}
           path: npm-package
 
       - name: Publish with npm trusted publishing
@@ -162,11 +168,17 @@ jobs:
         shell: bash
         run: |
           git add \
+            wasmer-sh/README.md \
             wasmer-sh/package.json \
             wasmer-sh/package-lock.json \
             wasmer-sh/pnpm-lock.yaml \
+            wasmer-sh/src/editor.ts \
+            wasmer-sh/src/main.ts \
+            wasmer-sh/vite.config.ts \
+            wasmer-sh/service-worker/.wasmer/host.ts \
             wasmer-sh/service-worker/package.json \
-            wasmer-sh/service-worker/package-lock.json
+            wasmer-sh/service-worker/package-lock.json \
+            wasmer-sh/service-worker/wasmer-service-worker.js
           if git diff --cached --quiet; then
             echo "changed=false" >> "${GITHUB_OUTPUT}"
             exit 0
@@ -178,7 +190,7 @@ jobs:
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m \
-            "Use @wasmer/sdk2 ${sdk_version} in wasmer-sh"
+            "Use @wasmer/sdk ${sdk_version} in wasmer-sh"
           git push origin HEAD:main
           echo "changed=true" >> "${GITHUB_OUTPUT}"
 

@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { Wasmer } from "@wasmer/sdk2/node";
+import { Wasmer } from "@wasmer/sdk/node";
 
 const execFileAsync = promisify(execFile);
 const port = 5432;

@@ -12,7 +12,7 @@ const isolationHeaders = {
 export default defineConfig({
   server: { headers: isolationHeaders },
   preview: { headers: isolationHeaders },
-  optimizeDeps: { exclude: ["@wasmer/sdk2"] },
+  optimizeDeps: { exclude: ["@wasmer/sdk"] },
   build: {
     target: "es2022",
     rollupOptions: {

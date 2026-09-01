@@ -1,4 +1,4 @@
-import { Wasmer } from "@wasmer/sdk2/browser";
+import { Wasmer } from "@wasmer/sdk/browser";
 
 const status = document.querySelector<HTMLSpanElement>("#status")!;
 const preview = document.querySelector<HTMLDivElement>("#preview")!;

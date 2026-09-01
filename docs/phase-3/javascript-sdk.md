@@ -76,7 +76,7 @@ asynchronous operation and is shared by all operations on that client. Use
 construction syntax.
 
 ```ts
-import { Wasmer } from "@wasmer/sdk2/node";
+import { Wasmer } from "@wasmer/sdk/node";
 
 const wasmer = new Wasmer();
 const python = await wasmer.packages.load("python/python@=3.13.5");
@@ -266,9 +266,9 @@ and network architecture.
 
 ## Publishing
 
-`.github/workflows/publish-npm.yml` publishes `@wasmer/sdk2` manually from the
+`.github/workflows/publish-npm.yml` publishes `@wasmer/sdk` manually from the
 `main` branch. The publish job runs on a GitHub-hosted runner in the `npm`
-environment with `id-token: write`, uses npm 11.12.1, rebuilds the wasm-bindgen
+environment with `id-token: write`, uses npm 11.19.1, rebuilds the wasm-bindgen
 and TypeScript artifacts, runs the Node regression suite under a hard
 process-level deadline, inspects the package, and invokes `npm publish`
 directly. It does not use or require an npm token.

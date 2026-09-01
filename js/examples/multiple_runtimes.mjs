@@ -1,4 +1,4 @@
-import { Wasmer } from "@wasmer/sdk2/node";
+import { Wasmer } from "@wasmer/sdk/node";
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({

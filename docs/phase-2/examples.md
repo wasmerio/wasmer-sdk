@@ -60,7 +60,7 @@ longer workflow.
 ### JavaScript
 
 ```ts
-import { Wasmer } from "@wasmer/sdk2";
+import { Wasmer } from "@wasmer/sdk";
 
 const wasmer = new Wasmer();
 
@@ -896,7 +896,7 @@ SDK a scoped filesystem rather than an ambient host path.
 import {
   BrowserFileSystem,
   Wasmer,
-} from "@wasmer/sdk2/browser";
+} from "@wasmer/sdk/browser";
 
 const wasmer = new Wasmer();
 

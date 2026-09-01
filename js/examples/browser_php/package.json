@@ -8,7 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@wasmer/sdk2": "file:../.."
+    "@wasmer/sdk": "file:../.."
   },
   "devDependencies": {
     "typescript": "^5.9.2",

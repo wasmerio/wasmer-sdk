@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import { Wasmer } from "@wasmer/sdk2/node";
+import { Wasmer } from "@wasmer/sdk/node";
 
 const source = await readFile(
   new URL("../../fixtures/python/hello.py", import.meta.url),

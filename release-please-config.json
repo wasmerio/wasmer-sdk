@@ -1,29 +1,20 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "separate-pull-requests": true,
   "packages": {
     "python": {
       "release-type": "python",
       "package-name": "wasmer-sdk",
       "component": "wasmer-sdk",
       "include-component-in-tag": false,
-      "initial-version": "0.1.0",
-      "extra-files": [
-        {
-          "type": "json",
-          "path": "js/package.json",
-          "jsonpath": "$.version"
-        },
-        {
-          "type": "json",
-          "path": "js/package-lock.json",
-          "jsonpath": "$.version"
-        },
-        {
-          "type": "json",
-          "path": "js/package-lock.json",
-          "jsonpath": "$.packages[''].version"
-        }
-      ]
+      "initial-version": "0.1.0"
+    },
+    "js": {
+      "release-type": "node",
+      "package-name": "@wasmer/sdk",
+      "component": "wasmer-sdk-js",
+      "include-component-in-tag": true,
+      "initial-version": "0.11.0"
     }
   }
 }

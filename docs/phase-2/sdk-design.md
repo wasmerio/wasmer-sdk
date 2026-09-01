@@ -357,9 +357,9 @@ and remain configurable.
 ## 6. JavaScript and TypeScript API
 
 The browser and Node.js packages expose the same TypeScript contract from
-different target entrypoints. `@wasmer/sdk2` may select the correct entrypoint
-through package exports, while `@wasmer/sdk2/browser` and
-`@wasmer/sdk2/node` remain available for explicit builds.
+different target entrypoints. `@wasmer/sdk` may select the correct entrypoint
+through package exports, while `@wasmer/sdk/browser` and
+`@wasmer/sdk/node` remain available for explicit builds.
 
 The following declarations describe the intended surface, not final
 implementation syntax.
@@ -897,7 +897,7 @@ The browser package includes a provider for
 import {
   BrowserFileSystem,
   Wasmer,
-} from "@wasmer/sdk2/browser";
+} from "@wasmer/sdk/browser";
 
 const handle = await window.showDirectoryPicker({
   mode: "readwrite",

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import net from "node:net";
 
-import { Wasmer } from "@wasmer/sdk2/node";
+import { Wasmer } from "@wasmer/sdk/node";
 
 const serverSource = await readFile(
   new URL("../../fixtures/edgejs/server.js", import.meta.url),

@@ -10,7 +10,7 @@ package; give the sandbox files and capabilities; then run commands or keep
 long-lived processes under your control.
 
 ```javascript
-import { Wasmer } from "@wasmer/sdk2/node";
+import { Wasmer } from "@wasmer/sdk/node";
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
@@ -86,7 +86,7 @@ applications can inspect every exit reason directly.
 
 | Language | Package | Guide |
 | --- | --- | --- |
-| JavaScript | `npm install @wasmer/sdk2` | [JavaScript SDK](js/README.md) |
+| JavaScript | `npm install @wasmer/sdk` | [JavaScript SDK](js/README.md) |
 | Python | `pip install wasmer-sdk` | [Python SDK](python/README.md) |
 | Rust | Workspace/Git while crate publishing is disabled | [Rust SDK](rust/README.md) |
 

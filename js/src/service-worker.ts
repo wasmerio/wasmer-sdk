@@ -1,5 +1,5 @@
 /*
- * Browser HTTP ingress for @wasmer/sdk2.
+ * Browser HTTP ingress for @wasmer/sdk.
  *
  * Import this module from a same-origin service worker registered with scope
  * `/`. It deliberately has no dependency on the Wasmer runtime: the worker

@@ -46,6 +46,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       release_created: ${{ steps.release.outputs['python--release_created'] }}
+      javascript_release_created: ${{ steps.release.outputs['js--release_created'] }}
       build_requested: ${{ steps.select-release.outputs.build_requested }}
       release_sha: ${{ steps.select-release.outputs.release_sha }}
       version: ${{ steps.select-release.outputs.version }}
@@ -188,7 +189,7 @@ jobs:
   dispatch-javascript-release:
     name: Dispatch JavaScript release
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.javascript_release_created == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

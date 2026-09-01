@@ -1,22 +1,19 @@
-# `@wasmer/sdk2`
+# `@wasmer/sdk`
 
 Run Wasmer packages in Node.js or the browser with one package-first sandbox
 API. The runtime is Wasmer + WASIX compiled to WebAssembly with
 `wasm-bindgen`; Node.js does not load a native addon.
 
-> `@wasmer/sdk2` is the temporary package name for the next Wasmer JavaScript
-> SDK.
-
 ## Install
 
 ```console
-npm install @wasmer/sdk2
+npm install @wasmer/sdk
 ```
 
 ## Run Python from Node.js
 
 ```javascript
-import { Wasmer } from "@wasmer/sdk2/node";
+import { Wasmer } from "@wasmer/sdk/node";
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
@@ -106,7 +103,7 @@ targets.
 Import the browser entrypoint:
 
 ```javascript
-import { Wasmer } from "@wasmer/sdk2/browser";
+import { Wasmer } from "@wasmer/sdk/browser";
 
 const httpHost = "https://http.example.com";
 const wasmer = new Wasmer();
@@ -132,7 +129,7 @@ Browsers cannot open TCP sockets directly. Give a browser sandbox a WISP
 endpoint to multiplex its WASIX TCP and DNS traffic over one WebSocket:
 
 ```javascript
-import { Wasmer } from "@wasmer/sdk2/browser";
+import { Wasmer } from "@wasmer/sdk/browser";
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
@@ -186,20 +183,20 @@ origin. That origin needs two small SDK entrypoints. Serve the worker as
 `/wasmer-service-worker.js`:
 
 ```javascript
-import "@wasmer/sdk2/service-worker";
+import "@wasmer/sdk/service-worker";
 ```
 
 Serve a control document at `/.wasmer/host.html` which imports:
 
 ```javascript
-import "@wasmer/sdk2/service-worker-host";
+import "@wasmer/sdk/service-worker-host";
 ```
 
 The application itself stays on a different origin. Start the guest server,
 then pass the static HTTP-host origin to `ports.expose()`:
 
 ```javascript
-import { Wasmer } from "@wasmer/sdk2/browser";
+import { Wasmer } from "@wasmer/sdk/browser";
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
