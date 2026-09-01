@@ -14,6 +14,7 @@ import {
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 
+import { detectBrowserCompatibilityWarning } from "./browser-compatibility";
 import { WorkspaceEditor } from "./editor";
 import expressReadme from "../workspace/node-express/README.md?raw";
 import expressPackage from "../workspace/node-express/package.json?raw";
@@ -127,6 +128,12 @@ declare global {
 }
 
 const elements = {
+  browserWarning: requiredElement<HTMLElement>("browser-warning"),
+  browserWarningTitle: requiredElement<HTMLElement>("browser-warning-title"),
+  browserWarningMessage: requiredElement<HTMLElement>("browser-warning-message"),
+  browserWarningDismiss: requiredElement<HTMLButtonElement>(
+    "browser-warning-dismiss",
+  ),
   stage: document.querySelector<HTMLElement>(".shell-stage")!,
   workspaceColumn: requiredElement<HTMLDivElement>("workspace-column"),
   terminal: requiredElement<HTMLDivElement>("terminal"),
@@ -169,6 +176,8 @@ const elements = {
   wispError: requiredElement<HTMLParagraphElement>("wisp-url-error"),
   wispCancel: requiredElement<HTMLButtonElement>("wisp-cancel-button"),
 };
+
+showBrowserCompatibilityWarning(navigator.userAgent);
 
 const config = readConfig(new URLSearchParams(window.location.search));
 const wispAutoconfigureChannel = new BroadcastChannel(
@@ -252,6 +261,9 @@ terminal.onResize(({ cols, rows }) => {
 elements.clear.addEventListener("click", () => {
   terminal.clear();
   terminal.focus();
+});
+elements.browserWarningDismiss.addEventListener("click", () => {
+  elements.browserWarning.hidden = true;
 });
 elements.restart.addEventListener("click", () => void start());
 elements.editorButton.addEventListener("click", () => void toggleEditor());
@@ -1204,6 +1216,15 @@ function assertBrowserCapabilities(): void {
   if (typeof SharedArrayBuffer === "undefined") {
     throw new Error("SharedArrayBuffer is unavailable in this browser.");
   }
+}
+
+function showBrowserCompatibilityWarning(userAgent: string): void {
+  const warning = detectBrowserCompatibilityWarning(userAgent);
+  if (!warning) return;
+  elements.browserWarning.dataset.browser = warning.browser;
+  elements.browserWarningTitle.textContent = warning.title;
+  elements.browserWarningMessage.textContent = warning.message;
+  elements.browserWarning.hidden = false;
 }
 
 function describePackageLoad(packageNames: string[]): string {

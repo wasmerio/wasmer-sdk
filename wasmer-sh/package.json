@@ -12,7 +12,8 @@
     "build:http": "npm --prefix service-worker run build",
     "build": "tsc --noEmit && vite build && npm --prefix service-worker run build",
     "preview": "node scripts/run-servers.mjs preview",
-    "test": "node tests/browser-smoke.mjs"
+    "test": "npm run test:compatibility && node tests/browser-smoke.mjs",
+    "test:compatibility": "node --test tests/browser-compatibility.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

@@ -35,7 +35,7 @@ body {
 
 body {
   display: grid;
-  grid-template-rows: 52px minmax(0, 1fr);
+  grid-template-rows: 52px auto minmax(0, 1fr);
   color: var(--text);
 }
 
@@ -49,6 +49,7 @@ button {
 }
 
 .app-bar {
+  grid-row: 1;
   position: relative;
   z-index: 10;
   display: grid;
@@ -59,6 +60,82 @@ button {
   border-bottom: 1px solid var(--line);
   background: rgba(9, 9, 13, 0.92);
   backdrop-filter: blur(18px);
+}
+
+.browser-warning {
+  grid-row: 2;
+  position: relative;
+  z-index: 9;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px 9px 16px;
+  border-bottom: 1px solid rgba(250, 204, 107, 0.2);
+  background: #211b10;
+  color: #ded7c5;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.browser-warning[hidden] {
+  display: none;
+}
+
+.browser-warning > svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: rgba(250, 204, 107, 0.08);
+  stroke: #facc6b;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.45;
+}
+
+.browser-warning p {
+  min-width: 0;
+  margin: 0;
+}
+
+.browser-warning strong {
+  margin-right: 7px;
+  color: #fff2c2;
+  font-weight: 650;
+}
+
+.browser-warning button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  margin-left: auto;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #afa891;
+  cursor: pointer;
+}
+
+.browser-warning button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff2c2;
+}
+
+.browser-warning button:focus-visible {
+  outline: 2px solid #facc6b;
+  outline-offset: 1px;
+}
+
+.browser-warning button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.6;
 }
 
 .brand {
@@ -246,6 +323,7 @@ button {
 }
 
 .shell-stage {
+  grid-row: 3;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   transition: grid-template-columns 180ms ease;
@@ -1075,6 +1153,16 @@ button {
 
   .text-button {
     padding-inline: 8px;
+  }
+
+  .browser-warning {
+    align-items: flex-start;
+    padding-left: 12px;
+  }
+
+  .browser-warning strong {
+    display: block;
+    margin: 0 0 2px;
   }
 
   #terminal .xterm {

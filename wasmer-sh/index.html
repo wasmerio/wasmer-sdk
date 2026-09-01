@@ -65,6 +65,27 @@
       </nav>
     </header>
 
+    <aside id="browser-warning" class="browser-warning" role="alert" hidden>
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M10 2.5 18 17H2L10 2.5Z" />
+        <path d="M10 7v4.5M10 14.25v.25" />
+      </svg>
+      <p>
+        <strong id="browser-warning-title"></strong>
+        <span id="browser-warning-message"></span>
+      </p>
+      <button
+        id="browser-warning-dismiss"
+        type="button"
+        aria-label="Dismiss browser compatibility warning"
+        title="Dismiss"
+      >
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="m6 6 8 8M14 6l-8 8" />
+        </svg>
+      </button>
+    </aside>
+
     <main class="shell-stage">
       <div id="workspace-column" class="workspace-column">
         <section id="editor-panel" class="editor-panel" aria-label="Workspace editor" hidden>
