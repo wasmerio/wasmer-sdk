@@ -233,7 +233,7 @@ treated as a miss.
 
 ### Registry references
 
-A registry reference such as `python/python@=3.13.5` is not a content key.
+A registry reference such as `python/python@=3.13.18` is not a content key.
 `packages/refs` is only an index from:
 
 ```text

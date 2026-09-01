@@ -65,7 +65,7 @@ import { Wasmer } from "@wasmer/sdk";
 const wasmer = new Wasmer();
 
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
 });
 
 const output = await sandbox.command(
@@ -90,7 +90,7 @@ async fn main() -> Result<()> {
 
     let sandbox = wasmer
         .sandboxes().create()
-        .package("python/python@=3.13.5")
+        .package("python/python@=3.13.18")
         .await?;
 
     let output = sandbox
@@ -189,7 +189,7 @@ await using sandbox = await wasmer.sandboxes.create({
   },
 });
 
-const python = await sandbox.installPackage("python/python@=3.13.5");
+const python = await sandbox.installPackage("python/python@=3.13.18");
 await sandbox.installPackage("wasmer/bash@1.0.25", {
   asShell: "bash",
 });
@@ -224,7 +224,7 @@ let sandbox = wasmer
     .await?;
 
 let python = sandbox
-    .install_package("python/python@=3.13.5")
+    .install_package("python/python@=3.13.18")
     .await?;
 sandbox
     .install_package("wasmer/bash@1.0.25")
@@ -332,7 +332,7 @@ let artifact = sandbox
 
 ```ts
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
   files: {
     "progress.py": `
 import time
@@ -386,7 +386,7 @@ guest cannot block on a full pipe.
 
 ```ts
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
   files: {
     "uppercase.py": `
 import sys
@@ -735,7 +735,7 @@ Limits are part of creation or execution, not a separate policy language.
 
 ```ts
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
   limits: {
     memoryBytes: 128 * 1024 * 1024,
     filesystemBytes: 16 * 1024 * 1024,
@@ -763,7 +763,7 @@ console.log({
 ```rust
 let sandbox = wasmer
     .sandboxes().create()
-    .package("python/python@=3.13.5")
+    .package("python/python@=3.13.18")
     .memory_limit(128 * 1024 * 1024)
     .filesystem_limit(16 * 1024 * 1024)
     .max_processes(1)
@@ -909,7 +909,7 @@ const project = await BrowserFileSystem.fromDirectoryHandle(handle, {
 });
 
 const report = await client.preflight({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
   mounts: [{
     guest: "/project",
     fileSystem: project,
@@ -919,7 +919,7 @@ const report = await client.preflight({
 report.requireCompatible();
 
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
   mounts: [{
     guest: "/project",
     fileSystem: project,

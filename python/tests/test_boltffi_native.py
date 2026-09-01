@@ -11,7 +11,7 @@ class NativeBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.client = sdk.Wasmer(None, 256 * 1024)
         self.sandbox = await self.client.create_sandbox(
-            ["python/python@=3.13.5"],
+            ["python/python@=3.13.18"],
             {"main.py": b"print('hello from BoltFFI test')"},
             {},
             sdk.NetworkMode.DISABLED,

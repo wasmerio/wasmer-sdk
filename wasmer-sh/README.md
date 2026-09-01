@@ -17,7 +17,7 @@ const sandbox = await wasmer.sandboxes.create({
   packages: [
     bashPackage,
     "wasmer/neatvi",
-    "python/python@=3.13.5",
+    "python/python@=3.13.18",
     "wasmer/edgejs@0.2.0",
     "php/php-32",
   ],
@@ -241,5 +241,5 @@ package entrypoint directly without rebuilding the site:
 For example:
 
 ```text
-/?package=python/python@=3.13.5&command=python&arg=-q
+/?package=python/python@=3.13.18&command=python&arg=-q
 ```

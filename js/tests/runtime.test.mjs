@@ -14,7 +14,7 @@ const runtimeCache =
 test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   const client = new Wasmer({ cache: { directory: runtimeCache } });
   const sandbox = await client.sandboxes.create({
-    packages: ["python/python@=3.13.5"],
+    packages: ["python/python@=3.13.18"],
   });
   const output = await sandbox
     .command("python", ["-c", "print(sum(range(10)))"])
@@ -53,8 +53,8 @@ test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   };
   const cachedClient = new Wasmer({ cache: { directory: runtimeCache } });
   try {
-    const cached = await cachedClient.packages.load("python/python@=3.13.5");
-    assert.equal(cached.id, "python/python@3.13.5");
+    const cached = await cachedClient.packages.load("python/python@=3.13.18");
+    assert.equal(cached.id, "python/python@3.13.18");
   } finally {
     await cachedClient.close();
     globalThis.fetch = originalFetch;
@@ -72,7 +72,7 @@ test("reuses commands and preserves filesystem and stream semantics", async () =
   let sandbox;
   try {
     sandbox = await client.sandboxes.create({
-      packages: ["python/python@=3.13.5"],
+      packages: ["python/python@=3.13.18"],
     });
 
     const command = sandbox.command("python", ["--version"]);

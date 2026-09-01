@@ -17,7 +17,7 @@ import { Wasmer } from "@wasmer/sdk/node";
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
   files: {
     "main.py": "print(sum(number * number for number in range(10)))",
   },
@@ -108,7 +108,7 @@ import { Wasmer } from "@wasmer/sdk/browser";
 const httpHost = "https://http.example.com";
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
 });
 const output = await sandbox
   .command("python", ["-c", "print('Hello from the browser')"])

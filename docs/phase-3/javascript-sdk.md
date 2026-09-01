@@ -79,7 +79,7 @@ construction syntax.
 import { Wasmer } from "@wasmer/sdk/node";
 
 const wasmer = new Wasmer();
-const python = await wasmer.packages.load("python/python@=3.13.5");
+const python = await wasmer.packages.load("python/python@=3.13.18");
 const sandbox = await wasmer.sandboxes.create({
   packages: [python],
   files: { "main.py": "print('hello')" },

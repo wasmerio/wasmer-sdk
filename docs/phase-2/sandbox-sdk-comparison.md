@@ -8,7 +8,7 @@ Last updated: 2026-07-27
 Should the universal Wasmer SDK expose a top-level operation like this?
 
 ```ts
-await client.run("python/python@=3.13.5", {
+await client.run("python/python@=3.13.18", {
   args: ["-c", "print('hello')"],
 });
 ```
@@ -29,7 +29,7 @@ The short path remains short:
 
 ```ts
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
 });
 
 const output = await sandbox
@@ -494,7 +494,7 @@ with a lifecycle:
 
 ```ts
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
 });
 ```
 
@@ -509,7 +509,7 @@ belong.
 const wasmer = new Wasmer();
 
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@=3.13.5"],
+  packages: ["python/python@=3.13.18"],
   files: {
     "main.py": "print(sum(range(10)))",
   },
@@ -548,7 +548,7 @@ const output = await sandbox
 ```rust
 let sandbox = wasmer
     .sandboxes().create()
-    .package("python/python@=3.13.5")
+    .package("python/python@=3.13.18")
     .file("/workspace/main.py", b"print(sum(range(10)))")
     .network(NetworkPolicy::Disabled)
     .await?;

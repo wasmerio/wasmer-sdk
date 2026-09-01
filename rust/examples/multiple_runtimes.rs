@@ -6,7 +6,7 @@ async fn main() -> Result<()> {
     let sandbox = wasmer
         .sandboxes()
         .create()
-        .package("python/python@=3.13.5")
+        .package("python/python@=3.13.18")
         .package("wasmer/edgejs-quickjs")
         .package("php/php-32")
         .await?;
