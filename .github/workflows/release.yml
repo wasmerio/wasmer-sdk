@@ -1,10 +1,10 @@
-name: Release Python
+name: Release SDK
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Python version to prepare
+        description: SDK version to prepare
         required: true
         default: "0.1.0"
         type: string
@@ -20,7 +20,7 @@ on:
       - closed
 
 concurrency:
-  group: release-python
+  group: release-sdk
   cancel-in-progress: false
 
 permissions:
@@ -184,6 +184,22 @@ jobs:
           name: wasmer-sdk-${{ needs.release-please.outputs.version }}-${{ matrix.name }}
           path: wheelhouse/*.whl
           if-no-files-found: error
+
+  dispatch-javascript-release:
+    name: Dispatch JavaScript release
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Publish the synchronized JavaScript version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run publish-npm.yml --ref main
 
   publish-python:
     name: Publish wasmer-sdk
