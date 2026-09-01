@@ -123,6 +123,28 @@ cross-tab channels used by third-party iframes.
 `http://127.0.0.1:5174`. The latter owns the service worker and all guest HTTP
 URLs, so guest routes never overlap Vite routes.
 
+To run that standalone service-worker host through AnyBuild and Wasmer instead
+of Vite, install [AnyBuild](https://www.anybuild.run/docs/installation/) and run:
+
+```console
+pnpm run dev:http:anybuild
+```
+
+AnyBuild selects `wasmer-sh/service-worker` as an independent Node static
+application, runs its `build` script, publishes its `dist/` output, and runs
+the static server with Wasmer at `http://127.0.0.1:8080`. Its generated
+configuration and build state are separate from an AnyBuild build of the shell
+itself. Start the shell in another terminal with:
+
+```console
+VITE_WASMER_SERVICE_WORKER_ORIGIN=http://127.0.0.1:8080 pnpm run dev:app
+```
+
+Set `PORT` on both commands if port 8080 is unavailable.
+
+The generated service-worker output includes an `sws.toml` file containing the
+cross-origin headers required by the standalone HTTP host.
+
 The service worker exposes one guest server at its origin root. It forwards
 paths unchanged and never rewrites HTML or mounts the site beneath an SDK
 prefix. A second guest needs another origin; production deployments can use a
@@ -144,7 +166,7 @@ VITE_WASMER_SERVICE_WORKER_ORIGIN=https://http.wasmer.sh pnpm build
 ```
 
 The shell is emitted to `dist/`; the standalone service-worker host is emitted
-to `dist-service-worker/`. Deploy them to separate origins, then configure the
+to `service-worker/dist/`. Deploy them to separate origins, then configure the
 shell build with `VITE_WASMER_SERVICE_WORKER_ORIGIN`. The HTTP host must serve
 `Cross-Origin-Resource-Policy: cross-origin`; its Vite preview configuration
 does this automatically. A wildcard production setup can point the configured
@@ -182,6 +204,13 @@ WASMER_EDGEJS_WEBC=/absolute/path/to/edgejs-quickjs.webc \
 WASMER_TEST_PNPM=1 \
 WASMER_WISP_URL=ws://127.0.0.1:4000/ \
 npm test
+```
+
+To exercise an externally hosted service worker, including the AnyBuild and
+Wasmer command above, set `WASMER_SERVICE_WORKER_ORIGIN`:
+
+```console
+WASMER_SERVICE_WORKER_ORIGIN=http://127.0.0.1:8080 npm test
 ```
 
 The focused Next.js regression installs the untouched npm SWC WebAssembly

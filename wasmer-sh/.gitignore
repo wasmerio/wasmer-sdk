@@ -1,5 +1,6 @@
 dist
 dist-service-worker
+service-worker/dist
 node_modules
 .vite
 .wasmer

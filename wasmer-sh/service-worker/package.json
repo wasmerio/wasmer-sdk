@@ -1,0 +1,15 @@
+{
+  "name": "wasmer-sh-service-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "8.2.0"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

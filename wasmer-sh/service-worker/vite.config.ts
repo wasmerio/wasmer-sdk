@@ -17,7 +17,7 @@ const controlDocuments = new Map([
 
 export default defineConfig({
   root,
-  cacheDir: resolve(root, "../node_modules/.vite/http"),
+  cacheDir: resolve(root, "node_modules/.vite"),
   plugins: [
     {
       name: "wasmer-static-control-documents",
@@ -53,7 +53,7 @@ export default defineConfig({
   },
   build: {
     target: "es2022",
-    outDir: resolve(root, "../dist-service-worker"),
+    outDir: resolve(root, "dist"),
     emptyOutDir: true,
     modulePreload: { polyfill: false },
     rollupOptions: {

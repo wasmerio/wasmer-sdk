@@ -1,5 +1,6 @@
 /target
 /.wasmer
+/.anybuild
 /js/node_modules
 /js/dist
 /js/pkg

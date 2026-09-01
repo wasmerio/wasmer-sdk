@@ -9,7 +9,9 @@
     "dev": "node scripts/run-servers.mjs dev",
     "dev:app": "vite --host 127.0.0.1 --port 5173",
     "dev:http": "vite --config service-worker/vite.config.ts --host 127.0.0.1 --port 5174",
-    "build": "tsc --noEmit && vite build && vite build --config service-worker/vite.config.ts",
+    "dev:http:anybuild": "anybuild .. --subdir wasmer-sh/service-worker --wasmer --start --serve-port ${PORT:-8080}",
+    "build:http": "npm --prefix service-worker run build",
+    "build": "tsc --noEmit && vite build && npm --prefix service-worker run build",
     "preview": "node scripts/run-servers.mjs preview",
     "test": "node tests/browser-smoke.mjs"
   },

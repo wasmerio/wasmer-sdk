@@ -19,6 +19,8 @@ const testNextBuild = process.env.WASMER_TEST_NEXT_BUILD === "1";
 const testVinext = process.env.WASMER_TEST_VINEXT === "1";
 const testVinextDev = process.env.WASMER_TEST_VINEXT_DEV === "1";
 const testPython = process.env.WASMER_TEST_PYTHON !== "0";
+const externalServiceWorkerOrigin =
+  process.env.WASMER_SERVICE_WORKER_ORIGIN?.replace(/\/$/, "");
 if (edgejsWebc && !process.env.VITE_EDGEJS_WEBC_URL) {
   process.env.VITE_EDGEJS_WEBC_URL = `/@fs/${edgejsWebc}`;
 }
@@ -58,17 +60,21 @@ let serviceWorkerServer;
 let serviceWorkerOrigin;
 const diagnostics = [];
 try {
-  serviceWorkerServer = await createServer({
-    configFile: fileURLToPath(
-      new URL("../service-worker/vite.config.ts", import.meta.url),
-    ),
-    logLevel: "warn",
-    server: { host: "127.0.0.1", port: 0 },
-  });
-  await serviceWorkerServer.listen();
-  const serviceWorkerAddress = serviceWorkerServer.httpServer?.address();
-  assert(serviceWorkerAddress && typeof serviceWorkerAddress !== "string");
-  serviceWorkerOrigin = `http://127.0.0.1:${serviceWorkerAddress.port}`;
+  if (externalServiceWorkerOrigin) {
+    serviceWorkerOrigin = externalServiceWorkerOrigin;
+  } else {
+    serviceWorkerServer = await createServer({
+      configFile: fileURLToPath(
+        new URL("../service-worker/vite.config.ts", import.meta.url),
+      ),
+      logLevel: "warn",
+      server: { host: "127.0.0.1", port: 0 },
+    });
+    await serviceWorkerServer.listen();
+    const serviceWorkerAddress = serviceWorkerServer.httpServer?.address();
+    assert(serviceWorkerAddress && typeof serviceWorkerAddress !== "string");
+    serviceWorkerOrigin = `http://127.0.0.1:${serviceWorkerAddress.port}`;
+  }
   process.env.VITE_WASMER_SERVICE_WORKER_ORIGIN = serviceWorkerOrigin;
 
   server = await createServer({
