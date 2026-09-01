@@ -491,7 +491,10 @@ fn build_sandbox_runtime(
     let runtime: Arc<dyn Runtime + Send + Sync> =
         Arc::new(OverriddenRuntime::new(runtime).with_instantiation_hook(hooks));
 
-    #[cfg(all(target_arch = "wasm32", feature = "js-napi"))]
+    #[cfg(any(
+        all(target_arch = "wasm32", feature = "js-napi"),
+        all(not(target_arch = "wasm32"), feature = "napi-v8")
+    ))]
     let runtime: Arc<dyn Runtime + Send + Sync> = Arc::new(
         OverriddenRuntime::new(runtime)
             // This hook returns no imports for packages that do not use N-API.
@@ -501,7 +504,13 @@ fn build_sandbox_runtime(
     runtime
 }
 
-#[cfg(all(test, target_arch = "wasm32", feature = "js-napi"))]
+#[cfg(all(
+    test,
+    any(
+        all(target_arch = "wasm32", feature = "js-napi"),
+        all(not(target_arch = "wasm32"), feature = "napi-v8")
+    )
+))]
 mod napi_hook_tests {
     use wasmer_wasix::runtime::InstantiationHook;
 
