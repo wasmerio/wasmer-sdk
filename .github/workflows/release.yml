@@ -8,6 +8,11 @@ on:
         required: true
         default: "0.1.0"
         type: string
+      publish_existing:
+        description: Rebuild and publish an existing GitHub release tag
+        required: false
+        default: false
+        type: boolean
   pull_request:
     branches:
       - main
@@ -41,8 +46,9 @@ jobs:
     timeout-minutes: 10
     outputs:
       release_created: ${{ steps.release.outputs['python--release_created'] }}
-      release_sha: ${{ steps.release.outputs['python--sha'] }}
-      version: ${{ steps.release.outputs['python--version'] }}
+      build_requested: ${{ steps.select-release.outputs.build_requested }}
+      release_sha: ${{ steps.select-release.outputs.release_sha }}
+      version: ${{ steps.select-release.outputs.version }}
     steps:
       - id: release
         uses: googleapis/release-please-action@v4
@@ -52,10 +58,49 @@ jobs:
           release-as: ${{ inputs.version }}
           target-branch: main
 
+      - id: select-release
+        name: Select release to publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUBLISH_EXISTING: ${{ inputs.publish_existing }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          RELEASE_CREATED: ${{ steps.release.outputs['python--release_created'] }}
+          RELEASE_SHA: ${{ steps.release.outputs['python--sha'] }}
+          RELEASE_VERSION: ${{ steps.release.outputs['python--version'] }}
+        run: |
+          if [[ "${RELEASE_CREATED}" == "true" ]]; then
+            {
+              echo "build_requested=true"
+              echo "release_sha=${RELEASE_SHA}"
+              echo "version=${RELEASE_VERSION}"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [[ "${EVENT_NAME}" != "workflow_dispatch" ||
+                "${PUBLISH_EXISTING}" != "true" ]]; then
+            echo "build_requested=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          tag="v${REQUESTED_VERSION}"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+            --jq '.tag_name' >/dev/null
+          release_sha="$(
+            gh api "repos/${GITHUB_REPOSITORY}/commits/${tag}" --jq '.sha'
+          )"
+          {
+            echo "build_requested=true"
+            echo "release_sha=${release_sha}"
+            echo "version=${REQUESTED_VERSION}"
+          } >> "${GITHUB_OUTPUT}"
+
   build-python-wheels:
     name: Python wheel (${{ matrix.name }})
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.build_requested == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -108,9 +153,8 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes patchelf
-          python -m pip install --upgrade auditwheel
+          python -m pip install --upgrade auditwheel patchelf==0.19.1.0
+          patchelf --version
           auditwheel repair wheelhouse/*.whl --wheel-dir repaired
           rm wheelhouse/*.whl
           mv repaired/*.whl wheelhouse/
