@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.2...v0.1.3) (2026-09-01)
+
+
+### Documentation
+
+* **python:** explain exact package version pins ([9cafd66](https://github.com/wasmerio/wasmer-sdk/commit/9cafd666e8f6b2d44dbe3fa70ddfb8e7e52b360e))
+* **python:** explain exact package version pins ([59109dc](https://github.com/wasmerio/wasmer-sdk/commit/59109dc74871f4e6fa4df46f452aab0fd436cfa9))
+
 ## [0.1.2](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.1...v0.1.2) (2026-07-31)
 
 
