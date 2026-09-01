@@ -25,7 +25,24 @@ if (edgejsWebc && !process.env.VITE_EDGEJS_WEBC_URL) {
 const externalWispUrl = process.env.WASMER_WISP_URL;
 const proxy = externalWispUrl
   ? undefined
-  : http.createServer((_request, response) => {
+  : http.createServer((request, response) => {
+      const requestUrl = new URL(request.url ?? "/", "http://localhost");
+      if (requestUrl.pathname === "/autoconfigure-test") {
+        const bridgeUrl = requestUrl.searchParams.get("bridge");
+        const endpoint = requestUrl.searchParams.get("endpoint");
+        if (!bridgeUrl || !endpoint) {
+          response.writeHead(400, { "content-type": "text/plain" });
+          response.end("missing bridge or endpoint");
+          return;
+        }
+        const target = new URL(bridgeUrl);
+        target.searchParams.set("endpoint", endpoint);
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(
+          `<!doctype html><a id="autoconfigure" href=${JSON.stringify(target.href)}>Automatically connect to wasmer.sh</a>`,
+        );
+        return;
+      }
       response.writeHead(200, { "content-type": "text/plain" });
       response.end("wasmer.sh test WISP proxy");
     });
@@ -34,6 +51,7 @@ proxy?.on("upgrade", (request, socket, head) => {
 });
 
 let browser;
+let context;
 let page;
 let server;
 let serviceWorkerServer;
@@ -76,7 +94,8 @@ try {
   assert(address && typeof address !== "string");
 
   browser = await chromium.launch({ headless: true });
-  page = await browser.newPage();
+  context = await browser.newContext();
+  page = await context.newPage();
   if (testVinext || testVinextDev) {
     await page.addInitScript(() => {
       Object.defineProperty(Navigator.prototype, "hardwareConcurrency", {
@@ -107,12 +126,9 @@ try {
   );
   const wispUrl =
     externalWispUrl ?? `ws://127.0.0.1:${proxyAddress.port}/`;
-  await page.goto(
-    `http://127.0.0.1:${address.port}/?wisp=${encodeURIComponent(wispUrl)}`,
-    {
-      waitUntil: "load",
-    },
-  );
+  await page.goto(`http://127.0.0.1:${address.port}/`, {
+    waitUntil: "load",
+  });
   await page.waitForFunction(
     () => document.documentElement.dataset.state === "running",
     undefined,
@@ -128,6 +144,91 @@ try {
     () => globalThis.__wasmerShell.snapshot().replace(/\x1b\[[0-9;]*m/g, "").endsWith("$ "),
     undefined,
     { timeout: 120_000 },
+  );
+
+  assert.equal(await page.locator("#wisp-dialog").isHidden(), true);
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
+      "curl -fsS https://registry.npmjs.org/-/ping >/dev/null && echo __WISP_RUNTIME_OK__\r",
+    );
+  });
+  await page
+    .locator("#wisp-dialog")
+    .waitFor({ state: "visible", timeout: 30_000 });
+  assert.match(
+    (await page.locator("#wisp-dialog-detail").textContent()) ?? "",
+    /command needs access to the network/,
+  );
+  assert.equal(
+    await page.locator("#wisp-deploy-tab").getAttribute("aria-selected"),
+    "true",
+  );
+  assert.equal(
+    await page.locator("#wisp-deploy-button").getAttribute("href"),
+    `https://wasmer.io/apps/create?package=wasmer/wisp-server&env%5BWISP_AUTOCONFIGURE%5D=${encodeURIComponent(`http://127.0.0.1:${address.port}/wisp-autoconfigure/index.html`)}`,
+  );
+  assert.equal(
+    await page.locator("#wisp-deploy-button").getAttribute("target"),
+    "_blank",
+  );
+  await page.locator("#wisp-local-tab").click();
+  assert.equal(
+    await page.locator("#wisp-local-command").inputValue(),
+    "wasmer run wasmer/wisp-server --net",
+  );
+  const bridgePage = await context.newPage();
+  assert(proxyAddress && typeof proxyAddress !== "string");
+  const bridgeTestUrl = new URL(
+    "/autoconfigure-test",
+    `http://127.0.0.1:${proxyAddress.port}`,
+  );
+  bridgeTestUrl.searchParams.set(
+    "bridge",
+    `http://127.0.0.1:${address.port}/wisp-autoconfigure/index.html`,
+  );
+  bridgeTestUrl.searchParams.set("endpoint", wispUrl);
+  await bridgePage.goto(bridgeTestUrl.href);
+  assert.equal(await page.locator("#wisp-dialog").isVisible(), true);
+  await bridgePage.locator("#autoconfigure").click();
+  await page.locator("#wisp-dialog").waitFor({ state: "hidden" });
+  await bridgePage.close();
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("\n__WISP_RUNTIME_OK__"),
+    undefined,
+    { timeout: 60_000 },
+  );
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
+      "printf preserved > /workspace/.wisp-preserved\r",
+    );
+  });
+  await page.waitForFunction(
+    () =>
+      globalThis.__wasmerShell
+        .snapshot()
+        .replace(/\x1b\[[0-9;]*m/g, "")
+        .endsWith("$ "),
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.locator("#network-button").click();
+  await page.getByRole("heading", { name: "Change WISP server" }).waitFor();
+  const localSetupSelected =
+    (await page.locator("#wisp-local-tab").getAttribute("aria-selected")) ===
+    "true";
+  await page
+    .locator(localSetupSelected ? "#wisp-local-url-input" : "#wisp-deploy-url-input")
+    .fill(wispUrl);
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await page.evaluate(async () => {
+    await globalThis.__wasmerShell.send(
+      "test -f /workspace/.wisp-preserved && curl -fsS https://registry.npmjs.org/-/ping >/dev/null && echo __WISP_RECONFIGURED_OK__\r",
+    );
+  });
+  await page.waitForFunction(
+    () => globalThis.__wasmerShell.snapshot().includes("__WISP_RECONFIGURED_OK__"),
+    undefined,
+    { timeout: 60_000 },
   );
 
   if (testVinextDev) {

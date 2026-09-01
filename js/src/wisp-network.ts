@@ -5,6 +5,10 @@ import type { NodeNetworkMethod } from "./node-network.js";
 
 type Wake = (id: number, event: string) => boolean;
 type WispStream = ReturnType<wisp.ClientConnection["create_stream"]>;
+type WispUrlProvider = (request: {
+  url?: string;
+  error?: Error;
+}) => string | Promise<string>;
 
 interface SocketState {
   stream: WispStream;
@@ -35,41 +39,48 @@ const RECEIVE_LIMIT_BYTES = 16 * 1024 * 1024;
 /** TCP and DNS egress for a browser WASIX sandbox, multiplexed over WISP. */
 export class WispNetworkBridge {
   readonly id = nextBridgeId++;
-  readonly #connection: wisp.ClientConnection;
-  readonly #ready: Promise<void>;
   readonly #sockets = new Map<number, SocketState>();
   readonly #dnsCache = new Map<string, DnsCacheEntry>();
-  readonly #resolvedHosts = new Map<string, string>();
   readonly #dnsUrl: URL;
+  readonly #requestUrl?: WispUrlProvider;
+  #url?: string;
+  #connection?: wisp.ClientConnection;
+  #openingConnection?: wisp.ClientConnection;
+  #connectionPromise?: Promise<wisp.ClientConnection>;
+  #endpointRevision = 0;
   #nextSocketId = 1;
   #wake: Wake = () => true;
   #closed = false;
 
   constructor(
-    readonly url: string,
+    url?: string,
     dnsUrl = "https://cloudflare-dns.com/dns-query",
+    requestUrl?: WispUrlProvider,
   ) {
-    const endpoint = validateWispUrl(url);
+    this.#url = url?.trim() || undefined;
+    this.#requestUrl = requestUrl;
     this.#dnsUrl = new URL(dnsUrl, globalThis.location?.href);
     if (this.#dnsUrl.protocol !== "https:" && this.#dnsUrl.protocol !== "http:") {
       throw new TypeError("WISP DNS endpoint must use http: or https:");
     }
-    this.#connection = new wisp.ClientConnection(endpoint.href);
-    this.#ready = new Promise<void>((resolve, reject) => {
-      this.#connection.onopen = resolve;
-      this.#connection.onerror = () => reject(new Error("WISP connection failed"));
-      this.#connection.onclose = () => {
-        if (!this.#connection.connected) {
-          reject(new Error("WISP connection closed before its handshake completed"));
-        }
-        this.#closeSockets();
-      };
-    });
     bridges.set(this.id, this);
   }
 
   setWakeCallback(callback: Wake): void {
     this.#wake = callback;
+  }
+
+  setUrl(url: string): void {
+    if (this.#closed) throw new Error("WISP network bridge is closed");
+    this.#url = validateWispUrl(url).href;
+    this.#endpointRevision += 1;
+    const opening = this.#openingConnection;
+    const connected = this.#connection;
+    this.#openingConnection = undefined;
+    this.#connection = undefined;
+    this.#closeSockets();
+    opening?.close();
+    if (connected !== opening) connected?.close();
   }
 
   async resolve(host: string): Promise<string[]> {
@@ -78,25 +89,25 @@ export class WispNetworkBridge {
     if (normalized === "localhost") return ["127.0.0.1"];
     const cached = this.#dnsCache.get(normalized);
     if (cached && cached.expiresAt > Date.now()) {
-      this.#rememberResolvedHost(normalized, cached.addresses);
       return [...cached.addresses];
     }
+    // DNS is the first outbound operation for most socket clients. Establish
+    // the configured transport here so applications can request or replace a
+    // WISP endpoint before a failed lookup terminates the guest operation.
+    await this.#getConnection();
     const answer = await resolveIpAddresses(this.#dnsUrl, normalized);
     this.#dnsCache.set(normalized, {
       addresses: answer.addresses,
       expiresAt: Date.now() + answer.ttlSeconds * 1_000,
     });
-    this.#rememberResolvedHost(normalized, answer.addresses);
     return [...answer.addresses];
   }
 
   async connectTcp(_localText: string, peerText: string): Promise<object> {
     if (this.#closed) throw new Error("WISP network bridge is closed");
-    await this.#ready;
+    const connection = await this.#getConnection();
     const peer = parseAddress(peerText);
-    const destination =
-      this.#resolvedHosts.get(stripIpv6Brackets(peer.host)) ?? peer.host;
-    const stream = this.#connection.create_stream(destination, peer.port, "tcp");
+    const stream = connection.create_stream(peer.host, peer.port, "tcp");
     const id = this.#nextSocketId++;
     const state: SocketState = {
       stream,
@@ -206,8 +217,120 @@ export class WispNetworkBridge {
     this.#closed = true;
     bridges.delete(this.id);
     this.#closeSockets();
-    this.#connection.close();
+    this.#openingConnection?.close();
+    this.#connection?.close();
+    this.#openingConnection = undefined;
+    this.#connection = undefined;
     this.#wake = () => true;
+  }
+
+  async #getConnection(): Promise<wisp.ClientConnection> {
+    if (this.#closed) throw new Error("WISP network bridge is closed");
+    if (this.#connection) return this.#connection;
+    if (this.#connectionPromise) return this.#connectionPromise;
+
+    const pending = this.#connect();
+    this.#connectionPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.#connectionPromise === pending) this.#connectionPromise = undefined;
+    }
+  }
+
+  async #connect(): Promise<wisp.ClientConnection> {
+    let url = this.#url;
+    let previousUrl: string | undefined;
+    let failure: Error | undefined;
+
+    for (;;) {
+      if (!url) {
+        if (!this.#requestUrl) {
+          throw failure ?? new Error("No WISP endpoint is configured");
+        }
+        const requestRevision = this.#endpointRevision;
+        const requestedUrl = await this.#requestUrl({
+          url: previousUrl,
+          error: failure,
+        });
+        if (requestRevision !== this.#endpointRevision) {
+          url = this.#url;
+          previousUrl = undefined;
+          failure = undefined;
+          continue;
+        }
+        url = requestedUrl;
+      }
+
+      const endpointRevision = this.#endpointRevision;
+      try {
+        const endpoint = validateWispUrl(url);
+        return await this.#openConnection(endpoint);
+      } catch (error) {
+        if (this.#closed) throw new Error("WISP network bridge is closed");
+        if (endpointRevision !== this.#endpointRevision) {
+          url = this.#url;
+          previousUrl = undefined;
+          failure = undefined;
+          continue;
+        }
+        failure = toError(error);
+        previousUrl = url;
+        url = undefined;
+        if (!this.#requestUrl) throw failure;
+      }
+    }
+  }
+
+  #openConnection(endpoint: URL): Promise<wisp.ClientConnection> {
+    const connection = new wisp.ClientConnection(endpoint.href);
+    this.#openingConnection = connection;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const rejectHandshake = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        if (this.#openingConnection === connection) {
+          this.#openingConnection = undefined;
+        }
+        connection.close();
+        reject(error);
+      };
+      connection.onopen = () => {
+        if (this.#closed || this.#openingConnection !== connection) {
+          rejectHandshake(
+            new Error(
+              this.#closed
+                ? "WISP network bridge is closed"
+                : "WISP endpoint changed while connecting",
+            ),
+          );
+          return;
+        }
+        settled = true;
+        if (this.#openingConnection === connection) {
+          this.#openingConnection = undefined;
+        }
+        this.#url = endpoint.href;
+        this.#connection = connection;
+        resolve(connection);
+      };
+      connection.onerror = () => {
+        rejectHandshake(new Error(`WISP connection to ${endpoint.href} failed`));
+      };
+      connection.onclose = () => {
+        if (!settled) {
+          rejectHandshake(
+            new Error(
+              `WISP connection to ${endpoint.href} closed before its handshake completed`,
+            ),
+          );
+          return;
+        }
+        if (this.#connection === connection) this.#connection = undefined;
+        this.#closeSockets();
+      };
+    });
   }
 
   #requireSocket(id: number): SocketState {
@@ -229,21 +352,18 @@ export class WispNetworkBridge {
       setTimeout(() => this.#emitWake(id, event), 0);
     }
   }
-
-  #rememberResolvedHost(host: string, addresses: readonly string[]): void {
-    for (const address of addresses) {
-      this.#resolvedHosts.set(stripIpv6Brackets(address), host);
-    }
-  }
 }
 
 async function resolveIpAddresses(
   dnsEndpoint: URL,
   hostname: string,
 ): Promise<{ addresses: string[]; ttlSeconds: number }> {
+  // WISP stream creation has no TCP-open acknowledgement, so an unreachable
+  // first address surfaces later as a write failure. Prefer IPv4 because
+  // browser-facing WISP deployments commonly have no IPv6 route.
   const results = await Promise.allSettled([
-    resolveDnsType(dnsEndpoint, hostname, 28),
     resolveDnsType(dnsEndpoint, hostname, 1),
+    resolveDnsType(dnsEndpoint, hostname, 28),
   ]);
   const answers = results.flatMap((result) =>
     result.status === "fulfilled" ? result.value : [],
@@ -406,6 +526,10 @@ function validateWispUrl(value: string): URL {
   }
   if (!endpoint.pathname.endsWith("/")) endpoint.pathname += "/";
   return endpoint;
+}
+
+function toError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
 }
 
 function parseAddress(value: string): { host: string; port: number } {

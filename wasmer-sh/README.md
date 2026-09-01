@@ -17,7 +17,7 @@ const sandbox = await wasmer.sandboxes.create({
   packages: [
     bashPackage,
     "wasmer/neatvi",
-    "python/python@3.13.17",
+    "python/python@3.13.5",
     "syrusakbary/edgejs-quickjs-wasi@0.1.5",
     "php/php-32",
   ],
@@ -67,7 +67,10 @@ preview automatically; press Ctrl-C to stop the server and close the preview.
 
 wasmer.sh can also attach the sandbox to a WISP proxy. This gives WASIX tools
 real outbound TCP and DNS from the browser, multiplexed over one WebSocket. A
-WASI-compatible Edge.js build can then run `pnpm` against the npm registry:
+WASI-compatible Edge.js build can then run `pnpm` against the npm registry.
+If no WISP endpoint is configured, the first outbound connection asks for one
+and saves it in browser storage. A configured endpoint that cannot connect
+opens the same prompt so it can be replaced without restarting the shell:
 
 ```console
 cd node-express && pnpm i && node server.js
@@ -88,20 +91,32 @@ the panel is opened.
 
 ## Run locally
 
-Build and start the WASIX Epoxy sidecar in one terminal:
+Start the published WASIX Epoxy proxy in one terminal:
 
 ```console
-cd ../wisp-proxy
-./build.sh
-wasmer run . --net
+wasmer run wasmer/wisp-server --net
 ```
 
 Then start wasmer.sh in another terminal:
 
 ```console
 pnpm install
-VITE_WISP_URL=ws://127.0.0.1:4000/ pnpm dev
+pnpm dev
 ```
+
+The first command that needs outbound networking offers two setup paths: deploy
+`wasmer/wisp-server` to Wasmer for free, or run it locally with the command
+above and connect to `ws://localhost:4000/`. Set `VITE_WISP_URL` to configure
+the endpoint at build time instead. Use the **Network** action in the header to
+change the endpoint later without resetting the sandbox or its filesystem.
+
+The deploy action passes the current shell origin's
+`/wisp-autoconfigure/index.html`
+bridge as `WISP_AUTOCONFIGURE`. Visiting the deployed WISP server redirects its
+tab to that bridge with the WebSocket endpoint. The top-level bridge relays the
+endpoint to an open wasmer.sh tab, which stores it and completes any pending
+network prompt automatically. It must be top-level because browsers partition
+cross-tab channels used by third-party iframes.
 
 `pnpm dev` starts two independent servers. The shell runs at
 `http://127.0.0.1:5173`, while a small static HTTP host runs at
@@ -195,5 +210,5 @@ package entrypoint directly without rebuilding the site:
 For example:
 
 ```text
-/?package=python/python@3.13.17&command=python&arg=-q
+/?package=python/python@3.13.5&command=python&arg=-q
 ```

@@ -146,9 +146,38 @@ const output = await sandbox
 console.log(output.text());
 ```
 
-The SDK owns one WISP connection per sandbox and routes networking from every
-WASIX worker through it. Use a trusted, access-controlled proxy: it can observe
+The SDK opens the WISP connection lazily when the guest first requests DNS or
+outbound TCP access. Browser applications can also supply or replace the
+endpoint at that point:
+
+```javascript
+const sandbox = await wasmer.sandboxes.create({
+  packages: ["curl/curl"],
+  network: {
+    mode: "wisp",
+    requestUrl: async ({ url, error }) => {
+      // Show application UI here. `url` and `error` are set after a failed
+      // configured endpoint; return the WebSocket URL selected by the user.
+      return await requestWispUrlFromUser({ url, error });
+    },
+  },
+});
+```
+
+Concurrent guest connections share the same pending endpoint request. The SDK
+owns one WISP connection per sandbox and routes networking from every WASIX
+worker through it. Use a trusted, access-controlled proxy: it can observe
 connection metadata and decide which destinations and ports are allowed.
+
+Change an active sandbox's endpoint without recreating its filesystem or
+process environment:
+
+```javascript
+sandbox.network.setWispUrl("wss://another-proxy.example/");
+```
+
+Existing WISP streams are closed. The replacement connection is opened lazily
+on the next outbound network operation.
 
 ### Run a web server in an iframe
 

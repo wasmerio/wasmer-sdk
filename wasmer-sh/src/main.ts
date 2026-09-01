@@ -9,6 +9,7 @@ import {
   type Sandbox,
   type WritableBytes,
   Wasmer,
+  type WispConnectionRequest,
 } from "@wasmer/sdk2/browser";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -48,7 +49,7 @@ const EDGEJS_PACKAGE = "syrusakbary/edgejs@0.1.24";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "curl/curl",
-  "python/python@3.13.17",
+  "python/python@3.13.5",
   EDGEJS_PACKAGE,
   "php/php-32",
 ];
@@ -56,6 +57,15 @@ const TRANSCRIPT_LIMIT = 128 * 1024;
 const MINIMUM_PREVIEW_REFRESH_MS = 180;
 const PREVIEW_REFRESH_SETTLE_MS = 90;
 const PREVIEW_REFRESH_FADE_OUT_MS = 55;
+const WISP_STORAGE_KEY = "wasmer.sh:wisp-url";
+const WISP_AUTOCONFIGURE_CHANNEL = "wisp-autoconfigure";
+const WISP_AUTOCONFIGURE_PATH = "/wisp-autoconfigure/index.html";
+const DEFAULT_WISP_URL = "ws://localhost:4000/";
+const LOCAL_WISP_COMMAND = "wasmer run wasmer/wisp-server --net";
+
+type WispSetupMode = "deploy" | "local";
+
+class WispDialogCanceledError extends Error {}
 
 interface ShellConfig {
   packageName: string;
@@ -97,6 +107,12 @@ interface PreviewLoadingMessage {
   previewId?: unknown;
 }
 
+interface WispAutoconfigureMessage {
+  type?: unknown;
+  version?: unknown;
+  endpoint?: unknown;
+}
+
 interface DevelopmentShellApi {
   send(data: string): Promise<void>;
   snapshot(): string;
@@ -122,6 +138,7 @@ const elements = {
   clear: requiredElement<HTMLButtonElement>("clear-button"),
   restart: requiredElement<HTMLButtonElement>("restart-button"),
   editorButton: requiredElement<HTMLButtonElement>("editor-button"),
+  networkButton: requiredElement<HTMLButtonElement>("network-button"),
   editorPanel: requiredElement<HTMLElement>("editor-panel"),
   editorLoading: requiredElement<HTMLDivElement>("editor-loading"),
   editorWorkbench: requiredElement<HTMLDivElement>("editor-workbench"),
@@ -135,9 +152,28 @@ const elements = {
   previewLocation: requiredElement<HTMLInputElement>("preview-location"),
   previewOpen: requiredElement<HTMLAnchorElement>("preview-open"),
   previewClose: requiredElement<HTMLButtonElement>("preview-close"),
+  wispDialog: requiredElement<HTMLDialogElement>("wisp-dialog"),
+  wispForm: requiredElement<HTMLFormElement>("wisp-form"),
+  wispTitle: requiredElement<HTMLHeadingElement>("wisp-dialog-title"),
+  wispDetail: requiredElement<HTMLParagraphElement>("wisp-dialog-detail"),
+  wispDeployTab: requiredElement<HTMLButtonElement>("wisp-deploy-tab"),
+  wispLocalTab: requiredElement<HTMLButtonElement>("wisp-local-tab"),
+  wispDeployPanel: requiredElement<HTMLElement>("wisp-deploy-panel"),
+  wispLocalPanel: requiredElement<HTMLElement>("wisp-local-panel"),
+  wispDeployButton: requiredElement<HTMLAnchorElement>("wisp-deploy-button"),
+  wispDeployInput: requiredElement<HTMLInputElement>("wisp-deploy-url-input"),
+  wispLocalCommand: requiredElement<HTMLInputElement>("wisp-local-command"),
+  wispCopyButton: requiredElement<HTMLButtonElement>("wisp-copy-button"),
+  wispLocalInput: requiredElement<HTMLInputElement>("wisp-local-url-input"),
+  wispError: requiredElement<HTMLParagraphElement>("wisp-url-error"),
+  wispCancel: requiredElement<HTMLButtonElement>("wisp-cancel-button"),
 };
 
 const config = readConfig(new URLSearchParams(window.location.search));
+const wispAutoconfigureChannel = new BroadcastChannel(
+  WISP_AUTOCONFIGURE_CHANNEL,
+);
+elements.wispDeployButton.href = createWispDeploymentUrl();
 const wasmer = new Wasmer({
   cache: { namespace: "wasmer.sh" },
   parallelism: 4,
@@ -194,6 +230,8 @@ let pendingProcessInput = "";
 let transcript = "";
 let previewRefreshStartedAt = 0;
 let previewRefreshTimer: number | undefined;
+let pendingWispRequest: Promise<string> | undefined;
+let wispSetupMode: WispSetupMode = "deploy";
 
 terminal.loadAddon(fit);
 terminal.open(elements.terminal);
@@ -216,6 +254,7 @@ elements.clear.addEventListener("click", () => {
 });
 elements.restart.addEventListener("click", () => void start());
 elements.editorButton.addEventListener("click", () => void toggleEditor());
+elements.networkButton.addEventListener("click", () => void changeWispProxy());
 window.addEventListener(
   "keydown",
   (event) => {
@@ -272,8 +311,24 @@ elements.previewLocationForm.addEventListener("submit", (event) => {
 elements.previewLocation.addEventListener("focus", () => {
   elements.previewLocation.select();
 });
+elements.wispDeployTab.addEventListener("click", () =>
+  selectWispSetup("deploy"),
+);
+elements.wispLocalTab.addEventListener("click", () =>
+  selectWispSetup("local"),
+);
+elements.wispCopyButton.addEventListener("click", () =>
+  void copyLocalWispCommand(),
+);
+wispAutoconfigureChannel.addEventListener(
+  "message",
+  receiveWispAutoconfiguration,
+);
 window.addEventListener("message", receivePreviewState);
-window.addEventListener("pagehide", () => void dispose());
+window.addEventListener("pagehide", () => {
+  wispAutoconfigureChannel.close();
+  void dispose();
+});
 
 if (import.meta.env.DEV) {
   window.__wasmerShell = {
@@ -339,9 +394,11 @@ async function start(): Promise<void> {
     const sandbox = await wasmer.sandboxes.create({
       packages: [mainPackage, ...uses],
       files: workspaceFiles(),
-      network: config.wispUrl
-        ? { mode: "wisp", url: config.wispUrl }
-        : { mode: "http" },
+      network: {
+        mode: "wisp",
+        url: config.wispUrl,
+        requestUrl: requestWispUrl,
+      },
       env: {
         HOME: "/workspace",
         PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:.",
@@ -889,12 +946,214 @@ function readConfig(params: URLSearchParams): ShellConfig {
     wispUrl:
       params.get("wisp")?.trim() ||
       import.meta.env.VITE_WISP_URL?.trim() ||
+      readStoredWispUrl() ||
       undefined,
     serviceWorkerOrigin:
       params.get("httpOrigin")?.trim() ||
       import.meta.env.VITE_WASMER_SERVICE_WORKER_ORIGIN?.trim() ||
       (import.meta.env.DEV ? "http://127.0.0.1:5174" : undefined),
   };
+}
+
+function readStoredWispUrl(): string | undefined {
+  try {
+    return localStorage.getItem(WISP_STORAGE_KEY)?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function createWispDeploymentUrl(): string {
+  const autoconfigureUrl = new URL(
+    WISP_AUTOCONFIGURE_PATH,
+    window.location.origin,
+  ).href;
+  return `https://wasmer.io/apps/create?package=wasmer/wisp-server&env%5BWISP_AUTOCONFIGURE%5D=${encodeURIComponent(autoconfigureUrl)}`;
+}
+
+function receiveWispAutoconfiguration(
+  event: MessageEvent<WispAutoconfigureMessage>,
+): void {
+  const message = event.data;
+  if (
+    message?.type !== "wisp-autoconfigure" ||
+    message.version !== 1 ||
+    typeof message.endpoint !== "string"
+  ) {
+    return;
+  }
+
+  let endpoint: string;
+  try {
+    endpoint = normalizeWispUrl(message.endpoint);
+  } catch {
+    return;
+  }
+
+  if (elements.wispDialog.open) {
+    elements.wispDeployInput.value = endpoint;
+    selectWispSetup("deploy");
+    elements.wispForm.requestSubmit();
+    return;
+  }
+
+  try {
+    localStorage.setItem(WISP_STORAGE_KEY, endpoint);
+  } catch {
+    // Storage can be unavailable in private or restricted browser contexts.
+  }
+  config.wispUrl = endpoint;
+  activeSession?.sandbox.network.setWispUrl(endpoint);
+}
+
+function requestWispUrl(request: WispConnectionRequest): Promise<string> {
+  if (pendingWispRequest) return pendingWispRequest;
+  const pending = showWispDialog(request, "connect")
+    .then((url) => {
+      config.wispUrl = url;
+      return url;
+    })
+    .finally(() => {
+      if (pendingWispRequest === pending) pendingWispRequest = undefined;
+    });
+  pendingWispRequest = pending;
+  return pending;
+}
+
+async function changeWispProxy(): Promise<void> {
+  const session = activeSession;
+  if (!session) return;
+  try {
+    const url = await showWispDialog({ url: config.wispUrl }, "change");
+    session.sandbox.network.setWispUrl(url);
+    config.wispUrl = url;
+  } catch (error) {
+    if (!(error instanceof WispDialogCanceledError)) showTerminalError(error);
+  } finally {
+    terminal.focus();
+  }
+}
+
+function showWispDialog(
+  request: WispConnectionRequest,
+  purpose: "connect" | "change",
+): Promise<string> {
+  const failedUrl = request.url?.trim();
+  elements.wispTitle.textContent =
+    purpose === "change" ? "Change WISP server" : "Connect a WISP server";
+  elements.wispDetail.textContent =
+    purpose === "change"
+      ? "Choose a new WISP endpoint. Existing network connections will close when you connect."
+      : request.error
+        ? `The connection to ${failedUrl || "the configured WISP server"} failed. Enter a working WebSocket endpoint to retry.`
+        : "This command needs access to the network. Enter a WISP WebSocket endpoint to continue.";
+  const localFailure = failedUrl !== undefined && isLocalWispUrl(failedUrl);
+  elements.wispDeployInput.value = localFailure ? "" : failedUrl || "";
+  elements.wispLocalInput.value = localFailure ? failedUrl : DEFAULT_WISP_URL;
+  selectWispSetup(localFailure ? "local" : "deploy");
+  elements.wispError.hidden = true;
+  elements.wispError.textContent = "";
+  elements.wispDialog.showModal();
+  queueMicrotask(() => {
+    activeWispInput().focus();
+    activeWispInput().select();
+  });
+
+  return new Promise<string>((resolve, reject) => {
+    const cleanup = () => {
+      elements.wispForm.removeEventListener("submit", submit);
+      elements.wispCancel.removeEventListener("click", cancel);
+      elements.wispDialog.removeEventListener("cancel", cancel);
+      if (elements.wispDialog.open) elements.wispDialog.close();
+    };
+    const finish = (callback: () => void) => {
+      cleanup();
+      callback();
+    };
+    const submit = (event: Event) => {
+      event.preventDefault();
+      try {
+        const endpoint = normalizeWispUrl(activeWispInput().value);
+        try {
+          localStorage.setItem(WISP_STORAGE_KEY, endpoint);
+        } catch {
+          // Storage can be unavailable in private or restricted browser contexts.
+        }
+        finish(() => resolve(endpoint));
+      } catch (error) {
+        elements.wispError.textContent = describeError(error);
+        elements.wispError.hidden = false;
+        activeWispInput().focus();
+      }
+    };
+    const cancel = (event: Event) => {
+      event.preventDefault();
+      finish(() =>
+        reject(
+          new WispDialogCanceledError(
+            "Network connection canceled: no WISP server is configured",
+          ),
+        ),
+      );
+    };
+    elements.wispForm.addEventListener("submit", submit);
+    elements.wispCancel.addEventListener("click", cancel);
+    elements.wispDialog.addEventListener("cancel", cancel);
+  });
+}
+
+function selectWispSetup(mode: WispSetupMode): void {
+  wispSetupMode = mode;
+  const deploySelected = mode === "deploy";
+  elements.wispDeployTab.setAttribute("aria-selected", String(deploySelected));
+  elements.wispDeployTab.tabIndex = deploySelected ? 0 : -1;
+  elements.wispDeployPanel.hidden = !deploySelected;
+  elements.wispLocalTab.setAttribute("aria-selected", String(!deploySelected));
+  elements.wispLocalTab.tabIndex = deploySelected ? -1 : 0;
+  elements.wispLocalPanel.hidden = deploySelected;
+  elements.wispError.hidden = true;
+  elements.wispError.textContent = "";
+}
+
+function activeWispInput(): HTMLInputElement {
+  return wispSetupMode === "deploy"
+    ? elements.wispDeployInput
+    : elements.wispLocalInput;
+}
+
+function isLocalWispUrl(value: string): boolean {
+  try {
+    const hostname = new URL(value).hostname;
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "[::1]"
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function copyLocalWispCommand(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(LOCAL_WISP_COMMAND);
+  } catch {
+    elements.wispLocalCommand.select();
+    document.execCommand("copy");
+  }
+  elements.wispCopyButton.textContent = "Copied";
+  window.setTimeout(() => {
+    elements.wispCopyButton.textContent = "Copy";
+  }, 1_500);
+}
+
+function normalizeWispUrl(value: string): string {
+  const endpoint = new URL(value.trim());
+  if (endpoint.protocol !== "ws:" && endpoint.protocol !== "wss:") {
+    throw new TypeError("The WISP URL must start with ws:// or wss://");
+  }
+  if (!endpoint.pathname.endsWith("/")) endpoint.pathname += "/";
+  return endpoint.href;
 }
 
 function workspaceFiles(): Record<string, string> {
@@ -966,6 +1225,7 @@ function setState(state: string, status: string): void {
 function setBusy(busy: boolean): void {
   elements.restart.disabled = busy;
   elements.editorButton.disabled = busy || activeSession === undefined;
+  elements.networkButton.disabled = busy || activeSession === undefined;
 }
 
 function showStartupError(error: unknown): void {

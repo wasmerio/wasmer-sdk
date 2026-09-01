@@ -37,13 +37,31 @@ export type PackageSource = string | Uint8Array | Package;
 export type CommandSelector = string | Package | CommandRef;
 export type FileContents = string | Uint8Array;
 
+export interface WispConnectionRequest {
+  /** The endpoint that failed, when retrying a configured WISP server. */
+  url?: string;
+  /** The connection error that caused the SDK to request another endpoint. */
+  error?: Error;
+}
+
+export type WispUrlProvider = (
+  request: WispConnectionRequest,
+) => string | Promise<string>;
+
 export type NetworkPolicy =
   | { mode: "disabled" }
   | { mode: "host" }
   /** Browser-only HTTP ingress, exposed through `sandbox.ports.expose()`. */
   | { mode: "http" }
   /** Browser TCP/DNS egress over WISP, plus browser HTTP ingress. */
-  | { mode: "wisp"; url: string; dnsUrl?: string };
+  | {
+      mode: "wisp";
+      /** Initial endpoint. The connection is opened lazily on first network egress. */
+      url?: string;
+      dnsUrl?: string;
+      /** Supplies an endpoint when one is missing or the current endpoint fails. */
+      requestUrl?: WispUrlProvider;
+    };
 
 export interface SandboxOptions {
   packages?: readonly PackageSource[];
@@ -381,6 +399,7 @@ export class Wasmer {
       const bridge = new wisp.WispNetworkBridge(
         network.url,
         network.dnsUrl,
+        network.requestUrl,
       );
       networkBridge = bridge;
       builder.networkWisp(bridge);
@@ -515,19 +534,21 @@ export type ShellValue =
 export class Sandbox {
   readonly fs: SandboxFileSystem;
   readonly ports: Ports;
+  readonly network: SandboxNetwork;
   readonly #core: SandboxCore;
-  readonly #networkBridge: { close(): void } | undefined;
+  readonly #networkBridge: NetworkBridge | undefined;
   #shell: CommandSelector | undefined;
 
   constructor(
     readonly wasmer: Wasmer,
     core: SandboxCore,
     shell?: CommandSelector,
-    networkBridge?: { close(): void },
+    networkBridge?: NetworkBridge,
   ) {
     this.#core = core;
     this.fs = new SandboxFileSystem(core);
     this.ports = new Ports(core);
+    this.network = new SandboxNetworkService(networkBridge);
     this.#shell = shell;
     this.#networkBridge = networkBridge;
   }
@@ -627,6 +648,35 @@ export class Sandbox {
       );
     }
     return this.#shell;
+  }
+}
+
+interface NetworkBridge {
+  close(): void;
+  setUrl?(url: string): void;
+}
+
+/** Runtime controls for a sandbox's configured network provider. */
+export interface SandboxNetwork {
+  /** Replace the browser WISP endpoint and close existing WISP connections. */
+  setWispUrl(url: string): void;
+}
+
+class SandboxNetworkService implements SandboxNetwork {
+  readonly #bridge: NetworkBridge | undefined;
+
+  constructor(bridge?: NetworkBridge) {
+    this.#bridge = bridge;
+  }
+
+  setWispUrl(url: string): void {
+    if (!this.#bridge?.setUrl) {
+      throw new WasmerError(
+        "this sandbox does not use browser WISP networking",
+        "CAPABILITY_UNAVAILABLE",
+      );
+    }
+    this.#bridge.setUrl(url);
   }
 }
 

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Configure WISP</title>
+  </head>
+  <body>
+    <p id="status">Configuring the WISP connection…</p>
+    <script>
+      (() => {
+        const channel = new BroadcastChannel("wisp-autoconfigure");
+
+        const configure = (value) => {
+          let endpoint;
+          try {
+            endpoint = new URL(value);
+          } catch {
+            return false;
+          }
+          if (endpoint.protocol !== "ws:" && endpoint.protocol !== "wss:") {
+            return false;
+          }
+
+          channel.postMessage({
+            type: "wisp-autoconfigure",
+            version: 1,
+            endpoint: endpoint.href,
+          });
+          document.querySelector("#status").textContent =
+            "WISP configured. You can close this tab.";
+          return true;
+        };
+
+        const endpoint = new URL(window.location.href).searchParams.get("endpoint");
+        if (endpoint && configure(endpoint)) return;
+
+        window.addEventListener("message", (event) => {
+          const message = event.data;
+          if (
+            event.source !== window.parent ||
+            message?.type !== "wisp-autoconfigure" ||
+            message.version !== 1 ||
+            typeof message.endpoint !== "string"
+          ) {
+            return;
+          }
+
+          let endpointUrl;
+          try {
+            endpointUrl = new URL(message.endpoint);
+          } catch {
+            return;
+          }
+          if (endpointUrl.protocol !== "ws:" && endpointUrl.protocol !== "wss:") return;
+
+          const expectedOrigin = `${endpointUrl.protocol === "wss:" ? "https:" : "http:"}//${endpointUrl.host}`;
+          if (event.origin !== expectedOrigin) return;
+          configure(endpointUrl.href);
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -33,7 +33,8 @@ available in every language SDK.
 - **Unix commands in an interactive browser shell** —
   [wasmer.sh application](wasmer-sh)
 - **pnpm with outbound browser networking over WISP** —
-  [wasmer.sh](wasmer-sh), backed by the [WASIX Epoxy proxy](wisp-proxy)
+  [wasmer.sh](wasmer-sh), backed by the
+  [WASIX Epoxy package](https://github.com/wasix-org/epoxy-tls/tree/multiplexed/wasmer)
 - **A PHP website rendered from a browser WASIX server** —
   [JavaScript service-worker example](js/examples/browser_php)
 - **Python 3.13** — [JavaScript example](js/examples/python.mjs),

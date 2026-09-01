@@ -800,6 +800,230 @@ button {
   background: rgba(167, 139, 250, 0.19);
 }
 
+.wisp-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--panel-raised);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.52);
+}
+
+.wisp-dialog::backdrop {
+  background: rgba(3, 3, 7, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.wisp-form {
+  display: grid;
+  gap: 20px;
+  padding: 28px;
+}
+
+.wisp-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgba(167, 139, 250, 0.24);
+  border-radius: 12px;
+  background: rgba(167, 139, 250, 0.1);
+  color: #c4a7ff;
+}
+
+.wisp-icon svg {
+  width: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.wisp-form .eyebrow {
+  margin-bottom: 8px;
+}
+
+.wisp-form h2 {
+  margin: 0;
+  font-size: 23px;
+  font-weight: 590;
+  letter-spacing: -0.035em;
+}
+
+.wisp-dialog-detail {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.wisp-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.wisp-tab {
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wisp-tab span {
+  display: inline-flex;
+  margin-left: 4px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(94, 230, 168, 0.11);
+  color: #86efc0;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wisp-tab[aria-selected="true"] {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+}
+
+.wisp-tab:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.55);
+  outline-offset: 1px;
+}
+
+.wisp-tab-panel {
+  display: grid;
+  gap: 16px;
+  min-height: 172px;
+}
+
+.wisp-tab-panel[hidden] {
+  display: none;
+}
+
+.wisp-tab-panel > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.wisp-deploy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  margin: 0;
+  text-decoration: none;
+}
+
+.wisp-field {
+  display: grid;
+  gap: 8px;
+  color: #c8c4d1;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wisp-field input {
+  width: 100%;
+  height: 43px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  outline: none;
+  background: #0b0b11;
+  color: var(--text);
+  font: 13px "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo,
+    monospace;
+}
+
+.wisp-command-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.wisp-command-field input {
+  min-width: 0;
+  height: 43px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-right: 0;
+  border-radius: 9px 0 0 9px;
+  outline: none;
+  background: #0b0b11;
+  color: #d8d5df;
+  font: 12px "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo,
+    monospace;
+}
+
+.wisp-command-field button {
+  min-width: 66px;
+  border: 1px solid var(--line-strong);
+  border-radius: 0 9px 9px 0;
+  background: rgba(255, 255, 255, 0.05);
+  color: #d8d5df;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.wisp-command-field button:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.wisp-field input:focus {
+  border-color: rgba(167, 139, 250, 0.64);
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.1);
+}
+
+.wisp-url-error {
+  margin: -10px 0 0;
+  color: var(--red);
+  font-size: 12px;
+}
+
+.wisp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.wisp-actions .primary-button,
+.secondary-button {
+  min-height: 38px;
+  margin: 0;
+  padding: 0 17px;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.secondary-button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: #c8c4d1;
+}
+
+.secondary-button:hover {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .noscript-message {
   position: fixed;
   z-index: 20;

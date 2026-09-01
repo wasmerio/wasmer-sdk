@@ -39,6 +39,9 @@
         <button id="editor-button" class="text-button" type="button" aria-pressed="false" disabled>
           Editor
         </button>
+        <button id="network-button" class="text-button" type="button" disabled>
+          Network
+        </button>
         <button id="clear-button" class="text-button" type="button">
           Clear
         </button>
@@ -123,6 +126,132 @@
         <div id="preview-content" class="preview-content"></div>
       </section>
     </main>
+
+    <dialog
+      id="wisp-dialog"
+      class="wisp-dialog"
+      aria-labelledby="wisp-dialog-title"
+    >
+      <form id="wisp-form" class="wisp-form" novalidate>
+        <div class="wisp-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M8 12h8M12 8v8" />
+            <circle cx="12" cy="12" r="9" />
+          </svg>
+        </div>
+        <div>
+          <p class="eyebrow">Outbound network</p>
+          <h2 id="wisp-dialog-title">Connect a WISP server</h2>
+          <p id="wisp-dialog-detail" class="wisp-dialog-detail">
+            This command needs access to the network. Enter a WISP WebSocket
+            endpoint to continue.
+          </p>
+        </div>
+
+        <div class="wisp-tabs" role="tablist" aria-label="WISP setup method">
+          <button
+            id="wisp-deploy-tab"
+            class="wisp-tab"
+            type="button"
+            role="tab"
+            aria-selected="true"
+            aria-controls="wisp-deploy-panel"
+          >
+            Deploy WISP server to Wasmer <span>Free</span>
+          </button>
+          <button
+            id="wisp-local-tab"
+            class="wisp-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="wisp-local-panel"
+            tabindex="-1"
+          >
+            Run WISP locally
+          </button>
+        </div>
+
+        <section
+          id="wisp-deploy-panel"
+          class="wisp-tab-panel"
+          role="tabpanel"
+          aria-labelledby="wisp-deploy-tab"
+        >
+          <p>
+            Create a hosted WISP server on Wasmer, then paste its WebSocket URL
+            below.
+          </p>
+          <a
+            id="wisp-deploy-button"
+            class="primary-button wisp-deploy-button"
+            href="https://wasmer.io/apps/create?package=wasmer/wisp-server&amp;env%5BWISP_AUTOCONFIGURE%5D=%2Fwisp-autoconfigure%2Findex.html"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Deploy to Wasmer
+          </a>
+          <label class="wisp-field" for="wisp-deploy-url-input">
+            <span>Deployed WISP URL</span>
+            <input
+              id="wisp-deploy-url-input"
+              type="url"
+              inputmode="url"
+              autocomplete="url"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="wss://yourappname.wasmer.app"
+              aria-required="true"
+            />
+          </label>
+        </section>
+
+        <section
+          id="wisp-local-panel"
+          class="wisp-tab-panel"
+          role="tabpanel"
+          aria-labelledby="wisp-local-tab"
+          hidden
+        >
+          <p>Run this command in a terminal on your computer:</p>
+          <div class="wisp-command-field">
+            <input
+              id="wisp-local-command"
+              type="text"
+              value="wasmer run wasmer/wisp-server --net"
+              aria-label="Local WISP command"
+              readonly
+            />
+            <button id="wisp-copy-button" type="button">Copy</button>
+          </div>
+          <label class="wisp-field" for="wisp-local-url-input">
+            <span>Local WISP URL</span>
+            <input
+              id="wisp-local-url-input"
+              type="url"
+              inputmode="url"
+              autocomplete="url"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="ws://localhost:4000/"
+              aria-required="true"
+            />
+          </label>
+        </section>
+
+        <p id="wisp-url-error" class="wisp-url-error" role="alert" hidden></p>
+        <div class="wisp-actions">
+          <button
+            id="wisp-cancel-button"
+            class="secondary-button"
+            type="button"
+          >
+            Cancel
+          </button>
+          <button class="primary-button" type="submit">Connect</button>
+        </div>
+      </form>
+    </dialog>
 
     <noscript>
       <div class="noscript-message">
