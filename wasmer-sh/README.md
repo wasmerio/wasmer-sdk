@@ -124,10 +124,11 @@ cross-tab channels used by third-party iframes.
 URLs, so guest routes never overlap Vite routes.
 
 To run that standalone service-worker host through AnyBuild and Wasmer instead
-of Vite, install [AnyBuild](https://www.anybuild.run/docs/installation/) and run:
+of Vite, install [AnyBuild](https://www.anybuild.run/docs/installation/). From
+the repository root, run:
 
 ```console
-pnpm run dev:http:anybuild
+anybuild . --subdir wasmer-sh/service-worker --wasmer --start
 ```
 
 AnyBuild selects `wasmer-sh/service-worker` as an independent Node static
@@ -140,7 +141,8 @@ itself. Start the shell in another terminal with:
 VITE_WASMER_SERVICE_WORKER_ORIGIN=http://127.0.0.1:8080 pnpm run dev:app
 ```
 
-Set `PORT` on both commands if port 8080 is unavailable.
+Set `PORT` before the AnyBuild command if port 8080 is unavailable, and use
+the same port in `VITE_WASMER_SERVICE_WORKER_ORIGIN`.
 
 The generated service-worker output includes an `sws.toml` file containing the
 cross-origin headers required by the standalone HTTP host.
