@@ -41,6 +41,9 @@ export class WispNetworkBridge {
   readonly id = nextBridgeId++;
   readonly #sockets = new Map<number, SocketState>();
   readonly #dnsCache = new Map<string, DnsCacheEntry>();
+  // WASIX connects by resolved address. Retain its originating hostname so
+  // WISP performs the remote connection without pinning traffic to one CDN IP.
+  readonly #resolvedHosts = new Map<string, string>();
   readonly #dnsUrl: URL;
   readonly #requestUrl?: WispUrlProvider;
   #url?: string;
@@ -89,6 +92,7 @@ export class WispNetworkBridge {
     if (normalized === "localhost") return ["127.0.0.1"];
     const cached = this.#dnsCache.get(normalized);
     if (cached && cached.expiresAt > Date.now()) {
+      this.#rememberResolvedHost(normalized, cached.addresses);
       return [...cached.addresses];
     }
     // DNS is the first outbound operation for most socket clients. Establish
@@ -100,6 +104,7 @@ export class WispNetworkBridge {
       addresses: answer.addresses,
       expiresAt: Date.now() + answer.ttlSeconds * 1_000,
     });
+    this.#rememberResolvedHost(normalized, answer.addresses);
     return [...answer.addresses];
   }
 
@@ -107,7 +112,9 @@ export class WispNetworkBridge {
     if (this.#closed) throw new Error("WISP network bridge is closed");
     const connection = await this.#getConnection();
     const peer = parseAddress(peerText);
-    const stream = connection.create_stream(peer.host, peer.port, "tcp");
+    const destination =
+      this.#resolvedHosts.get(stripIpv6Brackets(peer.host)) ?? peer.host;
+    const stream = connection.create_stream(destination, peer.port, "tcp");
     const id = this.#nextSocketId++;
     const state: SocketState = {
       stream,
@@ -350,6 +357,12 @@ export class WispNetworkBridge {
     if (this.#closed) return;
     if (!this.#wake(id, event)) {
       setTimeout(() => this.#emitWake(id, event), 0);
+    }
+  }
+
+  #rememberResolvedHost(host: string, addresses: readonly string[]): void {
+    for (const address of addresses) {
+      this.#resolvedHosts.set(stripIpv6Brackets(address), host);
     }
   }
 }
