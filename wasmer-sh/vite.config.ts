@@ -18,10 +18,8 @@ export default defineConfig({
   server: {
     headers: crossOriginIsolationHeaders,
     fs: {
-      // The repository uses the local SDK package through `link:../js`.
       allow: [
         fileURLToPath(new URL(".", import.meta.url)),
-        fileURLToPath(new URL("../js", import.meta.url)),
         fileURLToPath(new URL("../fixtures", import.meta.url)),
         ...(edgejsWebcPath ? [dirname(edgejsWebcPath)] : []),
       ],

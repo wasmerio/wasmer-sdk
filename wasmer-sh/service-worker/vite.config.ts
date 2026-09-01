@@ -45,7 +45,7 @@ export default defineConfig({
   server: {
     headers: crossOriginHeaders,
     fs: {
-      allow: [root, fileURLToPath(new URL("../../js", import.meta.url))],
+      allow: [root],
     },
   },
   preview: {
