@@ -26,17 +26,17 @@ serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 tokio = { version = "1.49", default-features = false, features = ["io-util", "sync"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
-virtual-net = { version = "=0.702.1", default-features = false }
-virtual-mio = { version = "=0.702.1", default-features = false }
+virtual-net = { version = "=0.704.0", default-features = false }
+virtual-mio = { version = "=0.704.0", default-features = false }
 wasm-bindgen = "0.2.120"
 wasm-bindgen-futures = "0.4"
-wasmer = { version = "=7.2.1", default-features = false, features = ["js", "js-default"] }
+wasmer = { version = "=7.4.0", default-features = false, features = ["js", "js-default"] }
 wasmer-sdk = { path = "../../rust", default-features = false, features = ["js-napi"] }
-wasmer-package = { version = "=0.702.1", default-features = false, features = ["execution", "webc-v3"] }
-wasmer-wasix = { version = "=0.702.1", default-features = false, features = ["js", "js-default"] }
-wasmer-wasix-types = "=0.702.1"
-wasmer-types = "=7.2.1"
-webc = { version = "=12.0.0", default-features = false, features = ["v3"] }
+wasmer-package = { version = "=0.704.0", default-features = false, features = ["execution", "webc-v3"] }
+wasmer-wasix = { version = "=0.704.0", default-features = false, features = ["js", "js-default"] }
+wasmer-wasix-types = "=0.704.0"
+wasmer-types = "=7.4.0"
+webc = { version = "=12.0.1", default-features = false, features = ["v3"] }
 
 [dependencies.web-sys]
 version = "0.3"

@@ -57,7 +57,7 @@ There is no client-level `run()`. Execution belongs to a sandbox because even a 
 
 ```ts
 const wasmer = new Wasmer();
-const python = await wasmer.packages.load("python/python@3.12");
+const python = await wasmer.packages.load("python/python@=3.13.5");
 const sandbox = await wasmer.sandboxes.create({
   packages: [python],
   files: { "main.py": "print('hello')" },
@@ -95,7 +95,7 @@ Captured byte decoding is synchronous because the bytes are already in memory. L
 
 A package source is one of:
 
-- a registry reference such as `python/python@3.12`;
+- a registry reference such as `python/python@=3.13.5`;
 - a local WEBC file or package directory on hosts with ambient filesystem access;
 - in-memory WEBC bytes, including browser `File` contents; or
 - an already resolved `Package`.

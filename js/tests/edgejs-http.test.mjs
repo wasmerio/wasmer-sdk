@@ -14,7 +14,7 @@ const cacheDirectory = fileURLToPath(
 );
 const edgeJsSource = process.env.WASMER_EDGEJS_WEBC
   ? new Uint8Array(await readFile(process.env.WASMER_EDGEJS_WEBC))
-  : "syrusakbary/edgejs-quickjs-wasi@0.1.5";
+  : "wasmer/edgejs@0.2.0";
 
 test("serves HTTP from EdgeJS through the Node network bridge", async (context) => {
   const port = await reservePort();

@@ -101,11 +101,11 @@ async function runBrowserAttempt(signal, attempt) {
           const client = new Wasmer();
           let sandbox;
           try {
-            // This package release contains CPython 3.12.0. Pin it exactly so
-            // registry changes cannot silently alter the browser regression.
+            // Pin the package exactly so registry changes cannot silently alter
+            // the browser regression.
             const python = await stage(
               "package-load",
-              () => client.packages.load("python/python@=0.2.0"),
+              () => client.packages.load("python/python@=3.13.5"),
               packageLoadTimeoutMs,
             );
             sandbox = await stage("sandbox-create", () =>
@@ -172,7 +172,7 @@ async function runBrowserAttempt(signal, attempt) {
                 const cachedClient = new Wasmer();
                 try {
                   const cached = await cachedClient.packages.load(
-                    "python/python@=0.2.0",
+                    "python/python@=3.13.5",
                   );
                   return cached.id === python.id;
                 } finally {

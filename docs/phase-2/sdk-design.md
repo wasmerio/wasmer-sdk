@@ -72,7 +72,7 @@ The first successful program introduces the one object that owns execution:
 ```ts
 const wasmer = new Wasmer();
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@3.12"],
+  packages: ["python/python@=3.13.5"],
 });
 const output = await sandbox
   .command("python", ["-c", "print('hello')"])
@@ -84,7 +84,7 @@ The next level should not require relearning the product:
 
 ```ts
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@3.12"],
+  packages: ["python/python@=3.13.5"],
 });
 
 await sandbox.fs.writeText("/workspace/main.py", "print('hello')");
@@ -115,7 +115,7 @@ content identity, and compatibility requirements.
 
 A package source may be:
 
-- a registry specification such as `python/python@3.12`;
+- a registry specification such as `python/python@=3.13.5`;
 - an exact version or content digest;
 - WEBC bytes;
 - a URL when URL acquisition is explicitly enabled;
@@ -198,7 +198,7 @@ independent command use an ordinary sandbox:
 
 ```ts
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@3.12"],
+  packages: ["python/python@=3.13.5"],
 });
 
 const output = await sandbox.command(
@@ -234,7 +234,7 @@ await using sandbox = await wasmer.sandboxes.create({
   },
 });
 
-await sandbox.installPackage("python/python@3.12");
+await sandbox.installPackage("python/python@=3.13.5");
 await sandbox.installPackage("wasmer/bash@1.0.25", {
   asShell: "bash",
 });
@@ -333,7 +333,7 @@ Selecting a package without an entrypoint fails with
 `PACKAGE_HAS_NO_ENTRYPOINT`; callers never need a non-null assertion:
 
 ```ts
-const edgejs = await wasmer.packages.load("syrusakbary/edgejs-quickjs-wasi@0.1.5");
+const edgejs = await wasmer.packages.load("wasmer/edgejs@0.2.0");
 await sandbox.command(edgejs, ["main.js"]).run();
 ```
 
@@ -523,7 +523,7 @@ set:
 ```ts
 await using sandbox = await wasmer.sandboxes.create();
 
-const python = await sandbox.installPackage("python/python@3.12");
+const python = await sandbox.installPackage("python/python@=3.13.5");
 
 const output = await sandbox
   .command(python.command("python"), [
@@ -908,7 +908,7 @@ const project = await BrowserFileSystem.fromDirectoryHandle(handle, {
 });
 
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@3.12"],
+  packages: ["python/python@=3.13.5"],
   mounts: [{
     guest: "/project",
     fileSystem: project,
@@ -1082,7 +1082,7 @@ let wasmer = Wasmer::new()?;
 
 let package = wasmer
     .packages()
-    .load("python/python@3.12")
+    .load("python/python@=3.13.5")
     .await?;
 
 let report = wasmer
@@ -1129,7 +1129,7 @@ cleanup.
 ```rust
 let sandbox = wasmer
     .sandboxes().create()
-    .package("python/python@3.12")
+    .package("python/python@=3.13.5")
     .package("wasmer/bash@1.0.25")
     .file("/workspace/main.py", b"print('hello')")
     .memory_limit(512 * 1024 * 1024)
@@ -1572,7 +1572,7 @@ Running Python is package execution:
 
 ```ts
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@3.12"],
+  packages: ["python/python@=3.13.5"],
 });
 await sandbox
   .command("python", ["-c", "print('hello')"])
@@ -1583,7 +1583,7 @@ Running JavaScript through EdgeJS QuickJS is the same:
 
 ```ts
 const edgejs = await wasmer.packages.load(
-  "syrusakbary/edgejs-quickjs-wasi@0.1.5",
+  "wasmer/edgejs@0.2.0",
 );
 await using sandbox = await wasmer.sandboxes.create({
   packages: [edgejs],
@@ -1633,7 +1633,7 @@ Deleting `.wasmer` may cost downloads and compilation time. Compiled artifacts
 from another target or engine fingerprint are never considered candidates.
 
 Examples in conceptual documentation may use a stable channel such as
-`python/python@3.12`. Release tests and production guides should use a verified
+`python/python@=3.13.5`. Release tests and production guides should use a verified
 exact version or digest. Package names that have not yet been verified are
 shown as placeholders rather than fabricated.
 
@@ -1661,7 +1661,7 @@ Current Wasmer JS style:
 
 ```ts
 await init();
-const pkg = await Wasmer.fromRegistry("python/python@3.12");
+const pkg = await Wasmer.fromRegistry("python/python@=3.13.5");
 const entrypoint = pkg.entrypoint;
 if (!entrypoint) throw new Error("Package has no entrypoint");
 const instance = await entrypoint.run({
@@ -1675,7 +1675,7 @@ Proposed sandbox-scoped style:
 ```ts
 const wasmer = new Wasmer();
 await using sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@3.12"],
+  packages: ["python/python@=3.13.5"],
 });
 const output = await sandbox
   .command("python", ["-c", "print(42)"])

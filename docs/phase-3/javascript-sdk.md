@@ -79,7 +79,7 @@ construction syntax.
 import { Wasmer } from "@wasmer/sdk2/node";
 
 const wasmer = new Wasmer();
-const python = await wasmer.packages.load("python/python@3.12");
+const python = await wasmer.packages.load("python/python@=3.13.5");
 const sandbox = await wasmer.sandboxes.create({
   packages: [python],
   files: { "main.py": "print('hello')" },
@@ -259,7 +259,7 @@ wasm-bindgen SDK's Node network bridge with the host's standard `psql`. It
 contains no PostgreSQL protocol proxy.
 
 The EdgeJS test serves a real HTTP response from
-`syrusakbary/edgejs-quickjs-wasi`. The PostgreSQL test starts the WASIX PostgreSQL
+`wasmer/edgejs@0.2.0`. The PostgreSQL test starts the WASIX PostgreSQL
 process through the SDK, waits for its TCP listener, and runs the host's normal
 `psql` binary against it. Both are end-to-end regression tests for the worker
 and network architecture.

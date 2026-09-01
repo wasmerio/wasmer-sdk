@@ -17,8 +17,8 @@ const sandbox = await wasmer.sandboxes.create({
   packages: [
     bashPackage,
     "wasmer/neatvi",
-    "python/python@3.13.5",
-    "syrusakbary/edgejs-quickjs-wasi@0.1.5",
+    "python/python@=3.13.5",
+    "wasmer/edgejs@0.2.0",
     "php/php-32",
   ],
   files: { ".bashrc": "PS1='wasmer@web:\\w$ '" },
@@ -52,7 +52,7 @@ live preview beside the terminal. The preview stays attached to the guest, so
 absolute URLs and subresources are routed back to the same WASIX server.
 The `node/`, `node-express/`, `next/`, `python/`, and `php/` directories are independent
 examples with their own README files. `node/server.js` is backed by
-`syrusakbary/edgejs-quickjs-wasi`; `python/server.py` uses Python's standard-library
+`wasmer/edgejs@0.2.0`; `python/server.py` uses Python's standard-library
 `HTTPServer`. Closing a listener closes its preview automatically.
 
 For an Express application, install the dependency inside the browser sandbox
@@ -210,5 +210,5 @@ package entrypoint directly without rebuilding the site:
 For example:
 
 ```text
-/?package=python/python@3.13.5&command=python&arg=-q
+/?package=python/python@=3.13.5&command=python&arg=-q
 ```

@@ -3,8 +3,8 @@ import { Wasmer } from "@wasmer/sdk2/node";
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
   packages: [
-    "python/python@3.13.17",
-    "syrusakbary/edgejs-quickjs-wasi@0.1.5",
+    "python/python@=3.13.5",
+    "wasmer/edgejs@0.2.0",
     "php/php-32",
   ],
 });

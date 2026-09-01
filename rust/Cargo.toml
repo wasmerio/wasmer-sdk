@@ -12,7 +12,6 @@ default = ["sys"]
 sys = [
   "virtual-fs/host-fs",
   "wasmer/cranelift",
-  "wasmer-package/authoring",
   "wasmer-wasix/sys-default",
 ]
 js = [
@@ -35,21 +34,21 @@ bytes = "1.11"
 futures = "0.3"
 thiserror = "2.0"
 tokio = { version = "1.49", features = ["io-util", "macros", "rt", "sync", "time"] }
-virtual-fs = { version = "=0.702.1", default-features = false }
-wasmer = { version = "=7.2.1", default-features = false }
-wasmer-c-api-imports = { version = "=7.2.1", default-features = false, features = ["wasi"] }
-wasmer-config = "=0.702.1"
-wasmer-package = { version = "=0.702.1", default-features = false, features = ["execution", "webc-v3"] }
-wasmer-wasix = { version = "=0.702.1", default-features = false }
-wasmer-wasix-types = "=0.702.1"
-webc = { version = "=12.0.0", default-features = false, features = ["v3"] }
+virtual-fs = { version = "=0.704.0", default-features = false }
+wasmer = { version = "=7.4.0", default-features = false }
+wasmer-c-api-imports = { version = "=7.4.0", default-features = false, features = ["wasi"] }
+wasmer-config = "=0.704.0"
+wasmer-package = { version = "=0.704.0", default-features = false }
+wasmer-wasix = { version = "=0.704.0", default-features = false }
+wasmer-wasix-types = "=0.704.0"
+webc = { version = "=12.0.1", default-features = false, features = ["v3"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1.49", features = ["fs", "rt-multi-thread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3", features = ["Window"], optional = true }
-wasmer-napi = { version = "=0.702.1", optional = true, default-features = false }
+wasmer-napi = { version = "=0.704.0", optional = true, default-features = false }
 
 [dev-dependencies]
 http = "1.4"

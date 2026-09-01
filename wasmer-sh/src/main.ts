@@ -45,11 +45,11 @@ import vinextViteConfig from "../workspace/vinext/vite.config.js?raw";
 import workspaceReadme from "../workspace/README.md?raw";
 
 const DEFAULT_PACKAGE = "wasmer/bash";
-const EDGEJS_PACKAGE = "syrusakbary/edgejs@0.1.24";
+const EDGEJS_PACKAGE = "wasmer/edgejs@0.2.0";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "curl/curl",
-  "python/python@3.13.5",
+  "python/python@=3.13.5",
   EDGEJS_PACKAGE,
   "php/php-32",
 ];

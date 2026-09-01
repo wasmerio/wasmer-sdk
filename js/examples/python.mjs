@@ -8,7 +8,7 @@ const source = await readFile(
 
 const wasmer = new Wasmer();
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["python/python@3.13.17"],
+  packages: ["python/python@=3.13.5"],
   files: { "hello.py": source },
 });
 

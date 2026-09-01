@@ -36,7 +36,7 @@ Construction is synchronous; operations that can perform I/O are asynchronous:
 from wasmer_sdk import Wasmer
 
 wasmer = Wasmer(cache_root=".wasmer")
-python = await wasmer.packages.load("python/python@3.12")
+python = await wasmer.packages.load("python/python@=3.13.5")
 sandbox = await wasmer.sandboxes.create(
     packages=[python],
     files={"main.py": "print('hello')"},
@@ -149,7 +149,7 @@ PYTHONPATH=python/src \
   python3 -m unittest discover -s python/tests -v
 ```
 
-The runtime suite loads `python/python@3.12` and verifies:
+The runtime suite loads `python/python@=3.13.5` and verifies:
 
 - captured checked execution;
 - reusable commands;

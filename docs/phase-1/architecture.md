@@ -91,7 +91,7 @@ architecture decision relies on undocumented assumptions about it.
 
 - **SDK**: the configured Rust entry point. It owns package resolution, caches,
   defaults, and the Wasmer runtime objects used by this build.
-- **Package spec**: an unresolved reference such as `python/python@3.12`, a
+- **Package spec**: an unresolved reference such as `python/python@=3.13.5`, a
   registry URL, a local WEBC path, or WEBC bytes.
 - **Resolved package**: immutable package content, resolved dependencies,
   manifest, commands, and content digests.
@@ -1011,7 +1011,7 @@ them.
 sdk = WasmerSdk.create(config)
 capabilities = sdk.capabilities()
 
-python = await sdk.packages.load("python/python@3.12")
+python = await sdk.packages.load("python/python@=3.13.5")
 sandbox = await sdk.sandboxes.create({
   filesystem: ephemeral(),
   network: disabled(),

@@ -52,7 +52,7 @@
     "test:workers": "npm run build:ts && node --test --test-timeout=30000 tests/multi-worker.test.mjs",
     "test:browser": "npm run build:ts && node --test --test-timeout=300000 tests/browser-python.test.mjs && node --test --test-timeout=240000 tests/browser-service-worker.test.mjs",
     "test:browser-http": "npm run build:ts && node --test --test-timeout=240000 tests/browser-service-worker.test.mjs",
-    "test:edgejs": "npm run build:ts && node --test --test-timeout=30000 tests/edgejs-http.test.mjs",
+    "test:edgejs": "npm run build:ts && node --experimental-wasm-jspi --test --test-timeout=30000 tests/edgejs-http.test.mjs",
     "test:napi-host-js": "npm run build:ts && node --test --test-timeout=60000 tests/napi-host-js.test.mjs",
     "test:postgres": "npm run build:ts && node --test --test-timeout=90000 tests/postgres-psql.test.mjs"
   },
