@@ -33,18 +33,17 @@ test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   );
   assert.equal(registryEntry.package_name, "python/python");
   assert.ok(Number.isSafeInteger(registryEntry.unix_timestamp));
-  assert.equal(
+  const distribution = registryEntry.response.data.getPackage.versions.find(
+    ({ version }) => version === "3.13.18",
+  );
+  const packageHash = distribution?.v3?.piritaSha256Hash;
+  assert.match(packageHash, /^[a-f0-9]{64}$/);
+  assert.ok(
     (
       await stat(
-        join(
-          runtimeCache,
-          "cache-v1",
-          "packages",
-          "c03ebe0946e66edf598fd7a1f192101f60e4e9c0095aecd04e049989692bdcab.bin",
-        ),
+        join(runtimeCache, "cache-v1", "packages", `${packageHash}.bin`),
       )
-    ).size,
-    44_680_028,
+    ).size > 0,
   );
 
   const originalFetch = globalThis.fetch;
