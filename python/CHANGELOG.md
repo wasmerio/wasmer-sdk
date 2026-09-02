@@ -6,7 +6,6 @@
 ### Features
 
 * **python:** support Edge.js with V8 ([4dfd435](https://github.com/wasmerio/wasmer-sdk/commit/4dfd435d3504b6ccd1d501e1867a2dfd6ec66a6c))
-* **python:** support Edge.js with V8 ([2b04351](https://github.com/wasmerio/wasmer-sdk/commit/2b04351e9106ef9a871accfd29c3bd5facbe0104))
 
 
 ### Bug Fixes
