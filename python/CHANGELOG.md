@@ -10,6 +10,7 @@
 
 ### Bug Fixes
 
+* **python:** support AArch64 C char ABI ([d1c7a97](https://github.com/wasmerio/wasmer-sdk/commit/d1c7a978a9a21625722e32c06c379975f016eb53))
 * **python:** check command failures by default ([fbe71f9](https://github.com/wasmerio/wasmer-sdk/commit/fbe71f95ee1a259a5b8ef7bd0306077defb0b78f))
 
 
