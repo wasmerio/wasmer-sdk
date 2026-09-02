@@ -21,7 +21,7 @@ bindgen-cli = ["uniffi/cli"]
 [dependencies]
 tokio = { version = "1.49", features = ["io-util", "rt-multi-thread", "sync"] }
 uniffi = "0.32.0"
-wasmer-sdk = { path = "..", version = "=0.1.0" }
+wasmer-sdk = { path = "..", version = "=0.1.0", features = ["napi-v8"] }
 
 [dev-dependencies]
 futures = "0.3"

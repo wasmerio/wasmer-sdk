@@ -8,7 +8,7 @@ async def main() -> None:
     sandbox = await wasmer.sandboxes.create(
         packages=[
             "python/python@=3.13.18",
-            "wasmer/edgejs-quickjs",
+            "wasmer/edgejs@0.2.0",
             "php/php-32",
         ]
     )

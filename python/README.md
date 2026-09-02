@@ -77,7 +77,7 @@ Network access is an explicit sandbox capability:
 
 ```python
 sandbox = await wasmer.sandboxes.create(
-    packages=["wasmer/edgejs-quickjs@0.1.0"],
+    packages=["wasmer/edgejs@0.2.0"],
     network="host",
 )
 ```

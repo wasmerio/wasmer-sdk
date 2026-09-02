@@ -19,9 +19,7 @@ class EdgeJsHttpTests(unittest.IsolatedAsyncioTestCase):
         sandbox = None
         process = None
         try:
-            edgejs = await client.packages.load(
-                "wasmer/edgejs-quickjs@0.1.0"
-            )
+            edgejs = await client.packages.load("wasmer/edgejs@0.2.0")
             sandbox = await client.sandboxes.create(
                 packages=[edgejs],
                 files={"server.js": SERVER_SOURCE.read_bytes()},

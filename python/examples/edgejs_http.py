@@ -40,7 +40,7 @@ async def main() -> None:
 
     async with Wasmer(output_bytes=256 * 1024) as wasmer:
         sandbox = await wasmer.sandboxes.create(
-            packages=["wasmer/edgejs-quickjs@0.1.0"],
+            packages=["wasmer/edgejs@0.2.0"],
             files={"server.js": SERVER_SOURCE.read_bytes()},
             env={"PORT": str(port)},
             network="host",

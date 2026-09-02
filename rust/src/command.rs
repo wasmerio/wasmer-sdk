@@ -1,3 +1,5 @@
+#[cfg(feature = "napi-v8")]
+use std::borrow::Cow;
 use std::{
     collections::{BTreeMap, HashSet},
     path::PathBuf,
@@ -7,8 +9,10 @@ use std::{
 
 use bytes::Bytes;
 use tokio::io::AsyncWriteExt;
-#[cfg(all(target_arch = "wasm32", feature = "js"))]
+#[cfg(any(all(target_arch = "wasm32", feature = "js"), feature = "napi-v8"))]
 use wasmer_wasix::bin_factory::BinaryPackageCommand;
+#[cfg(feature = "napi-v8")]
+use wasmer_wasix::runtime::ModuleInput;
 use wasmer_wasix::{
     Runtime,
     bin_factory::spawn_exec,
@@ -347,6 +351,8 @@ impl Command {
             .ok_or_else(|| Error::CommandNotFound {
                 command: command_name.clone(),
             })?;
+        #[cfg(feature = "napi-v8")]
+        configure_wasi_runner_for_napi(runtime.as_ref(), binary_command, &mut runner).await?;
         #[cfg(all(target_arch = "wasm32", feature = "js"))]
         precompile_browser_command(runtime.as_ref(), binary_command).await?;
         let wasi = binary_command
@@ -591,6 +597,28 @@ fn tolerate_early_exit(result: std::io::Result<()>) -> std::io::Result<()> {
         }
         other => other,
     }
+}
+
+#[cfg(feature = "napi-v8")]
+async fn configure_wasi_runner_for_napi(
+    runtime: &(dyn Runtime + Send + Sync),
+    command: &BinaryPackageCommand,
+    runner: &mut WasiRunner,
+) -> Result<()> {
+    let module = runtime
+        .resolve_module(ModuleInput::Command(Cow::Borrowed(command)), None, None)
+        .await
+        .map_err(|error| Error::Execution {
+            message: format!("unable to compile command for N-API detection: {error:#}"),
+        })?;
+    let (napi_version, napi_extension_version) = wasmer_napi::module_needs_napi(&module);
+    if napi_version.is_some() || napi_extension_version.is_some() {
+        runner
+            .capabilities_mut()
+            .threading
+            .enable_asynchronous_threading = false;
+    }
+    Ok(())
 }
 
 #[cfg(feature = "sys")]
