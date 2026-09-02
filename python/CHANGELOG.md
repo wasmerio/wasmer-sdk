@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.3...v0.2.0) (2026-09-02)
+## [0.1.4](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.3...v0.1.4) (2026-09-02)
 
 
 ### Features
