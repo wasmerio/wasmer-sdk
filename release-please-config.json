@@ -5,7 +5,7 @@
     "python": {
       "release-type": "python",
       "package-name": "wasmer-sdk",
-      "component": "wasmer-sdk",
+      "component": "wasmer-sdk-python",
       "include-component-in-tag": true,
       "initial-version": "0.1.0"
     },
