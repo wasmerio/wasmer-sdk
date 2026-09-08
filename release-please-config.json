@@ -6,7 +6,7 @@
       "release-type": "python",
       "package-name": "wasmer-sdk",
       "component": "wasmer-sdk",
-      "include-component-in-tag": false,
+      "include-component-in-tag": true,
       "initial-version": "0.1.0"
     },
     "js": {
