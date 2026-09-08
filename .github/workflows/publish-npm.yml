@@ -17,6 +17,44 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  diagnose-identity:
+    name: Inspect non-secret npm OIDC claims
+    if: github.ref == 'refs/heads/codex/npm-oidc-identity-probe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Inspect identity without publishing
+        run: |
+          node <<'NODE'
+          async function main() {
+            const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+            url.searchParams.set('audience', 'npm:registry.npmjs.org');
+            const response = await fetch(url, {
+              headers: {
+                Accept: 'application/json',
+                Authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`,
+              },
+            });
+            if (!response.ok) throw new Error(`GitHub identity request failed: ${response.status}`);
+            const { value } = await response.json();
+            const claims = JSON.parse(Buffer.from(value.split('.')[1], 'base64url').toString());
+            const allowed = [
+              'iss', 'aud', 'sub', 'repository', 'repository_id',
+              'repository_owner', 'repository_owner_id', 'repository_visibility',
+              'workflow_ref', 'job_workflow_ref', 'environment',
+              'ref', 'event_name', 'runner_environment',
+            ];
+            console.log(JSON.stringify(Object.fromEntries(
+              allowed.filter(key => key in claims).map(key => [key, claims[key]])
+            ), null, 2));
+          }
+          main().catch(() => { console.error('OIDC identity inspection failed'); process.exitCode = 1; });
+          NODE
+
   build:
     name: Build @wasmer/sdk
     if: github.ref == 'refs/heads/main' && inputs.sync_only != true
