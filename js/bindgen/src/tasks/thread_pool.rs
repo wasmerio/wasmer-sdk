@@ -150,7 +150,7 @@ impl VirtualTaskManager for ThreadPool {
     /// pulled from the worker pool that has a stateful thread local variable
     /// It is ok for this task to block execution and any async futures within its scope
     fn task_wasm(&self, task: TaskWasm) -> Result<(), WasiThreadError> {
-        let msg = crate::tasks::task_wasm::to_scheduler_message(task)?;
+        let msg = crate::tasks::task_wasm::to_scheduler_message(task);
         self.send(msg)
     }
 
@@ -188,7 +188,9 @@ impl VirtualTaskManager for ThreadPool {
         module: wasmer::Module,
         task: Box<dyn FnOnce(wasmer::Module) + Send + 'static>,
     ) -> Result<(), WasiThreadError> {
-        self.send(SchedulerMessage::SpawnWithModule { task, module })
+        self.send(SchedulerMessage::SpawnBlocking(Box::new(move || {
+            task(module)
+        })))
     }
 }
 

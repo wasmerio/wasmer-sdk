@@ -1,11 +1,7 @@
 use derivative::Derivative;
-use js_sys::WebAssembly;
 use wasm_bindgen::JsValue;
-use wasmer_types::ModuleHash;
 
-use crate::tasks::{
-    AsyncTask, BlockingModuleTask, BlockingTask, interop::Serializer, task_wasm::SpawnWasm,
-};
+use crate::tasks::{AsyncTask, BlockingTask, interop::Serializer, task_wasm::SpawnWasm};
 
 /// A message that will be sent from the scheduler to a worker using
 /// `postMessage()`.
@@ -13,7 +9,6 @@ use crate::tasks::{
 pub(crate) enum PostMessagePayload {
     Async(AsyncJob),
     Blocking(BlockingJob),
-    Notification(Notification),
 }
 
 impl PostMessagePayload {
@@ -30,9 +25,7 @@ mod tests {
     };
 
     use futures::channel::oneshot;
-    use wasm_bindgen::JsCast;
     use wasm_bindgen_test::wasm_bindgen_test;
-    use wasmer::js::AsJs;
     use wasmer_wasix::{PluggableRuntime, WasiEnvBuilder, runtime::task_manager::TaskWasm};
 
     use crate::tasks::{SchedulerMessage, ThreadPool};
@@ -97,44 +90,16 @@ mod tests {
         let engine = wasmer::Engine::default();
         let module = wasmer::Module::new(&engine, TEST_WASM).unwrap();
         let (sender, receiver) = oneshot::channel();
-        let msg = PostMessagePayload::Blocking(BlockingJob::SpawnWithModule {
-            module: JsValue::from(module).dyn_into().unwrap(),
-            task: Box::new(|module| {
-                sender.send(module.exports().count()).unwrap();
-            }),
-        });
-
+        let msg = PostMessagePayload::Blocking(BlockingJob::Thunk(Box::new(move || {
+            sender.send(module.exports().count()).unwrap();
+        })));
         let js = msg.into_js().unwrap();
         let round_tripped = unsafe { PostMessagePayload::try_from_js(js).unwrap() };
-
-        let (module, task) = match round_tripped {
-            PostMessagePayload::Blocking(BlockingJob::SpawnWithModule { module, task }) => {
-                (module, task)
-            }
-            _ => unreachable!(),
-        };
-        task(module.into());
-        assert_eq!(receiver.await.unwrap(), 2);
-    }
-
-    #[wasm_bindgen_test]
-    async fn round_trip_cache_module() {
-        let engine = wasmer::Engine::default();
-        let module = wasmer::Module::new(&engine, TEST_WASM).unwrap();
-        let msg = PostMessagePayload::Notification(Notification::CacheModule {
-            hash: ModuleHash::new(TEST_WASM),
-            module: module.into(),
-        });
-
-        let js = msg.into_js().unwrap();
-        let round_tripped = unsafe { PostMessagePayload::try_from_js(js).unwrap() };
-
         match round_tripped {
-            PostMessagePayload::Notification(Notification::CacheModule { hash, module: _ }) => {
-                assert_eq!(hash, ModuleHash::new(TEST_WASM));
-            }
+            PostMessagePayload::Blocking(BlockingJob::Thunk(task)) => task(),
             _ => unreachable!(),
         }
+        assert_eq!(receiver.await.unwrap(), 2);
     }
 
     #[wasm_bindgen_test]
@@ -158,43 +123,22 @@ mod tests {
             module,
             false,
             false,
-        ))
-        .unwrap();
+        ));
         let msg = match msg {
-            SchedulerMessage::SpawnWithModuleAndMemory {
-                module,
-                memory,
-                spawn_wasm,
-            } => PostMessagePayload::Blocking(BlockingJob::SpawnWithModuleAndMemory {
-                module: module.into(),
-                memory: memory.map(|memory| {
-                    memory
-                        .as_jsvalue(&wasmer::Store::default())
-                        .dyn_into()
-                        .unwrap()
-                }),
-                spawn_wasm,
-            }),
+            SchedulerMessage::SpawnWasm(task) => {
+                PostMessagePayload::Blocking(BlockingJob::SpawnWasm(task))
+            }
             _ => unreachable!(),
         };
 
         let js = msg.into_js().unwrap();
         let round_tripped = unsafe { PostMessagePayload::try_from_js(js).unwrap() };
 
-        let (module, memory, spawn_wasm) = match round_tripped {
-            PostMessagePayload::Blocking(BlockingJob::SpawnWithModuleAndMemory {
-                module,
-                memory,
-                spawn_wasm,
-            }) => (module, memory, spawn_wasm),
+        let task = match round_tripped {
+            PostMessagePayload::Blocking(BlockingJob::SpawnWasm(task)) => task,
             _ => unreachable!(),
         };
-        spawn_wasm
-            .begin()
-            .await
-            .execute(module, memory.into())
-            .await
-            .unwrap();
+        task.begin().await.execute().await.unwrap();
         assert!(flag.load(Ordering::SeqCst));
     }
 }
@@ -203,18 +147,7 @@ mod tests {
 #[derivative(Debug)]
 pub(crate) enum BlockingJob {
     Thunk(#[derivative(Debug(format_with = "crate::worker_utils::hidden"))] BlockingTask),
-    SpawnWithModule {
-        module: WebAssembly::Module,
-        #[derivative(Debug(format_with = "crate::worker_utils::hidden"))]
-        task: BlockingModuleTask,
-    },
-    SpawnWithModuleAndMemory {
-        module: WebAssembly::Module,
-        /// An instance of the WebAssembly linear memory that has already been
-        /// created.
-        memory: Option<WebAssembly::Memory>,
-        spawn_wasm: SpawnWasm,
-    },
+    SpawnWasm(SpawnWasm),
 }
 
 #[derive(Derivative)]
@@ -223,25 +156,11 @@ pub(crate) enum AsyncJob {
     Thunk(#[derivative(Debug(format_with = "crate::worker_utils::hidden"))] AsyncTask),
 }
 
-#[derive(Derivative)]
-#[derivative(Debug)]
-pub(crate) enum Notification {
-    CacheModule {
-        hash: ModuleHash,
-        module: WebAssembly::Module,
-    },
-}
-
 mod consts {
     pub(crate) const TYPE_SPAWN_ASYNC: &str = "spawn-async";
     pub(crate) const TYPE_SPAWN_BLOCKING: &str = "spawn-blocking";
-    pub(crate) const TYPE_CACHE_MODULE: &str = "cache-module";
-    pub(crate) const TYPE_SPAWN_WITH_MODULE: &str = "spawn-with-module";
-    pub(crate) const TYPE_SPAWN_WITH_MODULE_AND_MEMORY: &str = "spawn-with-module-and-memory";
+    pub(crate) const TYPE_SPAWN_WASM: &str = "spawn-wasm";
     pub(crate) const PTR: &str = "ptr";
-    pub(crate) const MODULE: &str = "module";
-    pub(crate) const MEMORY: &str = "memory";
-    pub(crate) const MODULE_HASH: &str = "module-hash";
 }
 
 impl PostMessagePayload {
@@ -257,25 +176,9 @@ impl PostMessagePayload {
                     .boxed(consts::PTR, task)
                     .finish()
             }
-            PostMessagePayload::Blocking(BlockingJob::SpawnWithModule { module, task }) => {
-                Serializer::new(consts::TYPE_SPAWN_WITH_MODULE)
+            PostMessagePayload::Blocking(BlockingJob::SpawnWasm(task)) => {
+                Serializer::new(consts::TYPE_SPAWN_WASM)
                     .boxed(consts::PTR, task)
-                    .set(consts::MODULE, module)
-                    .finish()
-            }
-            PostMessagePayload::Blocking(BlockingJob::SpawnWithModuleAndMemory {
-                module,
-                memory,
-                spawn_wasm,
-            }) => Serializer::new(consts::TYPE_SPAWN_WITH_MODULE_AND_MEMORY)
-                .boxed(consts::PTR, spawn_wasm)
-                .set(consts::MODULE, module)
-                .set(consts::MEMORY, memory)
-                .finish(),
-            PostMessagePayload::Notification(Notification::CacheModule { hash, module }) => {
-                Serializer::new(consts::TYPE_CACHE_MODULE)
-                    .set(consts::MODULE_HASH, hash.to_string())
-                    .set(consts::MODULE, module)
                     .finish()
             }
         }
@@ -288,7 +191,7 @@ impl PostMessagePayload {
     /// This can only be called if the original [`JsValue`] was created using
     /// [`PostMessagePayload::into_js()`].
     pub(crate) unsafe fn try_from_js(value: JsValue) -> Result<Self, crate::worker_utils::Error> {
-        let de = crate::tasks::interop::Deserializer::new(value);
+        let de = unsafe { crate::tasks::interop::Deserializer::new(value)? };
 
         // Safety: Keep this in sync with PostMessagePayload::to_js()
         match de.ty()?.as_str() {
@@ -300,37 +203,9 @@ impl PostMessagePayload {
                 let task = unsafe { de.boxed(consts::PTR)? };
                 Ok(PostMessagePayload::Blocking(BlockingJob::Thunk(task)))
             }
-            consts::TYPE_CACHE_MODULE => {
-                let module = de.js(consts::MODULE)?;
-                let hash = de.string(consts::MODULE_HASH)?;
-                let hash = crate::worker_utils::module_hash_from_hex(&hash)?;
-
-                Ok(PostMessagePayload::Notification(
-                    Notification::CacheModule { hash, module },
-                ))
-            }
-            consts::TYPE_SPAWN_WITH_MODULE => {
-                let task = unsafe { de.boxed(consts::PTR)? };
-                let module = de.js(consts::MODULE)?;
-
-                Ok(PostMessagePayload::Blocking(BlockingJob::SpawnWithModule {
-                    module,
-                    task,
-                }))
-            }
-            consts::TYPE_SPAWN_WITH_MODULE_AND_MEMORY => {
-                let module = de.js(consts::MODULE)?;
-                let memory = de.js(consts::MEMORY).ok();
-                let spawn_wasm = unsafe { de.boxed(consts::PTR)? };
-
-                Ok(PostMessagePayload::Blocking(
-                    BlockingJob::SpawnWithModuleAndMemory {
-                        module,
-                        memory,
-                        spawn_wasm,
-                    },
-                ))
-            }
+            consts::TYPE_SPAWN_WASM => Ok(PostMessagePayload::Blocking(BlockingJob::SpawnWasm(
+                unsafe { de.boxed(consts::PTR)? },
+            ))),
             other => Err(anyhow::anyhow!("Unknown message type: {other}").into()),
         }
     }

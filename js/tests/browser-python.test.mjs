@@ -14,7 +14,7 @@ const PACKAGE_LOAD_TIMEOUT_MS = 90_000;
 const MAX_ATTEMPTS = 2;
 
 test(
-  "runs Python through the browser SDK with files and live streams",
+  "runs Python browser workers with threads, late modules, files and streams",
   { timeout: MAX_ATTEMPTS * ATTEMPT_TIMEOUT_MS + 30_000 },
   async (context) => {
     const failures = [];
@@ -24,6 +24,8 @@ test(
         assert.deepEqual(result, {
           crossOriginIsolated: true,
           output: "python:hello browser\n",
+          threaded: "thread:ok\nchild-thread:ok\nrich:ok\n",
+          lateModule: "late-dlopen:ok\n",
           written: "HELLO BROWSER",
           lines: ["STREAMED THROUGH BROWSER"],
           streamedReason: "exited",
@@ -128,6 +130,70 @@ async function runBrowserAttempt(signal, attempt) {
                 .command("python", ["/workspace/main.py"])
                 .run(),
             );
+            const threaded = await stage(
+              "python-threading",
+              () =>
+                sandbox
+                  .command("python", [
+                    "-u",
+                    "-c",
+                    [
+                      "import threading",
+                      "import zlib, _hashlib",
+                      "result = []",
+                      "thread = threading.Thread(target=lambda: result.append((zlib.decompress(zlib.compress(b'ok')).decode(), _hashlib.openssl_sha256(b'abc').hexdigest())))",
+                      "thread.start()",
+                      "thread.join()",
+                      "assert result == [('ok', 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')], result",
+                      "print(f'thread:{result[0][0]}', flush=True)",
+                      "import subprocess, sys",
+                      "subprocess.run([sys.executable, '-c', \"import threading; result=[]; t=threading.Thread(target=lambda: result.append('ok')); t.start(); t.join(); assert result == ['ok']; print('child-thread:ok')\"], check=True)",
+                      "import io",
+                      "from pip._vendor.rich.console import Console",
+                      "from pip._vendor.rich.progress import Progress",
+                      "progress = Progress(console=Console(file=io.StringIO()))",
+                      "progress.start()",
+                      "progress.stop()",
+                      "print('rich:ok', flush=True)",
+                    ].join("; "),
+                  ])
+                  .run(),
+              15_000,
+            );
+            const lateModule = await stage("python-late-dlopen", () =>
+              sandbox
+                .command("python", [
+                  "-u",
+                  "-c",
+                  [
+                    "import threading, sys",
+                    "ready = threading.Event()",
+                    "go = threading.Event()",
+                    "result = []",
+                    "def child():",
+                    "    ready.set()",
+                    "    assert go.wait(15)",
+                    "    import zlib, _hashlib, _bz2, _lzma",
+                    "    result.append(zlib.decompress(zlib.compress(b'late')))",
+                    "    result.append(_hashlib.openssl_sha256(b'abc').hexdigest())",
+                    "    result.append(_bz2.BZ2Compressor().compress(b'hello'))",
+                    "    result.append(_lzma.LZMACompressor().compress(b'hello') is not None)",
+                    "t = threading.Thread(target=child)",
+                    "t.start()",
+                    "assert ready.wait(15)",
+                    "assert 'zlib' not in sys.modules",
+                    "import zlib, _hashlib, _bz2, _lzma",
+                    "go.set()",
+                    "t.join(15)",
+                    "assert not t.is_alive()",
+                    "assert result[0] == b'late', result",
+                    "assert result[1] == 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', result",
+                    "assert result[3] is True, result",
+                    "print('late-dlopen:ok', flush=True)",
+                  ].join("\n"),
+                ])
+                .run(),
+            );
             const written = await stage("file-read", () =>
               sandbox.fs.readText("output.txt"),
             );
@@ -186,6 +252,8 @@ async function runBrowserAttempt(signal, attempt) {
             return {
               crossOriginIsolated: globalThis.crossOriginIsolated,
               output: output.text(),
+              threaded: threaded.text(),
+              lateModule: lateModule.text(),
               written,
               lines,
               streamedReason: streamed.reason,

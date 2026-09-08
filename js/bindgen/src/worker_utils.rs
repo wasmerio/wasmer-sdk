@@ -210,16 +210,3 @@ pub(crate) fn current_module() -> js_sys::WebAssembly::Module {
     //   1: `wasm_bindgen::module` is currently only supported with `--target no-modules` and `--tar get web`
     wasm_bindgen::module().dyn_into().unwrap()
 }
-
-pub(crate) fn module_hash_from_hex(value: &str) -> Result<wasmer_types::ModuleHash, Error> {
-    if value.len() != 64 {
-        return Err(anyhow::anyhow!("invalid module hash length").into());
-    }
-    let mut bytes = [0_u8; 32];
-    for (index, byte) in bytes.iter_mut().enumerate() {
-        let offset = index * 2;
-        *byte = u8::from_str_radix(&value[offset..offset + 2], 16)
-            .map_err(|error| anyhow::anyhow!("invalid module hash: {error}"))?;
-    }
-    Ok(wasmer_types::ModuleHash::from_bytes(bytes))
-}

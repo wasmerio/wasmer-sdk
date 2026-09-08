@@ -21,7 +21,7 @@ pub(crate) enum WorkerMessage {
 
 impl WorkerMessage {
     pub(crate) unsafe fn try_from_js(value: JsValue) -> Result<Self, Error> {
-        let de = Deserializer::new(value);
+        let de = unsafe { Deserializer::new(value)? };
 
         match de.ty()?.as_str() {
             consts::TYPE_BUSY => Ok(WorkerMessage::MarkBusy),

@@ -1,14 +1,11 @@
 use std::marker::PhantomData;
 
 use derivative::Derivative;
-use js_sys::WebAssembly;
 use wasm_bindgen::JsValue;
-use wasmer::js::AsJs;
-use wasmer_types::ModuleHash;
 
 use crate::{
     tasks::{
-        AsyncTask, BlockingModuleTask, BlockingTask,
+        AsyncTask, BlockingTask,
         interop::{Deserializer, Serializer},
         task_wasm::SpawnWasm,
     },
@@ -67,30 +64,12 @@ pub(crate) enum SchedulerMessage {
         source_worker_id: u32,
         message: Box<SchedulerMessage>,
     },
-    /// Tell all workers to cache a WebAssembly module.
-    #[allow(dead_code)]
-    CacheModule {
-        hash: ModuleHash,
-        module: wasmer::Module,
-    },
-    /// Run a task in the background, explicitly transferring the
-    /// [`js_sys::WebAssembly::Module`] to the worker.
-    SpawnWithModule {
-        module: wasmer::Module,
-        #[derivative(Debug(format_with = "crate::worker_utils::hidden"))]
-        task: BlockingModuleTask,
-    },
-    /// Run a task in the background, explicitly transferring the
-    /// [`js_sys::WebAssembly::Module`] to the worker.
-    SpawnWithModuleAndMemory {
-        module: wasmer::Module,
-        memory: Option<wasmer::Memory>,
-        spawn_wasm: SpawnWasm,
-    },
+    /// Run a WASIX task with backend-managed shared handles.
+    SpawnWasm(SpawnWasm),
     #[doc(hidden)]
     #[allow(dead_code)]
     Markers {
-        /// [`wasmer::Module`] and friends are `!Send` in practice.
+        /// Keep worker-local C API messages from crossing Rust threads.
         not_send: PhantomData<*const ()>,
         /// Mark this variant as unreachable.
         uninhabited: std::convert::Infallible,
@@ -99,7 +78,7 @@ pub(crate) enum SchedulerMessage {
 
 impl SchedulerMessage {
     pub(crate) unsafe fn try_from_js(value: JsValue) -> Result<Self, Error> {
-        let de = Deserializer::new(value);
+        let de = unsafe { Deserializer::new(value)? };
 
         match de.ty()?.as_str() {
             consts::TYPE_CLOSE => Ok(SchedulerMessage::Close {
@@ -127,44 +106,9 @@ impl SchedulerMessage {
                 let tid = de.serde(consts::TID)?;
                 Ok(SchedulerMessage::TerminateWasmThread { pid, tid })
             }
-            consts::TYPE_CACHE_MODULE => {
-                let hash = de.string(consts::MODULE_HASH)?;
-                let hash = crate::worker_utils::module_hash_from_hex(&hash)?;
-                let module: WebAssembly::Module = de.js(consts::MODULE)?;
-                Ok(SchedulerMessage::CacheModule {
-                    hash,
-                    module: module.into(),
-                })
-            }
-            consts::TYPE_SPAWN_WITH_MODULE => {
-                let module: WebAssembly::Module = de.js(consts::MODULE)?;
-                let task = unsafe { de.boxed(consts::PTR)? };
-                Ok(SchedulerMessage::SpawnWithModule {
-                    module: module.into(),
-                    task,
-                })
-            }
-            consts::TYPE_SPAWN_WITH_MODULE_AND_MEMORY => {
-                let spawn_wasm: SpawnWasm = unsafe { de.boxed(consts::PTR)? };
-                let module: WebAssembly::Module = de.js(consts::MODULE)?;
-                let module_bytes = spawn_wasm.module_bytes();
-                let module = wasmer::Module::from((module, module_bytes));
-
-                let memory = match spawn_wasm.shared_memory_type() {
-                    Some(ty) => {
-                        let memory: JsValue = de.js(consts::MEMORY)?;
-                        let mut store = wasmer::Store::default();
-                        wasmer::Memory::from_jsvalue(&mut store, &ty, &memory).ok()
-                    }
-                    None => None,
-                };
-
-                Ok(SchedulerMessage::SpawnWithModuleAndMemory {
-                    module,
-                    memory,
-                    spawn_wasm,
-                })
-            }
+            consts::TYPE_SPAWN_WASM => Ok(SchedulerMessage::SpawnWasm(unsafe {
+                de.boxed(consts::PTR)?
+            })),
             other => {
                 tracing::warn!(r#type = other, "Unknown message type");
                 Err(anyhow::anyhow!("Unknown message type, \"{other}\"").into())
@@ -209,34 +153,9 @@ impl SchedulerMessage {
             SchedulerMessage::FromWorker { .. } => {
                 Err(anyhow::anyhow!("worker-origin messages are local to the scheduler").into())
             }
-            SchedulerMessage::CacheModule { hash, module } => {
-                Serializer::new(consts::TYPE_CACHE_MODULE)
-                    .set(consts::MODULE_HASH, hash.to_string())
-                    .set(consts::MODULE, module)
-                    .finish()
-            }
-            SchedulerMessage::SpawnWithModule { module, task } => {
-                Serializer::new(consts::TYPE_SPAWN_WITH_MODULE)
-                    .set(consts::MODULE, module)
-                    .boxed(consts::PTR, task)
-                    .finish()
-            }
-            SchedulerMessage::SpawnWithModuleAndMemory {
-                module,
-                memory,
-                spawn_wasm,
-            } => {
-                let mut ser = Serializer::new(consts::TYPE_SPAWN_WITH_MODULE_AND_MEMORY)
-                    .set(consts::MODULE, module)
-                    .boxed(consts::PTR, spawn_wasm);
-
-                if let Some(memory) = memory {
-                    let store = wasmer::Store::default();
-                    ser = ser.set(consts::MEMORY, memory.as_jsvalue(&store));
-                }
-
-                ser.finish()
-            }
+            SchedulerMessage::SpawnWasm(task) => Serializer::new(consts::TYPE_SPAWN_WASM)
+                .boxed(consts::PTR, task)
+                .finish(),
             SchedulerMessage::Markers { uninhabited, .. } => match uninhabited {},
         }
     }
@@ -249,12 +168,7 @@ mod consts {
     pub const TYPE_WORKER_IDLE: &str = "worker-idle";
     pub const TYPE_WORKER_BUSY: &str = "worker-busy";
     pub const TYPE_TERMINATE_WASM_THREAD: &str = "terminate-wasm-thread";
-    pub const TYPE_CACHE_MODULE: &str = "cache-module";
-    pub const TYPE_SPAWN_WITH_MODULE: &str = "spawn-with-module";
-    pub const TYPE_SPAWN_WITH_MODULE_AND_MEMORY: &str = "spawn-with-module-and-memory";
-    pub const MEMORY: &str = "memory";
-    pub const MODULE_HASH: &str = "module-hash";
-    pub const MODULE: &str = "module";
+    pub const TYPE_SPAWN_WASM: &str = "spawn-wasm";
     pub const PTR: &str = "ptr";
     pub const WORKER_ID: &str = "worker-id";
     pub const PID: &str = "pid";
