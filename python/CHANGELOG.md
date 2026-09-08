@@ -1,10 +1,11 @@
 # Changelog
 
-## [0.2.0](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.2...wasmer-sdk-v0.2.0) (2026-09-08)
+## [0.2.0](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.2...wasmer-sdk-python-v0.2.0) (2026-09-08)
 
 This is the next PyPI feature release after 0.1.2. The earlier GitHub-only
 0.2.0 and 0.3.0 releases did not reach PyPI; their tags remain unchanged.
-Python releases now use the `wasmer-sdk-v<version>` tag prefix.
+Python releases now use the `wasmer-sdk-python-v<version>` tag prefix;
+the older `wasmer-sdk-v<version>` tags belong to historical JavaScript releases.
 
 ### Features
 
