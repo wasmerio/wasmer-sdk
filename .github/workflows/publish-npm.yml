@@ -113,7 +113,7 @@ jobs:
           path: npm-package
 
       - name: Publish with npm trusted publishing
-        run: npm publish ./npm-package/*.tgz --access public
+        run: npm publish ./npm-package/*.tgz --access public --loglevel=verbose
 
   sync-wasmer-sh:
     name: Update wasmer-sh to the published SDK
