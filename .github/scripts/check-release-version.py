@@ -15,7 +15,7 @@ def main() -> None:
     parser.add_argument(
         "tag",
         nargs="?",
-        help="optional release tag in the form v<version>",
+        help="optional release tag: wasmer-sdk-v<version> (or legacy v<version>)",
     )
     parser.add_argument(
         "--check-registries",
@@ -33,9 +33,12 @@ def main() -> None:
         )
     version = section_value(manifest, "project", "version")
     if args.tag is not None:
-        if not args.tag.startswith("v"):
-            raise SystemExit("release tags must have the form v<version>")
-        if args.tag[1:] != version:
+        tag = args.tag.removeprefix("wasmer-sdk-")
+        if not tag.startswith("v"):
+            raise SystemExit(
+                "release tags must have the form wasmer-sdk-v<version> or v<version>"
+            )
+        if tag[1:] != version:
             raise SystemExit(
                 f"tag {args.tag!r} does not match package version {version!r}"
             )

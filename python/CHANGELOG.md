@@ -1,6 +1,20 @@
 # Changelog
 
-## [0.3.0](https://github.com/wasmerio/wasmer-sdk/compare/v0.2.0...v0.3.0) (2026-09-03)
+## [0.2.0](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.2...wasmer-sdk-v0.2.0) (2026-09-08)
+
+This is the next PyPI feature release after 0.1.2. The earlier GitHub-only
+0.2.0 and 0.3.0 releases did not reach PyPI; their tags remain unchanged.
+Python releases now use the `wasmer-sdk-v<version>` tag prefix.
+
+### Features
+
+* **python:** support Edge.js with V8, including the features from the previously unpublished releases ([4dfd435](https://github.com/wasmerio/wasmer-sdk/commit/4dfd435d3504b6ccd1d501e1867a2dfd6ec66a6c)).
+
+### Bug Fixes
+
+* **python:** use custom V8 build 11.9.9, fixing the Linux ARM64 `__isoc23_strtoll` import failure and including the shared-library TLS and atomic-linking fixes ([#485](https://github.com/wasmerio/wasmer-sdk/pull/485)).
+
+## GitHub-only attempt: [0.3.0](https://github.com/wasmerio/wasmer-sdk/compare/v0.2.0...v0.3.0) (2026-09-03; not published to PyPI)
 
 
 ### Features
@@ -23,7 +37,7 @@
 * **python:** explain exact package version pins ([59109dc](https://github.com/wasmerio/wasmer-sdk/commit/59109dc74871f4e6fa4df46f452aab0fd436cfa9))
 * **python:** simplify multi-runtime example ([7dd44a4](https://github.com/wasmerio/wasmer-sdk/commit/7dd44a462d1061b1c9925f40bc9da6c302ce8873))
 
-## [0.2.0](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.4...v0.2.0) (2026-09-02)
+## GitHub-only attempt: [0.2.0](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.4...v0.2.0) (2026-09-02; not published to PyPI)
 
 
 ### Features
@@ -46,7 +60,7 @@
 * **python:** explain exact package version pins ([59109dc](https://github.com/wasmerio/wasmer-sdk/commit/59109dc74871f4e6fa4df46f452aab0fd436cfa9))
 * **python:** simplify multi-runtime example ([7dd44a4](https://github.com/wasmerio/wasmer-sdk/commit/7dd44a462d1061b1c9925f40bc9da6c302ce8873))
 
-## [0.1.4](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.3...v0.1.4) (2026-09-02)
+## GitHub-only attempt: [0.1.4](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.3...v0.1.4) (2026-09-02; not published to PyPI)
 
 
 ### Features
@@ -69,7 +83,7 @@
 * **python:** explain exact package version pins ([59109dc](https://github.com/wasmerio/wasmer-sdk/commit/59109dc74871f4e6fa4df46f452aab0fd436cfa9))
 * **python:** simplify multi-runtime example ([7dd44a4](https://github.com/wasmerio/wasmer-sdk/commit/7dd44a462d1061b1c9925f40bc9da6c302ce8873))
 
-## [0.1.3](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.2...v0.1.3) (2026-09-01)
+## GitHub-only attempt: [0.1.3](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.2...v0.1.3) (2026-09-01; not published to PyPI)
 
 
 ### Documentation

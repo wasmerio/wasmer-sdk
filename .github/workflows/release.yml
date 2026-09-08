@@ -86,7 +86,7 @@ jobs:
             exit 0
           fi
 
-          tag="v${REQUESTED_VERSION}"
+          tag="wasmer-sdk-v${REQUESTED_VERSION}"
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
             --jq '.tag_name' >/dev/null
           release_sha="$(
@@ -139,7 +139,7 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
-        run: python .github/scripts/check-release-version.py "v${RELEASE_VERSION}"
+        run: python .github/scripts/check-release-version.py "wasmer-sdk-v${RELEASE_VERSION}"
 
       - name: Build native module and wheel
         shell: bash
@@ -200,7 +200,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run publish-npm.yml --ref main
+        run: gh workflow run publish-npm.yml --repo "${GITHUB_REPOSITORY}" --ref main
 
   publish-python:
     name: Publish wasmer-sdk
