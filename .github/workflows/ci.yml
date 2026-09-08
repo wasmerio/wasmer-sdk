@@ -85,6 +85,10 @@ jobs:
         working-directory: js
         run: npm test
 
+      - name: Test task serialization
+        working-directory: js
+        run: npm run test:bindgen
+
       - name: Test Edge.js
         working-directory: js
         run: |

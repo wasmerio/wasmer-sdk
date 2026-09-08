@@ -48,6 +48,7 @@
     "check:size": "node scripts/check-wasm-size.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build:ts && node scripts/test-node.mjs",
+    "test:bindgen": "node scripts/test-bindgen.mjs",
     "test:runtime": "npm run build:ts && node scripts/test-node.mjs runtime",
     "test:workers": "npm run build:ts && node --test --test-timeout=30000 tests/multi-worker.test.mjs",
     "test:browser": "npm run build:ts && node --test --test-timeout=300000 tests/browser-python.test.mjs && node --test --test-timeout=240000 tests/browser-service-worker.test.mjs",

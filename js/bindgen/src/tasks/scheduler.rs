@@ -8,13 +8,11 @@ use anyhow::{Context, Error};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::{self};
 use tracing::Instrument;
-use wasm_bindgen::{JsCast, JsValue};
-use wasmer::js::AsJs;
-use wasmer_types::ModuleHash;
+use wasm_bindgen::JsValue;
 
 use crate::tasks::{
-    AsyncJob, BlockingJob, CapiTransfer, Notification, PostMessagePayload, SchedulerMessage,
-    WorkerHandle, WorkerMessage,
+    AsyncJob, BlockingJob, CapiTransfer, PostMessagePayload, SchedulerMessage, WorkerHandle,
+    WorkerMessage,
 };
 
 /// A handle for interacting with the threadpool's scheduler.
@@ -169,7 +167,6 @@ struct SchedulerState {
     busy: VecDeque<WorkerHandle>,
     /// A channel that can be used to send messages to this scheduler.
     mailbox: Scheduler,
-    cached_modules: BTreeMap<ModuleHash, js_sys::WebAssembly::Module>,
     /// Nested WebAssembly objects waiting to travel with the next blocking
     /// task emitted by their source worker.
     pending_capi_transfers: BTreeMap<u32, BTreeMap<(u32, i32), JsValue>>,
@@ -201,7 +198,6 @@ impl SchedulerState {
             idle: VecDeque::new(),
             busy: VecDeque::new(),
             mailbox,
-            cached_modules: BTreeMap::new(),
             pending_capi_transfers: BTreeMap::new(),
             capi_values: BTreeMap::new(),
             pending_capi_requests: BTreeMap::new(),
@@ -239,46 +235,11 @@ impl SchedulerState {
                 source_worker_id,
                 message,
             } => self.execute_from(Some(source_worker_id), *message),
-            SchedulerMessage::CacheModule { hash, module } => {
-                let module: js_sys::WebAssembly::Module = JsValue::from(module).unchecked_into();
-                self.cached_modules.insert(hash, module.clone());
-
-                for worker in self.idle.iter().chain(self.busy.iter()) {
-                    worker.send(PostMessagePayload::Notification(
-                        Notification::CacheModule {
-                            hash,
-                            module: module.clone(),
-                        },
-                    ))?;
-                }
-
-                Ok(())
-            }
-            SchedulerMessage::SpawnWithModule { module, task } => self.post_message_from(
-                source_worker_id,
-                PostMessagePayload::Blocking(BlockingJob::SpawnWithModule {
-                    module: JsValue::from(module).unchecked_into(),
-                    task,
-                }),
-            ),
-            SchedulerMessage::SpawnWithModuleAndMemory {
-                module,
-                memory,
-                spawn_wasm,
-            } => {
-                let temp_store = wasmer::Store::default();
-                let memory: Option<js_sys::WebAssembly::Memory> =
-                    memory.map(|m| m.as_jsvalue(&temp_store).dyn_into().unwrap());
-                let module = JsValue::from(module).dyn_into().unwrap();
-                let task_key = spawn_wasm.task_key();
-
+            SchedulerMessage::SpawnWasm(task) => {
+                let task_key = task.task_key();
                 self.post_wasm_message_from(
                     source_worker_id,
-                    PostMessagePayload::Blocking(BlockingJob::SpawnWithModuleAndMemory {
-                        module,
-                        memory,
-                        spawn_wasm,
-                    }),
+                    PostMessagePayload::Blocking(BlockingJob::SpawnWasm(task)),
                     task_key,
                 )
             }
@@ -393,11 +354,7 @@ impl SchedulerState {
         let reason = match &msg {
             PostMessagePayload::Async(_) => "async",
             PostMessagePayload::Blocking(BlockingJob::Thunk(_)) => "blocking-thunk",
-            PostMessagePayload::Blocking(BlockingJob::SpawnWithModule { .. }) => "blocking-module",
-            PostMessagePayload::Blocking(BlockingJob::SpawnWithModuleAndMemory { .. }) => {
-                "blocking-wasm"
-            }
-            PostMessagePayload::Notification(_) => "notification",
+            PostMessagePayload::Blocking(BlockingJob::SpawnWasm(_)) => "blocking-wasm",
         };
         let worker = self.next_available_worker(reason)?;
         let transfers = self.take_capi_transfers(source_worker_id, would_block, Some(worker.id()));
@@ -474,15 +431,6 @@ impl SchedulerState {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
 
         let handle = WorkerHandle::spawn(id, self.mailbox.clone())?;
-
-        // Prime the worker's module cache
-        for (&hash, module) in &self.cached_modules {
-            let msg = PostMessagePayload::Notification(Notification::CacheModule {
-                hash,
-                module: module.clone(),
-            });
-            handle.send(msg)?;
-        }
 
         Ok(handle)
     }

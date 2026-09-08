@@ -43,7 +43,7 @@ mod worker_message;
 
 pub use self::thread_pool_worker::ThreadPoolWorker;
 pub(crate) use self::{
-    post_message_payload::{AsyncJob, BlockingJob, Notification, PostMessagePayload},
+    post_message_payload::{AsyncJob, BlockingJob, PostMessagePayload},
     scheduler::Scheduler,
     scheduler_message::SchedulerMessage,
     thread_pool::ThreadPool,
@@ -55,4 +55,3 @@ use std::{future::Future, pin::Pin};
 
 type AsyncTask = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + 'static>> + Send + 'static>;
 type BlockingTask = Box<dyn FnOnce() + Send + 'static>;
-type BlockingModuleTask = Box<dyn FnOnce(wasmer::Module) + Send + 'static>;

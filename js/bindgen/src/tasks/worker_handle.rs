@@ -66,11 +66,6 @@ impl WorkerHandle {
         self.id
     }
 
-    /// Send a message to the worker.
-    pub(crate) fn send(&self, msg: PostMessagePayload) -> Result<(), Error> {
-        self.send_with_capi_transfers(msg, Vec::new())
-    }
-
     /// Deliver a host value to a worker that requested it while already
     /// executing a WASIX thread. Worker.postMessage() performs the structured
     /// clone; the SDK does not serialize the JavaScript value itself.

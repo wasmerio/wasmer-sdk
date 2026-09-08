@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
-use crate::tasks::{AsyncJob, BlockingJob, Notification, PostMessagePayload, WorkerMessage};
+use crate::tasks::{AsyncJob, BlockingJob, PostMessagePayload, WorkerMessage};
 
 /// The Rust state for a worker in the threadpool.
 #[wasm_bindgen(skip_typescript)]
@@ -55,11 +55,6 @@ impl ThreadPoolWorker {
         match msg {
             PostMessagePayload::Async(async_job) => self.execute_async(async_job).await,
             PostMessagePayload::Blocking(blocking) => self.execute_blocking(blocking).await,
-            PostMessagePayload::Notification(Notification::CacheModule { hash, module: _ }) => {
-                tracing::warn!(%hash, "TODO Caching module");
-
-                Ok(())
-            }
         }
     }
 
@@ -79,18 +74,10 @@ impl ThreadPoolWorker {
                 let _guard = self.busy();
                 thunk();
             }
-            BlockingJob::SpawnWithModule { module, task } => {
+            BlockingJob::SpawnWasm(task) => {
+                let task = task.begin().await;
                 let _guard = self.busy();
-                task(module.into());
-            }
-            BlockingJob::SpawnWithModuleAndMemory {
-                module,
-                memory,
-                spawn_wasm,
-            } => {
-                let task = spawn_wasm.begin().await;
-                let _guard = self.busy();
-                task.execute(module, memory.into()).await?;
+                task.execute().await?;
             }
         }
 
