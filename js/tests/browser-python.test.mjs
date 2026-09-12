@@ -107,7 +107,7 @@ async function runBrowserAttempt(signal, attempt) {
             // the browser regression.
             const python = await stage(
               "package-load",
-              () => client.packages.load("python/python@=3.13.18"),
+              () => client.packages.load("python/python@=3.13.20"),
               packageLoadTimeoutMs,
             );
             sandbox = await stage("sandbox-create", () =>
@@ -238,7 +238,7 @@ async function runBrowserAttempt(signal, attempt) {
                 const cachedClient = new Wasmer();
                 try {
                   const cached = await cachedClient.packages.load(
-                    "python/python@=3.13.18",
+                    "python/python@=3.13.20",
                   );
                   return cached.id === python.id;
                 } finally {

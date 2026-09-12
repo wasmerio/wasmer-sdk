@@ -50,7 +50,7 @@ const EDGEJS_PACKAGE = "wasmer/edgejs@0.2.0";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "curl/curl",
-  "python/python@=3.13.18",
+  "python/python@=3.13.20",
   EDGEJS_PACKAGE,
   "php/php-32",
 ];

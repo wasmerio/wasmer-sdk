@@ -9,6 +9,9 @@ const crossOriginIsolationHeaders = {
   "Cross-Origin-Embedder-Policy": "require-corp",
 };
 const root = fileURLToPath(new URL(".", import.meta.url));
+const sdkDist = dirname(
+  fileURLToPath(import.meta.resolve("@wasmer/sdk/browser")),
+);
 const edgejsWebcUrl = process.env.VITE_EDGEJS_WEBC_URL;
 const edgejsWebcPath = edgejsWebcUrl?.startsWith("/@fs/")
   ? decodeURIComponent(edgejsWebcUrl.slice("/@fs".length))
@@ -18,9 +21,6 @@ const edgejsWebcPath = edgejsWebcUrl?.startsWith("/@fs/")
 // entrypoints as assets without traversing their ESM imports, so emit their
 // package-owned companion modules at the relative paths the entrypoints use.
 function sdkRuntimeAssets(): Plugin {
-  const sdkDist = dirname(
-    fileURLToPath(import.meta.resolve("@wasmer/sdk/browser")),
-  );
   const dependencies = ["node-network-rpc.js", "capi-worker-bridge.js"];
 
   return {
@@ -68,6 +68,8 @@ export default defineConfig({
       allow: [
         fileURLToPath(new URL(".", import.meta.url)),
         fileURLToPath(new URL("../fixtures", import.meta.url)),
+        // A linked SDK keeps its worker and wasm assets outside this app.
+        resolve(sdkDist, ".."),
         ...(edgejsWebcPath ? [dirname(edgejsWebcPath)] : []),
       ],
     },
