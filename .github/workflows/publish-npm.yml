@@ -128,6 +128,7 @@ jobs:
     permissions:
       actions: write
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -166,9 +167,11 @@ jobs:
           npm --prefix wasmer-sh/service-worker ci --ignore-scripts
           npm --prefix wasmer-sh run build
 
-      - name: Commit the synchronized dependency
+      - name: Open a pull request for the synchronized dependency
         id: commit
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git add \
             wasmer-sh/README.md \
@@ -194,7 +197,25 @@ jobs:
             "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m \
             "Use @wasmer/sdk ${sdk_version} in wasmer-sh"
-          git push origin HEAD:main
+          branch="codex/sync-wasmer-sh-sdk-${sdk_version}"
+          if git ls-remote --exit-code --heads origin "${branch}" >/dev/null; then
+            git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+          fi
+          git push --force-with-lease origin "HEAD:refs/heads/${branch}"
+          body_file="${RUNNER_TEMP}/sdk-sync-pr.md"
+          cat > "${body_file}" <<EOF
+          Update the browser shell and HTTP host to the published @wasmer/sdk ${sdk_version}.
+
+          Validation: registry metadata and tarball availability, synchronized lockfiles,
+          and a shell build from clean npm installs all passed.
+          EOF
+          existing_pr="$(gh pr list --head "${branch}" --base main --json number --jq '.[0].number // empty')"
+          if [ -z "${existing_pr}" ]; then
+            gh pr create --base main --head "${branch}" \
+              --title "Use @wasmer/sdk ${sdk_version} in wasmer-sh" \
+              --body-file "${body_file}"
+          fi
+          echo "branch=${branch}" >> "${GITHUB_OUTPUT}"
           echo "changed=true" >> "${GITHUB_OUTPUT}"
 
       - name: Run CI for the synchronized commit
@@ -202,4 +223,4 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run ci.yml --ref main
+        run: gh workflow run ci.yml --ref "${{ steps.commit.outputs.branch }}"
