@@ -19,7 +19,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "monaco-editor": "0.56.0",
-    "@wasmer/sdk": "0.11.0"
+    "@wasmer/sdk": "0.13.0"
   },
   "devDependencies": {
     "@mercuryworkshop/wisp-js": "0.4.1",
