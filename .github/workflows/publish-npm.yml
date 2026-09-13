@@ -124,7 +124,7 @@ jobs:
       always() &&
       (needs.publish.result == 'success' || inputs.sync_only == true)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       actions: write
       contents: write
@@ -143,6 +143,9 @@ jobs:
 
       - name: Update wasmer-sh package manifests
         run: node .github/scripts/sync-wasmer-sh-sdk-version.mjs
+
+      - name: Wait for npm registry processing
+        run: node .github/scripts/wait-for-npm-release.mjs
 
       - name: Regenerate dependency lockfiles
         run: |
