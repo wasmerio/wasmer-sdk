@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.12.0...wasmer-sdk-js-v0.13.0) (2026-09-13)
+
+
+### Features
+
+* Got Python fully working on the browser ([42ca9a8](https://github.com/wasmerio/wasmer-sdk/commit/42ca9a80b0ec9d9d0118cbdd59c75cc4c13532c4))
+
 ## [0.12.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.11.0...wasmer-sdk-js-v0.12.0) (2026-09-08)
 
 
