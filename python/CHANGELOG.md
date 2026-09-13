@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-python-v0.2.0...wasmer-sdk-python-v0.2.1) (2026-09-13)
+
+
+### Documentation
+
+* **python:** use verified production Python package ([50491ec](https://github.com/wasmerio/wasmer-sdk/commit/50491ecc10840bb932f2163406983330f5145ce4))
+
 ## [0.2.0](https://github.com/wasmerio/wasmer-sdk/compare/v0.1.2...wasmer-sdk-python-v0.2.0) (2026-09-08)
 
 This is the next PyPI feature release after 0.1.2. The earlier GitHub-only
