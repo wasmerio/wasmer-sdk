@@ -9,6 +9,8 @@ These examples run entirely inside your browser with Wasmer and WASIX.
 | Express             | `cd node-express && pnpm i && pnpm run start` |
 | Next.js             | `cd next && pnpm i && pnpm dev`               |
 | Vinext              | `cd vinext && pnpm i && pnpm dev`             |
+| FastAPI             | `cd python-fastapi && pip install -r requirements.txt && python server.py` |
+| Django              | `cd python-django && pip install -r requirements.txt && python server.py` |
 | Python HTTP server  | `cd python && python server.py`               |
 | PHP site            | `cd php && php -S 0.0.0.0:8000 -t .`          |
 

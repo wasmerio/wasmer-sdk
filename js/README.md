@@ -251,8 +251,11 @@ const server = await sandbox.ports.expose(8080, {
 ```
 
 See `wasmer-sh/service-worker` in this repository for a complete static Vite
-build. The relay transfers the route directly to its local service worker; the
-Wasmer runtime remains in the application page.
+build. The host document retains the sandbox connection and gives the service
+worker a replaceable bridge. If the browser stops an idle service worker, the
+next request reconnects through the live host document automatically. The
+Wasmer runtime remains in the application page; closing that page ends the
+server. Update both the service-worker and host-document bundles together.
 
 `network: { mode: "wisp", ... }` includes this HTTP-listener support, so one
 sandbox can serve a browser preview while making outbound connections.

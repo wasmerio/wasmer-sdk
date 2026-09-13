@@ -2,6 +2,13 @@ import { spawn } from "node:child_process";
 
 const tests = [
   {
+    name: "service-worker-lifecycle",
+    file: "tests/service-worker-lifecycle.test.mjs",
+    testTimeoutMs: 15_000,
+    processTimeoutMs: 30_000,
+    attempts: 1,
+  },
+  {
     name: "validation",
     file: "tests/validation.test.mjs",
     testTimeoutMs: undefined,

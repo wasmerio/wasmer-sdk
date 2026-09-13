@@ -1,4 +1,5 @@
 import "./styles.css";
+import pythonSitecustomize from "../python/sitecustomize.py?raw";
 
 import {
   type BrowserServer,
@@ -32,6 +33,12 @@ import nodeServer from "../workspace/node/server.js?raw";
 import phpIndex from "../workspace/php/index.php?raw";
 import phpInfo from "../workspace/php/phpinfo.php?raw";
 import phpReadme from "../workspace/php/README.md?raw";
+import fastapiReadme from "../workspace/python-fastapi/README.md?raw";
+import fastapiServer from "../workspace/python-fastapi/server.py?raw";
+import fastapiRequirements from "../workspace/python-fastapi/requirements.txt?raw";
+import djangoReadme from "../workspace/python-django/README.md?raw";
+import djangoServer from "../workspace/python-django/server.py?raw";
+import djangoRequirements from "../workspace/python-django/requirements.txt?raw";
 import pythonReadme from "../workspace/python/README.md?raw";
 import pythonServer from "../workspace/python/server.py?raw";
 import vinextApp from "../workspace/vinext/pages/_app.js?raw";
@@ -414,6 +421,11 @@ async function start(): Promise<void> {
       },
       env: {
         HOME: "/workspace",
+        PIP_EXTRA_INDEX_URL: "https://python-registry.wasmer.app/simple/",
+        PIP_PLATFORM: "wasix_wasm32",
+        PIP_ONLY_BINARY: ":all:",
+        PIP_TARGET: "/workspace/wasix-packages",
+        PYTHONPATH: "/workspace/.python:/workspace/wasix-packages",
         PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:.",
         USER: "wasmer",
         LOGNAME: "wasmer",
@@ -1176,6 +1188,7 @@ function workspaceFiles(): Record<string, string> {
 PS1='\\[\\033[1;38;5;141m\\]➜\\[\\033[0m\\] \\[\\033[1;38;5;117m\\]\\W\\[\\033[0m\\] \\[\\033[1m\\]$\\[\\033[0m\\] '
 HISTFILE=/workspace/.bash_history
 `,
+    ".python/sitecustomize.py": pythonSitecustomize,
     "README.md": workspaceReadme,
     "node/README.md": nodeReadme,
     "node/server.js": nodeServer,
@@ -1199,6 +1212,12 @@ HISTFILE=/workspace/.bash_history
     "vinext/pages/api/hello.js": vinextApiHello,
     "vinext/styles.css": vinextStyles,
     "vinext/vite.config.js": vinextViteConfig,
+    "python-fastapi/README.md": fastapiReadme,
+    "python-fastapi/server.py": fastapiServer,
+    "python-fastapi/requirements.txt": fastapiRequirements,
+    "python-django/README.md": djangoReadme,
+    "python-django/server.py": djangoServer,
+    "python-django/requirements.txt": djangoRequirements,
     "python/README.md": pythonReadme,
     "python/server.py": pythonServer,
     "php/README.md": phpReadme,

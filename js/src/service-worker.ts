@@ -39,7 +39,7 @@ interface PendingResponse {
   timer: ReturnType<typeof setTimeout>;
 }
 
-interface ServiceWorkerMessageEvent extends Event {
+interface ServiceWorkerMessageEvent extends ServiceWorkerLifecycleEvent {
   data: unknown;
   ports: readonly MessagePort[];
 }
@@ -56,7 +56,13 @@ interface ServiceWorkerLifecycleEvent extends Event {
 interface WorkerScope {
   addEventListener(type: string, listener: (event: never) => void): void;
   skipWaiting(): Promise<void>;
-  clients: { claim(): Promise<void> };
+  clients: {
+    claim(): Promise<void>;
+    matchAll(options: { type: "window"; includeUncontrolled: boolean }): Promise<{
+      url: string;
+      postMessage(message: unknown, transfer: Transferable[]): void;
+    }[]>;
+  };
 }
 
 const scope = globalThis as unknown as WorkerScope;
@@ -79,41 +85,77 @@ scope.addEventListener("message", ((event: ServiceWorkerMessageEvent) => {
     if (!port || typeof message.serverId !== "string") {
       return;
     }
-    if (activeRoute) {
-      port.postMessage({
-        type: "wasmer-sdk:http-error",
-        serverId: message.serverId,
-        error: "this service worker already exposes another guest server",
-      });
-      port.close();
-      return;
-    }
-    const route: Route = {
-      id: message.serverId,
-      port,
-      pending: new Map(),
-    };
-    activeRoute = route;
-    port.addEventListener("message", (responseEvent: MessageEvent<unknown>) => {
-      receiveResponse(route, responseEvent.data);
-    });
-    port.start();
-    port.postMessage({
-      type: "wasmer-sdk:http-ready",
-      serverId: route.id,
-    });
+    event.waitUntil((async () => {
+      await recoverRoute();
+      if (activeRoute) {
+        port.postMessage({
+          type: "wasmer-sdk:http-error",
+          serverId: message.serverId,
+          error: "this service worker already exposes another guest server",
+        });
+        port.close();
+        return;
+      }
+      registerRoute(message.serverId!, port);
+    })());
   }
 }) as (event: never) => void);
+
+function registerRoute(id: string, port: MessagePort): Route {
+  const route: Route = { id, port, pending: new Map() };
+  activeRoute = route;
+  port.addEventListener("message", (event: MessageEvent<unknown>) => {
+    receiveResponse(route, event.data);
+  });
+  port.start();
+  port.postMessage({ type: "wasmer-sdk:http-ready", serverId: id });
+  return route;
+}
+
+let recovery: Promise<Route | undefined> | undefined;
+
+function recoverRoute(): Promise<Route | undefined> {
+  if (activeRoute) return Promise.resolve(activeRoute);
+  if (!recovery) {
+    recovery = discoverRoute().finally(() => { recovery = undefined; });
+  }
+  return recovery;
+}
+
+async function discoverRoute(): Promise<Route | undefined> {
+  const clients = await scope.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const hosts = clients.filter((client) => new URL(client.url).pathname === "/.wasmer/host.html");
+  await Promise.all(hosts.map((client) => new Promise<void>((resolve) => {
+    const channel = new MessageChannel();
+    const finish = () => {
+      clearTimeout(timer);
+      channel.port1.close();
+      resolve();
+    };
+    const timer = setTimeout(finish, 5_000);
+    channel.port1.onmessage = (event) => {
+      const port = event.ports[0];
+      if (port && typeof event.data?.serverId === "string") {
+        if (!activeRoute) registerRoute(event.data.serverId, port);
+        else port.close();
+      }
+      finish();
+    };
+    client.postMessage({ type: "wasmer-sdk:http-recover" }, [channel.port2]);
+  })));
+  return activeRoute;
+}
 
 scope.addEventListener("fetch", ((event: ServiceWorkerFetchEvent) => {
   const url = new URL(event.request.url);
   // Keep the cross-origin control document reachable while the guest owns `/`.
   if (url.pathname.startsWith("/.wasmer/")) return;
-  const route = activeRoute;
-  if (!route) return;
-  event.respondWith(
-    forwardRequest(route, event.request, url.pathname + url.search),
-  );
+  event.respondWith((async () => {
+    const route = activeRoute ?? await recoverRoute();
+    // With no live owner, preserve the host's normal inactive-server response.
+    if (!route) return fetch(event.request);
+    return forwardRequest(route, event.request, url.pathname + url.search);
+  })());
 }) as (event: never) => void);
 
 async function forwardRequest(

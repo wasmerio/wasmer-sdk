@@ -48,10 +48,68 @@ async function connect(connection: MessagePort): Promise<void> {
   }
 }
 
+interface HostRoute {
+  id: string;
+  owner: MessagePort;
+  bridge?: MessagePort;
+  accepted: boolean;
+}
+
+const routes = new Set<HostRoute>();
+
+// This document outlives idle service-worker instances. Keep the sandbox port
+// here; transfer only replaceable bridge ports into the service worker.
+navigator.serviceWorker.addEventListener("message", (event) => {
+  if (event.data?.type !== "wasmer-sdk:http-recover") return;
+  const response = event.ports[0];
+  if (!response) return;
+  const route = [...routes].find((candidate) => candidate.accepted);
+  if (route) {
+    response.postMessage({ serverId: route.id }, [attachBridge(route)]);
+  } else {
+    response.postMessage({ serverId: null });
+  }
+  response.close();
+});
+
+function attachBridge(route: HostRoute): MessagePort {
+  route.bridge?.close();
+  const channel = new MessageChannel();
+  route.bridge = channel.port1;
+  channel.port1.addEventListener("message", (event) => {
+    if (event.data?.type === "wasmer-sdk:http-ready") route.accepted = true;
+    if (event.data?.type === "wasmer-sdk:http-error") {
+      routes.delete(route);
+      channel.port1.close();
+    }
+    route.owner.postMessage(event.data);
+  });
+  channel.port1.start();
+  return channel.port2;
+}
+
 async function forwardToWorker(event: MessageEvent<unknown>): Promise<void> {
   try {
     const worker = await ensureActiveWorker(false);
-    worker.postMessage(event.data, [...event.ports]);
+    const message = event.data as { type?: string; serverId?: string } | null;
+    const owner = event.ports[0];
+    if (message?.type !== "wasmer-sdk:http-register" ||
+        typeof message.serverId !== "string" || !owner) {
+      worker.postMessage(event.data, [...event.ports]);
+      return;
+    }
+    const route: HostRoute = { id: message.serverId, owner, accepted: false };
+    routes.add(route);
+    owner.addEventListener("message", (response) => {
+      route.bridge?.postMessage(response.data);
+      if (response.data?.type === "wasmer-sdk:http-close") {
+        routes.delete(route);
+        route.bridge?.close();
+        owner.close();
+      }
+    });
+    owner.start();
+    worker.postMessage(event.data, [attachBridge(route)]);
   } catch (error) {
     // Route registration messages carry a response port. Returning the error on
     // it lets ports.expose() fail immediately instead of waiting for a timeout.
