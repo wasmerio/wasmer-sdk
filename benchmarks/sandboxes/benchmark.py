@@ -25,7 +25,7 @@ from typing import Any, Awaitable, Callable, Iterable
 
 RUNTIMES = {
     "python": {
-        "wasmer_package": "python/python@=3.13.18",
+        "wasmer_package": "python/python@=3.13.20",
         "wasmer_command": ("python", ["-c", "pass"]),
         "docker_image": "python:3.13.5-slim",
         "docker_command": ["python", "-c", "pass"],

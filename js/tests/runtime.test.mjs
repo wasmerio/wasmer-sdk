@@ -14,7 +14,7 @@ const runtimeCache =
 test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   const client = new Wasmer({ cache: { directory: runtimeCache } });
   const sandbox = await client.sandboxes.create({
-    packages: ["python/python@=3.13.18"],
+    packages: ["python/python@=3.13.20"],
   });
   const output = await sandbox
     .command("python", ["-c", "print(sum(range(10)))"])
@@ -34,7 +34,7 @@ test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   assert.equal(registryEntry.package_name, "python/python");
   assert.ok(Number.isSafeInteger(registryEntry.unix_timestamp));
   const distribution = registryEntry.response.data.getPackage.versions.find(
-    ({ version }) => version === "3.13.18",
+    ({ version }) => version === "3.13.20",
   );
   const packageHash = distribution?.v3?.piritaSha256Hash;
   assert.match(packageHash, /^[a-f0-9]{64}$/);
@@ -52,8 +52,8 @@ test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   };
   const cachedClient = new Wasmer({ cache: { directory: runtimeCache } });
   try {
-    const cached = await cachedClient.packages.load("python/python@=3.13.18");
-    assert.equal(cached.id, "python/python@3.13.18");
+    const cached = await cachedClient.packages.load("python/python@=3.13.20");
+    assert.equal(cached.id, "python/python@3.13.20");
   } finally {
     await cachedClient.close();
     globalThis.fetch = originalFetch;
@@ -71,7 +71,7 @@ test("reuses commands and preserves filesystem and stream semantics", async () =
   let sandbox;
   try {
     sandbox = await client.sandboxes.create({
-      packages: ["python/python@=3.13.18"],
+      packages: ["python/python@=3.13.20"],
     });
 
     const command = sandbox.command("python", ["--version"]);
