@@ -96,19 +96,15 @@ PIP_EXTRA_INDEX_URL=https://python-registry.wasmer.app/simple/
 PIP_PLATFORM=wasix_wasm32
 PIP_ONLY_BINARY=:all:
 PIP_TARGET=/workspace/wasix-packages
-PYTHONPATH=/workspace/.python:/workspace/wasix-packages
+PYTHONPATH=/workspace/wasix-packages
 ```
 
 Run `pip install fastapi` without extra flags. Pip searches PyPI and the Wasmer
 index for compatible wheels and installs into the writable workspace directory.
 Source-only packages are excluded. The indexes have no priority ordering.
 
-The shell supplies a `sitecustomize.py` startup hook that recognizes WASIX
-`wasi-threads` extension filenames matching the running interpreter's ABI.
-Extensions load directly without copying or renaming files, including extensions
-inside packages. Standard extension suffixes remain supported. This bridges the
-suffix mismatch in Python `3.13.20`; it does not make incompatible binaries
-compatible. Python's `-S` or `-I` options bypass this workspace startup hook.
+The registry wheels use Python's standard extension naming, so Python `3.13.20`
+loads them directly without a workspace startup hook or filename aliases.
 
 ## Run locally
 

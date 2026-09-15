@@ -1,5 +1,4 @@
 import "./styles.css";
-import pythonSitecustomize from "../python/sitecustomize.py?raw";
 
 import {
   type BrowserServer,
@@ -425,7 +424,7 @@ async function start(): Promise<void> {
         PIP_PLATFORM: "wasix_wasm32",
         PIP_ONLY_BINARY: ":all:",
         PIP_TARGET: "/workspace/wasix-packages",
-        PYTHONPATH: "/workspace/.python:/workspace/wasix-packages",
+        PYTHONPATH: "/workspace/wasix-packages",
         PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:.",
         USER: "wasmer",
         LOGNAME: "wasmer",
@@ -1188,7 +1187,6 @@ function workspaceFiles(): Record<string, string> {
 PS1='\\[\\033[1;38;5;141m\\]➜\\[\\033[0m\\] \\[\\033[1;38;5;117m\\]\\W\\[\\033[0m\\] \\[\\033[1m\\]$\\[\\033[0m\\] '
 HISTFILE=/workspace/.bash_history
 `,
-    ".python/sitecustomize.py": pythonSitecustomize,
     "README.md": workspaceReadme,
     "node/README.md": nodeReadme,
     "node/server.js": nodeServer,

@@ -645,7 +645,9 @@ try {
       { timeout: 120_000 },
     );
     await page.evaluate(async () => {
-      await globalThis.__wasmerShell.send("print('PYTHON_' + 'STDIN_OK')\r");
+      await globalThis.__wasmerShell.send(
+        "import os; assert os.environ['PYTHONPATH'] == '/workspace/wasix-packages'; assert not os.path.exists('/workspace/.python/sitecustomize.py'); print('PYTHON_' + 'STDIN_OK')\r",
+      );
     });
     await page.waitForFunction(
       () => globalThis.__wasmerShell.snapshot().includes("PYTHON_STDIN_OK"),
