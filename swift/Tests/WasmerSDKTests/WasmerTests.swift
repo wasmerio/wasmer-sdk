@@ -2,6 +2,46 @@ import Foundation
 import Testing
 import WasmerSDK
 
+@Test func createPackagesFromDefinitions() async throws {
+  let cache = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: cache) }
+  let client = try Wasmer(cacheDirectory: cache)
+  let fixture = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+  var bytes = try Data(contentsOf: fixture.appendingPathComponent("package-files.wasm"))
+  let definition = PackageDefinition(
+    modules: ["app": bytes], commands: ["hello": .init(module: "app")],
+    files: ["/data/input.txt": Data("original".utf8)])
+  let package = try await client.packages.create(definition)
+  bytes.resetBytes(in: 0..<bytes.count)
+  #expect(package.commands == ["hello"])
+  #expect(package.entrypoint == "hello")
+  #expect(try await client.packages.create(definition).id == package.id)
+  let a = try await client.sandboxes.create(packages: [.package(package)])
+  let b = try await client.sandboxes.create()
+  do {
+    try await b.installPackage(.package(package))
+    for sandbox in [a, b, a] {
+      #expect(try await sandbox.command(package).run().text() == "original")
+    }
+    var invalid = definition
+    invalid.commands["hello"] = .init(module: "missing")
+    do {
+      _ = try await client.packages.create(invalid)
+      Issue.record("Missing modules should be rejected")
+    } catch WasmerError.Failure(let code, _) {
+      #expect(code == "INVALID_ARGUMENT")
+    }
+  } catch {
+    try? await a.close()
+    try? await b.close()
+    try? await client.close()
+    throw error
+  }
+  try await a.close()
+  try await b.close()
+  try await client.close()
+}
+
 private func withSandbox(
   _ body: (Wasmer, Sandbox, Package) async throws -> Void
 ) async throws {
@@ -38,6 +78,30 @@ private func withSandbox(
     }
     let output = try await commands[0].run()
     #expect(output.ok)
+  }
+}
+
+@Test func loadRawWasmWithAutomaticEntrypoint() async throws {
+  try await withSandbox { client, sandbox, _ in
+    let fixture = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+    let bytes = try Data(contentsOf: fixture.appendingPathComponent("hello.wasm"))
+    let package = try await client.packages.load(bytes)
+    #expect(package.commands == ["main"])
+    #expect(package.entrypoint == "main")
+    let explicit = try await client.packages.create(PackageDefinition(
+      modules: ["main": bytes], commands: ["main": .init(module: "main")]))
+    #expect(package.id == explicit.id)
+    #expect(try await client.packages.load(.bytes(bytes)).id == package.id)
+    let installed = try await sandbox.installPackage(.bytes(bytes))
+    #expect(installed.id == package.id)
+    #expect(try await sandbox.command(package).run().text() == "Hello from Swift!\n")
+    #expect(try await sandbox.command("main").run().text() == "Hello from Swift!\n")
+    do {
+      _ = try await client.packages.load(Data([0, 97, 115, 109, 1, 0, 0, 0]))
+      Issue.record("A raw command must export _start")
+    } catch WasmerError.Failure(let code, _) {
+      #expect(code == "PACKAGE_LOAD_FAILED")
+    }
   }
 }
 

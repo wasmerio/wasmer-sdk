@@ -208,7 +208,7 @@ jobs:
           PYTHONPATH: python/src
         run: |
           python -m unittest discover -s python/tests -p test_runtime.py -v
-          python -m unittest discover -s python/tests -p test_boltffi_native.py -v
+          python -m unittest discover -s python/tests -p test_package_definition.py -v
           python -m unittest discover -s python/tests -p test_postgres_psql.py -v
 
       - name: Test Edge.js

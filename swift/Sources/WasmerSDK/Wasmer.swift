@@ -11,10 +11,14 @@ public typealias DirectoryEntry = WasmerSDKCore.DirectoryEntry
 public typealias InputMode = WasmerSDKCore.InputMode
 public typealias OutputMode = WasmerSDKCore.OutputMode
 
-/// A registry specifier, local package directory, WEBC file, or reusable package.
+/// A registry specifier, local package directory, WEBC file, in-memory bytes,
+/// or reusable package.
 public enum PackageSource: Sendable, ExpressibleByStringLiteral {
   case registry(String)
   case file(URL)
+  /// WEBC or raw WASI/WASIX bytes. Raw modules get the entrypoint `main`.
+  case bytes(Data)
+  /// Legacy spelling for in-memory package bytes.
   case webc(Data)
   case package(Package)
 
@@ -45,8 +49,52 @@ public struct Wasmer: Sendable {
   public func close() async throws { try await core.close() }
 }
 
+/// A WASI/WASIX command referencing a module in the same definition.
+public struct PackageCommandDefinition: Sendable {
+  public var module: String
+  public init(module: String) { self.module = module }
+}
+
+/// In-memory module bytes and bundled files at absolute guest paths.
+/// The sole command is the default entrypoint. Use the sandbox workspace for
+/// persistent writes; bundled package contents are captured during creation.
+public struct PackageDefinition: Sendable {
+  public var modules: [String: Data]
+  public var commands: [String: PackageCommandDefinition]
+  public var entrypoint: String?
+  public var files: [String: Data]
+
+  public init(
+    modules: [String: Data], commands: [String: PackageCommandDefinition],
+    entrypoint: String? = nil, files: [String: Data] = [:]
+  ) {
+    self.modules = modules
+    self.commands = commands
+    self.entrypoint = entrypoint
+    self.files = files
+  }
+}
+
 public struct Packages: Sendable {
   fileprivate let core: WasmerCore
+
+  /// Create a reusable package without serializing a WEBC archive.
+  public func create(_ definition: PackageDefinition) async throws -> Package {
+    let value = WasmerSDKCore.PackageDefinition(
+      modules: definition.modules,
+      commands: definition.commands.mapValues {
+        WasmerSDKCore.PackageCommandDefinition(module: $0.module)
+      },
+      entrypoint: definition.entrypoint, files: definition.files
+    )
+    return Package(core: try await core.createPackage(definition: value))
+  }
+
+  /// Load WEBC or raw WASI/WASIX bytes. A raw module must export `_start` and
+  /// gets a single command and entrypoint named `main` automatically.
+  public func load(_ bytes: Data) async throws -> Package {
+    return Package(core: try await core.loadPackageBytes(bytes: bytes))
+  }
 
   public func load(_ source: PackageSource) async throws -> Package {
     switch source {
@@ -54,8 +102,8 @@ public struct Packages: Sendable {
       return Package(core: try await core.loadPackageRegistry(specifier: specifier))
     case .file(let url):
       return Package(core: try await core.loadPackagePath(path: localPath(url)))
-    case .webc(let data):
-      return Package(core: try await core.loadPackageBytes(bytes: data))
+    case .bytes(let data), .webc(let data):
+      return try await load(data)
     case .package(let package):
       return package
     }
@@ -133,7 +181,7 @@ public struct Sandbox: Sendable {
       package = try await core.installPackageRegistry(specifier: specifier)
     case .file(let url):
       package = try await core.installPackagePath(path: localPath(url))
-    case .webc(let data):
+    case .bytes(let data), .webc(let data):
       package = try await core.installPackageBytes(bytes: data)
     case .package(let value):
       package = try await core.installPackageRef(package: value.core)

@@ -29,7 +29,7 @@ use wasmer_wasix::{
     },
 };
 
-use crate::{Error, Package, PackageSource, Result, SandboxBuilder};
+use crate::{Error, Package, PackageDefinition, PackageSource, Result, SandboxBuilder};
 
 const REGISTRY_QUERY_CACHE_TTL: Duration = Duration::from_mins(10);
 
@@ -380,7 +380,10 @@ impl Wasmer {
                             .to_owned(),
                 });
             }
-            PackageSource::Webc(bytes) => {
+            PackageSource::Bytes(bytes) if bytes.starts_with(b"\0asm") => {
+                return PackageDefinition::from_wasm(bytes).into_package().await;
+            }
+            PackageSource::Bytes(bytes) | PackageSource::Webc(bytes) => {
                 let container = wasmer_package::utils::from_bytes(bytes).map_err(|error| {
                     Error::PackageLoad {
                         package_source: label.clone(),
@@ -401,7 +404,24 @@ impl Wasmer {
 }
 
 impl Packages {
+    /// Create a reusable executable package from module bytes and bundled files.
+    ///
+    /// Does not serialize a WEBC archive, compile modules, or access the registry.
+    /// Modules are compiled when a command is executed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the client is closed, the definition is invalid,
+    /// a module cannot be decoded, or the bundled filesystem cannot be created.
+    pub async fn create(&self, definition: PackageDefinition) -> Result<Package> {
+        self.client.ensure_open()?;
+        definition.into_package().await
+    }
+
     /// Resolve a registry, local, or in-memory package.
+    ///
+    /// In-memory bytes can contain WEBC or a raw WASI/WASIX module. Raw modules
+    /// must export `_start` and get a single command and entrypoint named `main`.
     ///
     /// # Errors
     ///

@@ -18,6 +18,41 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 The repository root pins the required Wasmer revisions in its
 `[patch.crates-io]` section.
 
+## Load or create a package from Wasm
+
+For a single raw WASI/WASIX module, use
+`wasmer.packages().load(wasm_bytes).await?`, where `wasm_bytes` is a `Vec<u8>`
+or `bytes::Bytes`. Byte sources detect Wasm or WEBC by their contents. A raw
+module must export `_start` and gets one command and entrypoint named `main`
+automatically. WEBC commands and entrypoints are preserved. Use
+`sandbox.command(package)` to run the package entrypoint.
+
+`Packages::create` builds a package directly from owned module bytes and files,
+without a WEBC archive or registry request:
+
+```rust
+use wasmer_sdk::{PackageCommandDefinition, PackageDefinition};
+
+let package = wasmer.packages().create(PackageDefinition {
+    modules: [("app".into(), wasm_bytes.into())].into(),
+    commands: [("hello".into(), PackageCommandDefinition {
+        module: "app".into(),
+    })].into(),
+    files: [("/data/config.json".into(), b"{}".to_vec().into())].into(),
+    ..PackageDefinition::default()
+}).await?;
+let sandbox = wasmer.sandboxes().create().package(package.clone()).await?;
+let output = sandbox.command(package).arg("--help").run().await?;
+sandbox.close().await?;
+```
+
+`wasm_bytes` can be a `Vec<u8>`. Command modules must export `_start` and be
+compatible with the existing WASI/WASIX runner. A sole command is the inferred
+entrypoint; for multiple commands, set `entrypoint` or select a command by name.
+Files use canonical absolute guest paths and private execution overlays. Use
+the sandbox workspace for persistent writes. Definitions with changed commands
+or files have distinct package identities even when they share module bytes.
+
 ## Run Python inside Wasmer
 
 ```rust

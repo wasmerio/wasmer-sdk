@@ -2,6 +2,13 @@ import { spawn } from "node:child_process";
 
 const tests = [
   {
+    name: "package-definition",
+    file: "tests/package-definition.test.mjs",
+    testTimeoutMs: 30_000,
+    processTimeoutMs: 60_000,
+    attempts: 1,
+  },
+  {
     name: "worker-failure",
     file: "tests/worker-failure.test.mjs",
     testTimeoutMs: 15_000,

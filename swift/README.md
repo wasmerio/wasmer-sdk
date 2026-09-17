@@ -36,6 +36,38 @@ UniFFI, or a separate binary repository. The ZIP is also available directly on
 the [Swift release](https://github.com/wasmerio/wasmer-sdk/releases/tag/wasmer-sdk-swift-v0.2.1).
 See [release automation](../docs/releases.md) for preparation and publication.
 
+## Load or create a package from Wasm
+
+Load a single raw WASI/WASIX module with
+`let package = try await wasmer.packages.load(wasmData)`.
+The `Data` can contain Wasm or WEBC, detected by its contents. A raw module must
+export `_start` and gets one command and entrypoint named `main` automatically.
+Run it with `sandbox.command(package)` or `sandbox.command("main")`. WEBC
+packages retain their declared commands and entrypoint.
+
+Use a typed definition to execute a raw WASI/WASIX module on macOS:
+
+```swift
+let definition = PackageDefinition(
+  modules: ["app": wasmData],
+  commands: ["hello": PackageCommandDefinition(module: "app")],
+  files: ["/data/config.json": Data("{}".utf8)]
+)
+let package = try await wasmer.packages.create(definition)
+let sandbox = try await wasmer.sandboxes.create(packages: [.package(package)])
+let output = try await sandbox.command(package, ["--help"]).run()
+print(try output.text())
+try await sandbox.close()
+```
+
+`wasmData` is `Data`, for example from `Data(contentsOf: fileURL)`. No WEBC
+archive is generated. Command modules must export `_start`; a sole command is
+the inferred entrypoint. For multiple commands, set `entrypoint: "hello"` or
+select a named command. Bundled files use canonical absolute guest paths and
+private execution overlays; the sandbox workspace holds persistent data. A
+created package can also be installed with `.package(package)` in an existing
+sandbox. Close the client when finished.
+
 ## Build and use locally
 
 Install Rust 1.95 or newer, Swift 6, and Xcode on macOS. Building the library
@@ -137,7 +169,9 @@ Pass `network: .host` to grant native guest networking.
 
 Load reusable packages through `wasmer.packages.load(...)`. Sources include a
 registry string, `.file(URL)` for a local package directory or WEBC file,
-`.webc(Data)`, and `.package(Package)`. A raw `.wasm` file is not a package.
+`.bytes(Data)` for WEBC or raw Wasm, and `.package(Package)`. The `.webc(Data)`
+spelling is retained for compatibility. Read a raw `.wasm` file into `Data`
+before loading it.
 `sandbox.installPackage(...)` accepts the same sources. Commands accept a name,
 a loaded `Package` (its entrypoint), or a `CommandRef` from `package.command(...)`.
 

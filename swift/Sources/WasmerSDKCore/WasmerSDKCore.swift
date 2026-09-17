@@ -1918,6 +1918,8 @@ public protocol WasmerCoreProtocol: AnyObject, Sendable {
     
     func close() async throws 
     
+    func createPackage(definition: PackageDefinition) async throws  -> PackageCore
+    
     func createSandbox(packages: [PackageCore], files: [String: Data], env: [String: String], network: NetworkMode) async throws  -> SandboxCore
     
     func loadPackageBytes(bytes: Data) async throws  -> PackageCore
@@ -2001,6 +2003,22 @@ open func close()async throws   {
             completeFunc: ffi_wasmer_sdk_uniffi_rust_future_complete_void,
             freeFunc: ffi_wasmer_sdk_uniffi_rust_future_free_void,
             liftFunc: { $0 },
+            errorHandler: FfiConverterTypeSdkError_lift
+        )
+}
+    
+open func createPackage(definition: PackageDefinition)async throws  -> PackageCore  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wasmer_sdk_uniffi_fn_method_wasmercore_create_package(
+                        self.uniffiCloneHandle(),FfiConverterTypePackageDefinition_lower(definition)
+                )
+            },
+            pollFunc: ffi_wasmer_sdk_uniffi_rust_future_poll_u64,
+            completeFunc: ffi_wasmer_sdk_uniffi_rust_future_complete_u64,
+            freeFunc: ffi_wasmer_sdk_uniffi_rust_future_free_u64,
+            liftFunc: FfiConverterTypePackageCore_lift,
             errorHandler: FfiConverterTypeSdkError_lift
         )
 }
@@ -2280,6 +2298,121 @@ public func FfiConverterTypeFileStat_lift(_ buf: RustBuffer) throws -> FileStat 
 #endif
 public func FfiConverterTypeFileStat_lower(_ value: FileStat) -> RustBuffer {
     return FfiConverterTypeFileStat.lower(value)
+}
+
+
+public struct PackageCommandDefinition: Equatable, Hashable {
+    public let module: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(module: String) {
+        self.module = module
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PackageCommandDefinition: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackageCommandDefinition: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackageCommandDefinition {
+        return
+            try PackageCommandDefinition(
+                module: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PackageCommandDefinition, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.module, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageCommandDefinition_lift(_ buf: RustBuffer) throws -> PackageCommandDefinition {
+    return try FfiConverterTypePackageCommandDefinition.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageCommandDefinition_lower(_ value: PackageCommandDefinition) -> RustBuffer {
+    return FfiConverterTypePackageCommandDefinition.lower(value)
+}
+
+
+/**
+ * An in-memory package definition shared with the SDK core.
+ */
+public struct PackageDefinition: Equatable, Hashable {
+    public let modules: [String: Data]
+    public let commands: [String: PackageCommandDefinition]
+    public let entrypoint: String?
+    public let files: [String: Data]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(modules: [String: Data], commands: [String: PackageCommandDefinition], entrypoint: String?, files: [String: Data]) {
+        self.modules = modules
+        self.commands = commands
+        self.entrypoint = entrypoint
+        self.files = files
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PackageDefinition: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackageDefinition: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackageDefinition {
+        return
+            try PackageDefinition(
+                modules: FfiConverterDictionaryStringData.read(from: &buf), 
+                commands: FfiConverterDictionaryStringTypePackageCommandDefinition.read(from: &buf), 
+                entrypoint: FfiConverterOptionString.read(from: &buf), 
+                files: FfiConverterDictionaryStringData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PackageDefinition, into buf: inout [UInt8]) {
+        FfiConverterDictionaryStringData.write(value.modules, into: &buf)
+        FfiConverterDictionaryStringTypePackageCommandDefinition.write(value.commands, into: &buf)
+        FfiConverterOptionString.write(value.entrypoint, into: &buf)
+        FfiConverterDictionaryStringData.write(value.files, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageDefinition_lift(_ buf: RustBuffer) throws -> PackageDefinition {
+    return try FfiConverterTypePackageDefinition.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageDefinition_lower(_ value: PackageDefinition) -> RustBuffer {
+    return FfiConverterTypePackageDefinition.lower(value)
 }
 
 
@@ -3102,6 +3235,32 @@ fileprivate struct FfiConverterDictionaryStringData: FfiConverterRustBuffer {
         return dict
     }
 }
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryStringTypePackageCommandDefinition: FfiConverterRustBuffer {
+    public static func write(_ value: [String: PackageCommandDefinition], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterString.write(key, into: &buf)
+            FfiConverterTypePackageCommandDefinition.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String: PackageCommandDefinition] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [String: PackageCommandDefinition]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterString.read(from: &buf)
+            let value = try FfiConverterTypePackageCommandDefinition.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
+    }
+}
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
 private let UNIFFI_RUST_FUTURE_POLL_WAKE: Int8 = 1
 
@@ -3275,6 +3434,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wasmer_sdk_uniffi_checksum_method_wasmercore_close() != 31079) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wasmer_sdk_uniffi_checksum_method_wasmercore_create_package() != 41785) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wasmer_sdk_uniffi_checksum_method_wasmercore_create_sandbox() != 28086) {

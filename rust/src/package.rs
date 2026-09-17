@@ -5,6 +5,9 @@ use wasmer_wasix::bin_factory::BinaryPackage;
 
 use crate::{Error, Result};
 
+mod definition;
+pub use definition::{PackageCommandDefinition, PackageDefinition};
+
 /// A source from which a Wasmer package can be loaded.
 #[derive(Clone, Debug)]
 pub enum PackageSource {
@@ -12,6 +15,9 @@ pub enum PackageSource {
     Registry(String),
     /// A local WEBC file or a directory containing `wasmer.toml`.
     Path(PathBuf),
+    /// In-memory WEBC or raw WASI/WASIX module bytes, detected by their contents.
+    /// A raw module becomes a package with one command and entrypoint, `main`.
+    Bytes(Bytes),
     /// An in-memory WEBC container.
     Webc(Bytes),
     /// An already resolved package.
@@ -34,10 +40,16 @@ impl PackageSource {
         Self::Webc(bytes.into())
     }
 
+    #[must_use]
+    pub fn bytes(bytes: impl Into<Bytes>) -> Self {
+        Self::Bytes(bytes.into())
+    }
+
     pub(crate) fn label(&self) -> String {
         match self {
             Self::Registry(specifier) => specifier.clone(),
             Self::Path(path) => path.display().to_string(),
+            Self::Bytes(bytes) => format!("<{} in-memory package bytes>", bytes.len()),
             Self::Webc(bytes) => format!("<{} in-memory WEBC bytes>", bytes.len()),
             Self::Package(package) => package.id(),
         }
@@ -64,13 +76,13 @@ impl From<PathBuf> for PackageSource {
 
 impl From<Bytes> for PackageSource {
     fn from(value: Bytes) -> Self {
-        Self::Webc(value)
+        Self::Bytes(value)
     }
 }
 
 impl From<Vec<u8>> for PackageSource {
     fn from(value: Vec<u8>) -> Self {
-        Self::Webc(value.into())
+        Self::Bytes(value.into())
     }
 }
 

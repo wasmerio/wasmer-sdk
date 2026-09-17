@@ -19,7 +19,10 @@ pub use client::{CacheConfig, Packages, Sandboxes, Wasmer, WasmerConfig};
 pub use command::{CapturedOutput, Command, ExitReason, ExitStatus, Output, Stdio};
 pub use error::{Error, ProcessExitError, Result};
 pub use fs::SandboxFileSystem;
-pub use package::{CommandRef, CommandSelector, Package, PackageSource};
+pub use package::{
+    CommandRef, CommandSelector, Package, PackageCommandDefinition, PackageDefinition,
+    PackageSource,
+};
 pub use process::{Process, ProcessHandle, ProcessStderr, ProcessStdin, ProcessStdout};
 pub use provider_fs::{
     Directory, DirectoryEntry, File, FileMetadata, FileOpenOptions, FileSystem,

@@ -15,7 +15,6 @@ One Rust crate implements package resolution, sandbox state, filesystems, proces
 - Rust uses the core API directly.
 - JavaScript compiles the core to WebAssembly through `wasm-bindgen`. It does not use a native Node addon.
 - Python and, eventually, Swift use a coarse UniFFI facade with a handwritten language-native API on top.
-- BoltFFI is implemented in parallel as an evaluation, not yet as the primary Python boundary.
 
 The Rust, Node.js, and Python vertical slices are working. They execute registry and local packages, support live process I/O, filesystems, package installation, termination, and host networking. End-to-end proofs run an Edge.js HTTP server and a WASIX PostgreSQL server that is reached by a normal host `psql` client.
 
@@ -149,7 +148,7 @@ The core calls Wasmer directly. There is no general host-adapter layer between t
 | Layer | Responsibility |
 | --- | --- |
 | `wasmer-sdk` | Package, sandbox, process, filesystem, network policy, cache |
-| UniFFI/BoltFFI facade | Coarse FFI-safe objects and boundary conversions |
+| UniFFI facade | Coarse FFI-safe objects and boundary conversions |
 | `wasm-bindgen` facade | WebAssembly exports, worker integration, JS network RPC |
 | Handwritten language API | Idiomatic types, naming, validation, streams, errors |
 
@@ -168,8 +167,7 @@ The repository is organized by the surface that developers build and release:
 │   ├── src/
 │   ├── examples/
 │   ├── tests/
-│   ├── uniffi/
-│   └── boltffi/
+│   └── uniffi/
 ├── js/
 │   ├── src/
 │   ├── bindgen/
@@ -200,7 +198,6 @@ Implemented and exercised:
 - JavaScript `wasm-bindgen` build with a multi-worker scheduler;
 - client-scoped Node TCP/DNS networking;
 - Python UniFFI API with the same object structure;
-- BoltFFI Python prototype;
 - Edge.js HTTP execution through Rust, Node.js, and Python; and
 - socket-enabled WASIX PostgreSQL started by the SDK and reached by host `psql`.
 
@@ -221,7 +218,7 @@ Still deliberately incomplete:
 - **Rust becomes the semantic center.** This prevents implementation drift, but core changes require careful FFI design and cross-target compilation.
 - **Targets cannot be perfectly identical.** Browsers lack ambient host paths, Node needs a network bridge, and mobile platforms impose distribution and execution constraints. The contract must expose capabilities rather than pretend all features are universal.
 - **The JavaScript artifact is operationally demanding.** Shared memory and workers require cross-origin isolation in browsers and add scheduler and RPC complexity.
-- **Generated bindings do not solve packaging.** UniFFI still needs platform native artifacts. BoltFFI currently emits CPython-version-specific wheels.
+- **Generated bindings do not solve packaging.** UniFFI still needs platform native artifacts.
 - **Explicit sandboxes add one object to simple examples.** This is modest ceremony, but it keeps policy, state, and cleanup visible and avoids a separate shortcut model.
 - **A shared cache needs strict compatibility keys and concurrency rules.** Incorrect reuse would be worse than recompilation.
 

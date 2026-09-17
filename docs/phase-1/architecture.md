@@ -974,8 +974,7 @@ Phase 3 organizes the implementation by public language surface:
 │   ├── src/
 │   ├── examples/
 │   ├── tests/
-│   ├── uniffi/                  # UniFFI façade over wasmer-sdk
-│   └── boltffi/                 # BoltFFI prototype façade
+│   └── uniffi/                  # UniFFI façade over wasmer-sdk
 ├── js/
 │   ├── package.json
 │   ├── src/                     # handwritten TypeScript API
@@ -997,7 +996,7 @@ Phase 3 organizes the implementation by public language surface:
 
 `wasmer-sdk` is the product API and calls Wasmer directly. Its `sys` and `js`
 Cargo features select the relevant upstream Wasmer backend.
-The facades in `rust/uniffi`, `rust/boltffi`, and `js/bindgen` depend on that
+The facades in `rust/uniffi` and `js/bindgen` depend on that
 crate and contain only boundary conversion, initialization, and export code.
 They do not contain their own sandbox or runtime implementations. A top-level
 `swift/` package will be added when that language surface is implemented.
