@@ -113,6 +113,40 @@ class ReleaseTests(unittest.TestCase):
         self.write('js/package.json', {'name': '@wasmer/sdk', 'version': '0.14.0'})
         release.verify(self.assets, 'swift', root=self.root)
 
+    def test_unprepared_swift_release_reports_the_preparation_step(self):
+        with self.assertRaisesRegex(ValueError, 'Wait for Prepare Swift release'):
+            release.verify_swift_inputs(self.root)
+
+    def advance_release_branch(self, path, contents):
+        other = Path(self.temp.name) / 'updated'
+        self.git('worktree', 'add', '-b', 'updated', str(other), 'HEAD')
+        (other / path).write_text(contents)
+        subprocess.run(['git', 'add', '.'], cwd=other, check=True, capture_output=True)
+        subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+                        'commit', '-qm', 'concurrent PR update'], cwd=other, check=True)
+        return self.git('rev-parse', 'updated')
+
+    def test_preparation_attaches_to_new_head_without_losing_unrelated_changes(self):
+        self.seal_swift()
+        original = release.read_json(self.assets / release.METADATA)
+        updated = self.advance_release_branch('python/pyproject.toml',
+                                             '[project]\nname="wasmer-sdk"\nversion="0.3.0"\n')
+        release.refresh_swift(self.assets, 'updated', root=self.root)
+        self.assertEqual(self.git('rev-parse', 'HEAD'), updated)
+        self.assertEqual(release.version('python', self.root), '0.3.0')
+        self.assertEqual(release.verify_swift_inputs(self.root), original)
+        self.assertEqual(set(self.git('diff', '--cached', '--name-only').splitlines()), release.GENERATED)
+        self.commit()
+        release.verify(self.assets, 'swift', root=self.root)
+
+    def test_preparation_rejects_a_new_head_with_changed_native_inputs(self):
+        self.seal_swift()
+        updated = self.advance_release_branch('rust/lib.rs', '// changed native code')
+        with self.assertRaisesRegex(ValueError, 'inputs changed'):
+            release.refresh_swift(self.assets, 'updated', root=self.root)
+        self.assertEqual(self.git('rev-parse', 'HEAD'), updated)
+        self.assertEqual((self.root / 'rust/lib.rs').read_text(), '// changed native code')
+
     def test_modified_swift_checksum_or_binding_is_rejected(self):
         self.seal_swift()
         manifest = self.root / 'Package.swift'

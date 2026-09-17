@@ -60,7 +60,8 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          tarballs=(pending/*.tgz)
+          # Without ./, npm interprets pending/<name> as a GitHub repository.
+          tarballs=(./pending/*.tgz)
           if [ "${#tarballs[@]}" -gt 0 ]; then
             npm publish "${tarballs[0]}" --access public
           fi

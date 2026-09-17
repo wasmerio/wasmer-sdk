@@ -213,6 +213,9 @@ def seal(directory: Path, component: str, *, run_id: str = "", repository: str =
 
 def verify_swift_inputs(root: Path = ROOT) -> dict:
     value = version("swift", root)
+    require((root / SWIFT_METADATA).is_file(),
+            "Swift release artifacts are not prepared yet. Wait for Prepare Swift release to finish; "
+            "it commits the binary checksum and reruns CI automatically.")
     metadata = read_json(root / SWIFT_METADATA)
     require(metadata["schema"] == 1 and metadata["version"] == value, "Stale Swift release preparation")
     require(metadata["source_sha256"] == source_digest(root),
@@ -222,6 +225,28 @@ def verify_swift_inputs(root: Path = ROOT) -> dict:
     expected = swift_manifest(value, metadata["repository"], metadata["files"][swift_archive(value)])
     require((root / "Package.swift").read_text() == expected, "SwiftPM URL/checksum differs from release artifacts")
     return metadata
+
+
+def refresh_swift(directory: Path, ref: str, root: Path = ROOT) -> None:
+    """Attach tested generated files to an updated PR with identical build inputs.
+
+    The caller fetches the release branch first, then commits and pushes normally.
+    A non-fast-forward push still rejects a concurrent update after this check.
+    """
+    verify(directory, "swift", root=root)
+    generated = sorted(GENERATED)
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
+
+    # Save only the generated files, leaving unrelated PR changes to the new ref.
+    git("add", "--", *generated)
+    prepared = git("write-tree")
+    git("restore", "--source=HEAD", "--staged", "--worktree", "--", *generated)
+    git("checkout", "--detach", ref)
+    git("restore", f"--source={prepared}", "--staged", "--worktree", "--", *generated)
+    # Verify before committing: a new SHA is fine, changed Swift inputs are not.
+    verify(directory, "swift", root=root)
 
 
 def verify(directory: Path, component: str, *, root: Path = ROOT, tag: str | None = None) -> dict:
@@ -263,10 +288,11 @@ def archive_swift(directory: Path, root: Path = ROOT) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("check", "archive-swift", "seal", "verify", "verify-swift-inputs"))
+    parser.add_argument("command", choices=("check", "archive-swift", "seal", "verify", "verify-swift-inputs", "refresh-swift"))
     parser.add_argument("--component", choices=("js", "python", "swift"), default="swift")
     parser.add_argument("--assets", type=Path)
     parser.add_argument("--tag")
+    parser.add_argument("--ref", help="Fetched release PR ref for refresh-swift")
     parser.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""))
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", "wasmerio/wasmer-sdk"))
     args = parser.parse_args()
@@ -280,6 +306,9 @@ def main() -> None:
             archive_swift(args.assets)
         elif args.command == "seal":
             seal(args.assets, args.component, run_id=args.run_id, repository=args.repository)
+        elif args.command == "refresh-swift":
+            require(args.ref is not None, "--ref is required for refresh-swift")
+            refresh_swift(args.assets, args.ref)
         else:
             verify(args.assets, args.component, tag=args.tag)
 

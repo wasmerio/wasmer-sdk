@@ -130,15 +130,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pull_request }}
-          EXPECTED_SHA: ${{ needs.select.outputs.sha }}
           RELEASE_BRANCH: ${{ needs.select.outputs.branch }}
         run: |
-          # Never overwrite a PR that changed while the native build was running.
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)" = "$EXPECTED_SHA"
+          # JS/Python release merges may advance this PR while Swift is building.
+          # Preserve that new head, but reject any change to the Swift build inputs.
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .state)" = open
+          git fetch origin "$RELEASE_BRANCH"
+          python .github/scripts/sdk_release.py refresh-swift --assets release-dist --ref FETCH_HEAD
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add Package.swift swift/release-artifacts.json swift/Sources/WasmerSDKCore/WasmerSDKCore.swift
           git commit -m 'chore: pin Swift release binary and generated bindings'
+          # No force push: another update after verification must still fail.
           git push origin "HEAD:refs/heads/${RELEASE_BRANCH}"
           # Commits made with GITHUB_TOKEN do not automatically trigger CI.
           gh workflow run ci.yml --ref "$RELEASE_BRANCH"

@@ -18,9 +18,11 @@ not part of this matrix.
 
 ## Prepare and publish
 
-1. Run **Release SDK** (`release.yml`) on `main`, leaving `tag` empty. Release
-   Please opens or updates component PRs from conventional commits. Existing
-   pending JS/Python PRs get explicit CI runs because PRs created with
+1. Merging an ordinary PR into `main` runs **Release SDK** (`release.yml`).
+   Release Please opens or updates component PRs from conventional commits.
+   You can also run it manually on `main` with `tag` empty, including after
+   direct pushes. Merging a component release PR follows the publication path
+   in step 3 instead. Pending JS/Python PRs get explicit CI runs because PRs created with
    `GITHUB_TOKEN` do not trigger another workflow automatically.
 2. If a Swift PR exists, **Prepare Swift release** builds a release XCFramework
    for both architectures. It tests that archive on Apple Silicon and Intel,
@@ -48,8 +50,9 @@ PRs, in addition to the normal CI checks.
 
 Swift staging artifacts are retained for 90 days. If the Rust/Swift/build inputs
 change or staging expires, update the PR with `main` and run **Prepare Swift
-release** again with its PR number before merging. The preparation step refuses
-to push over a PR that changed while it was building. The release step refuses
+release** again with its PR number before merging. Preparation can attach the
+tested binary after unrelated JS/Python updates to the PR, but rejects changed
+Swift build inputs and concurrent pushes. The release step refuses
 to tag stale or missing Swift binaries. Published tags are never moved to add
 checksums or generated source.
 
