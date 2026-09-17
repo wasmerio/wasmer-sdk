@@ -16,12 +16,15 @@ path = "src/bin/uniffi-bindgen.rs"
 required-features = ["bindgen-cli"]
 
 [features]
+default = ["napi-v8"]
+sys = ["wasmer-sdk/sys"]
+napi-v8 = ["sys", "wasmer-sdk/napi-v8"]
 bindgen-cli = ["uniffi/cli"]
 
 [dependencies]
 tokio = { version = "1.49", features = ["io-util", "rt-multi-thread", "sync"] }
 uniffi = "0.32.0"
-wasmer-sdk = { path = "..", version = "=0.1.0", features = ["napi-v8"] }
+wasmer-sdk = { path = "..", version = "=0.1.0", default-features = false }
 
 [dev-dependencies]
 futures = "0.3"

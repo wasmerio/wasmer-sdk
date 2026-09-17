@@ -1,2 +1,7 @@
 [bindings.python]
 cdylib_name = "wasmer_sdk_uniffi"
+
+[bindings.swift]
+module_name = "WasmerSDKCore"
+ffi_module_name = "WasmerSDKFFI"
+generate_immutable_records = true

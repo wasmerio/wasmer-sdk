@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
-const { name, version } = JSON.parse(
+const { name, version: manifestVersion } = JSON.parse(
   await readFile(new URL("../../js/package.json", import.meta.url), "utf8"),
 );
+const version = process.env.WASMER_SDK_VERSION ?? manifestVersion;
 const registryUrl = `https://registry.npmjs.org/${encodeURIComponent(name)}`;
 const deadline = Date.now() + 10 * 60_000;
 let reason = "version has not appeared in registry metadata";

@@ -22,6 +22,26 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  release-metadata:
+    name: Release metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Check component versions and release tooling
+        run: |
+          for component in js python swift; do
+            python .github/scripts/sdk_release.py check --component "$component"
+          done
+          python -m unittest discover -s .github/scripts/tests -v
+      - name: Require a prepared Swift release
+        if: >-
+          github.head_ref == 'release-please--branches--main--components--wasmer-sdk-swift' ||
+          github.ref_name == 'release-please--branches--main--components--wasmer-sdk-swift'
+        run: python .github/scripts/sdk_release.py verify-swift-inputs
+
   rust:
     name: Rust and UniFFI
     runs-on: ubuntu-24.04
@@ -46,6 +66,29 @@ jobs:
 
       - name: Verify the Rust source package
         run: cargo +1.95.0 package --locked -p wasmer-sdk --no-verify
+
+  swift:
+    name: Swift (macOS)
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: swift-1.95-sys
+          cache-compiled-artifacts: "false"
+
+      - name: Install Rust
+        run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
+
+      - name: Build the UniFFI Swift package
+        env:
+          RUSTUP_TOOLCHAIN: 1.95.0
+        run: python3 swift/scripts/build.py
+
+      - name: Test Swift against local Wasm fixtures
+        run: python3 swift/scripts/test.py
 
   javascript:
     name: JavaScript

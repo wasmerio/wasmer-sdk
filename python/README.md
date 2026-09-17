@@ -108,12 +108,23 @@ The PostgreSQL example requires `psql` on `PATH`; pass
 
 ## Build and test locally
 
-From the repository root, install Rust 1.94 and build the UniFFI module:
+From the repository root, install Rust 1.95 and build the UniFFI module:
 
 ```console
-rustup toolchain install 1.94.0 --profile minimal
+rustup toolchain install 1.95.0 --profile minimal
 python3 python/scripts/build.py --release
 ```
+
+Binary releases contain Python 3 wheels for Linux x86_64/ARM64 and macOS
+Intel/Apple Silicon. Each wheel has a `py3-none` ABI tag; a separate wheel per
+Python minor version is unnecessary. The exact wheels published to PyPI are
+also attached to `wasmer-sdk-python-v<version>` GitHub releases with checksums.
+
+The builder enables native V8/Node-API integration on Linux x86_64 and macOS
+Apple Silicon. The pinned V8 build does not support Linux ARM64 or macOS Intel;
+those wheels use the `sys` backend for Wasm/WASI/WASIX and do not support native
+N-API guests such as Edge.js. Use `--backend sys` or `--backend napi-v8` to select
+the backend explicitly when building locally.
 
 Run the Python suite against that local module:
 

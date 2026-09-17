@@ -1,0 +1,161 @@
+name: Build release artifacts
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        required: true
+        type: string
+      sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+jobs:
+  javascript:
+    if: inputs.component == 'js'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: js-nightly
+          cache-compiled-artifacts: 'false'
+      - name: Install Rust and wasm-bindgen
+        run: |
+          rustup toolchain install nightly --profile minimal --component rust-src --target wasm32-unknown-unknown --no-self-update
+          if ! wasm-bindgen --version 2>/dev/null | grep -qx 'wasm-bindgen 0.2.126'; then
+            cargo +nightly install wasm-bindgen-cli --version 0.2.126 --locked --force
+          fi
+      - run: npm ci
+        working-directory: js
+      - run: npm run build
+        working-directory: js
+      - name: Test Node and browser builds
+        working-directory: js
+        run: |
+          timeout --kill-after=30s 6m npm test
+          npm run test:bindgen
+          npx playwright install --with-deps chromium
+          npm run test:browser
+      - name: Pack the tested build
+        working-directory: js
+        run: |
+          mkdir -p ../release-build
+          npm pack --pack-destination ../release-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-build-js
+          path: release-build/*.tgz
+          if-no-files-found: error
+
+  python:
+    if: inputs.component == 'python'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            backend: napi-v8
+          - name: linux-arm64
+            os: ubuntu-22.04-arm
+            backend: sys
+          - name: macos-arm64
+            os: macos-15
+            backend: napi-v8
+          - name: macos-x86_64
+            os: macos-15-intel
+            backend: sys
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: native-1.95-release-${{ matrix.backend }}
+      - run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
+      - name: Build the native module and wheel
+        env:
+          RUSTUP_TOOLCHAIN: 1.95.0
+          SDK_BACKEND: ${{ matrix.backend }}
+        run: |
+          python -m pip install --upgrade build
+          python python/scripts/build.py --release --backend "$SDK_BACKEND"
+          python -m build --wheel --outdir wheelhouse python
+      - name: Repair Linux wheels
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install --upgrade auditwheel patchelf==0.19.1.0
+          auditwheel repair wheelhouse/*.whl --wheel-dir repaired
+          rm wheelhouse/*.whl
+          mv repaired/*.whl wheelhouse/
+      - name: Test the installed wheel
+        run: |
+          python -m pip install --force-reinstall wheelhouse/*.whl
+          python -m unittest discover -s python/tests -p test_runtime.py -v
+          python -m unittest discover -s python/tests -p test_postgres_psql.py -v
+      - name: Test native N-API
+        if: matrix.backend == 'napi-v8'
+        shell: bash
+        run: |
+          for attempt in {1..3}; do
+            if python -m unittest discover -s python/tests -p test_edgejs_http.py -v; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep 10
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-build-python-${{ matrix.name }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  bundle:
+    needs: [javascript, python]
+    if: >-
+      always() &&
+      (needs.javascript.result == 'success' || needs.python.result == 'success') &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-build-${{ inputs.component }}*
+          merge-multiple: true
+          path: release-dist
+      - name: Validate the complete artifact set and record checksums
+        env:
+          COMPONENT: ${{ inputs.component }}
+        run: python .github/scripts/sdk_release.py seal --component "$COMPONENT" --assets release-dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-release-${{ inputs.component }}
+          path: release-dist/*
+          if-no-files-found: error
+          retention-days: 90

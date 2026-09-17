@@ -1,0 +1,144 @@
+name: Prepare Swift release
+
+on:
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Open Swift Release Please PR number
+        required: true
+        type: string
+
+concurrency:
+  group: prepare-swift-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUSTUP_TOOLCHAIN: 1.95.0
+
+jobs:
+  select:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.pr.outputs.sha }}
+      branch: ${{ steps.pr.outputs.branch }}
+    steps:
+      - id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pull_request }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > pr.json
+          jq -e --arg repo "$GITHUB_REPOSITORY" '
+            .state == "open" and .base.ref == "main" and
+            .head.repo.full_name == $repo and
+            .head.ref == "release-please--branches--main--components--wasmer-sdk-swift" and
+            any(.labels[]; .name == "autorelease: pending")' pr.json
+          echo "sha=$(jq -r .head.sha pr.json)" >> "$GITHUB_OUTPUT"
+          echo "branch=$(jq -r .head.ref pr.json)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: select
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.select.outputs.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: swift-1.95-universal-release
+          cache-compiled-artifacts: 'false'
+      - name: Install Rust targets
+        run: rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin --target x86_64-apple-darwin --no-self-update
+      - name: Build both macOS architectures
+        run: python swift/scripts/build.py --release --target aarch64-apple-darwin --target x86_64-apple-darwin
+      - name: Test the release binary
+        env:
+          WASMER_SWIFT_INTEGRATION: '1'
+        run: python swift/scripts/test.py --configuration release
+      - name: Archive the binary
+        run: python .github/scripts/sdk_release.py archive-swift --assets release-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swift-build
+          path: release-build/*
+          if-no-files-found: error
+          retention-days: 90
+
+  test-intel:
+    needs: [select, build]
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.select.outputs.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: swift-build
+          path: release-build
+      - name: Install the prepared binary and bindings
+        run: |
+          mkdir -p swift/Artifacts
+          unzip -q release-build/WasmerSDKFFI-*-macos-universal.zip -d swift/Artifacts
+          cp release-build/WasmerSDKCore.swift swift/Sources/WasmerSDKCore/WasmerSDKCore.swift
+      - name: Test the release binary on Intel
+        env:
+          WASMER_SWIFT_INTEGRATION: '1'
+        run: python swift/scripts/test.py --configuration release
+
+  prepare:
+    needs: [select, build, test-intel]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.select.outputs.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: swift-build
+          path: release-dist
+      - name: Pin SwiftPM to the tested archive
+        run: python .github/scripts/sdk_release.py seal --component swift --assets release-dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-release-swift
+          path: release-dist/*
+          if-no-files-found: error
+          retention-days: 90
+      - name: Commit the bindings and checksum to the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pull_request }}
+          EXPECTED_SHA: ${{ needs.select.outputs.sha }}
+          RELEASE_BRANCH: ${{ needs.select.outputs.branch }}
+        run: |
+          # Never overwrite a PR that changed while the native build was running.
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)" = "$EXPECTED_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Package.swift swift/release-artifacts.json swift/Sources/WasmerSDKCore/WasmerSDKCore.swift
+          git commit -m 'chore: pin Swift release binary and generated bindings'
+          git push origin "HEAD:refs/heads/${RELEASE_BRANCH}"
+          # Commits made with GITHUB_TOKEN do not automatically trigger CI.
+          gh workflow run ci.yml --ref "$RELEASE_BRANCH"

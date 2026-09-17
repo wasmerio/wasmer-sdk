@@ -12,7 +12,7 @@ const manifests = [
 ];
 const sdkPackage = await readJson(sdkPackagePath);
 const sdkName = sdkPackage.name;
-const sdkVersion = sdkPackage.version;
+const sdkVersion = process.env.WASMER_SDK_VERSION ?? sdkPackage.version;
 
 if (sdkName !== "@wasmer/sdk") {
   throw new Error(`${sdkPackagePath}: expected @wasmer/sdk, got ${sdkName}`);

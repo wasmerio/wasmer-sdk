@@ -13,7 +13,14 @@ from pathlib import Path
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build the local Python UniFFI package")
     parser.add_argument("--release", action="store_true")
+    parser.add_argument(
+        "--backend", choices=("auto", "sys", "napi-v8"), default="auto",
+        help="auto enables native N-API only on targets supported by the pinned V8 build",
+    )
     args = parser.parse_args()
+    backend = args.backend
+    if backend == "auto":
+        backend = default_backend()
 
     package_root = Path(__file__).resolve().parents[1]
     workspace = package_root.parent
@@ -27,8 +34,9 @@ def main() -> None:
         "--locked",
         "-p",
         "wasmer-sdk-uniffi",
+        "--no-default-features",
         "--features",
-        "bindgen-cli",
+        f"{backend},bindgen-cli",
         "--lib",
         "--bin",
         "uniffi-bindgen",
@@ -57,6 +65,15 @@ def main() -> None:
         shutil.copy2(library, destination / library_name)
 
     print(f"built {package_root / 'src' / 'wasmer_sdk'}")
+
+
+def default_backend() -> str:
+    system, machine = platform.system(), platform.machine().lower()
+    supports_v8 = (
+        (system == "Darwin" and machine in ("arm64", "aarch64"))
+        or (system in ("Linux", "Windows") and machine in ("x86_64", "amd64"))
+    )
+    return "napi-v8" if supports_v8 else "sys"
 
 
 def native_library_name() -> str:
