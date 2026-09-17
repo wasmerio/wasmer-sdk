@@ -188,8 +188,10 @@ actor NativeFileSystem {
         return try checked(unlinkat(fd, name, info["kind"] as? String == "directory" ? AT_REMOVEDIR : 0))
       }
     case "rename":
-      _ = try withParent(string(args, 0)) { fromFD, from in
-        try withParent(string(args, 1)) { toFD, to in
+      let source = try string(args, 0)
+      let destination = try string(args, 1)
+      _ = try withParent(source) { fromFD, from in
+        try withParent(destination) { toFD, to in
           guard from != ".", to != "." else { throw NativeIOError(EACCES) }
           _ = try metadata(fromFD, from)
           return try checked(renameat(fromFD, from, toFD, to))
