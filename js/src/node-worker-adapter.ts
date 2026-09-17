@@ -36,12 +36,14 @@ interface CacheRequest {
 
 let workersCreated = 0;
 let activeWorkers = 0;
+let workerFailures = 0;
 
 export function nodeWorkerStats(): {
   workersCreated: number;
   activeWorkers: number;
+  workerFailures: number;
 } {
-  return { workersCreated, activeWorkers };
+  return { workersCreated, activeWorkers, workerFailures };
 }
 
 /**
@@ -61,6 +63,7 @@ export class NodeWorkerAdapter {
 
   readonly #worker: NodeWorker;
   #terminating = false;
+  #failed = false;
 
   constructor(url: string, options: { name?: string; type?: string } = {}) {
     const workerOptions: NodeWorkerOptions = {
@@ -79,19 +82,28 @@ export class NodeWorkerAdapter {
       }
     });
     this.#worker.on("error", (error) => {
-      console.error("Wasmer SDK worker error:", error);
-      this.onerror?.({
-        message: error.message,
-        filename: "",
-        lineno: 0,
-        colno: 0,
-      });
+      this.#reportFailure(error);
     });
     this.#worker.on("exit", (code) => {
       activeWorkers -= 1;
-      if (!this.#terminating && code !== 0) {
-        console.error(`Wasmer SDK worker exited with status ${code}`);
+      if (!this.#terminating) {
+        this.#reportFailure(
+          new Error(`Wasmer SDK worker exited unexpectedly with status ${code}`),
+        );
       }
+    });
+  }
+
+  #reportFailure(error: Error): void {
+    if (this.#failed) return;
+    this.#failed = true;
+    workerFailures += 1;
+    console.error("Wasmer SDK worker error:", error);
+    this.onerror?.({
+      message: error.message,
+      filename: "",
+      lineno: 0,
+      colno: 0,
     });
   }
 

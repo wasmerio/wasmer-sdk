@@ -179,7 +179,7 @@ shared Rust objects; copying a wrapper shares its underlying state.
 
 ## What remains for iOS
 
-The workspace pins Wasmer to `51f597fb99f7e4c562c7990e91c54831f8db8350`:
+The workspace pins Wasmer to `f9b88e70b3822779ccb79d97134296b5120f3818`:
 
 - Its native SDK selects Cranelift, which generates executable code at runtime.
 - Its Wasmer API exposes `sys`, `v8`, and `js` backends; there is no Wasmi or WAMR

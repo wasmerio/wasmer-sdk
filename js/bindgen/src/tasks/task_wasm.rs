@@ -20,6 +20,10 @@ pub(crate) fn to_scheduler_message(task: TaskWasm) -> SchedulerMessage {
 pub(crate) struct SpawnWasm(#[derivative(Debug = "ignore")] TaskWasm);
 
 impl SpawnWasm {
+    pub(crate) fn process(&self) -> wasmer_wasix::WasiProcess {
+        self.0.env.process.clone()
+    }
+
     pub(crate) fn task_key(&self) -> (u32, u32) {
         (self.0.env.pid().raw(), self.0.env.tid().raw())
     }

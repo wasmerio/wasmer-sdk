@@ -188,7 +188,10 @@ impl JsWasmer {
 
     pub async fn shutdown(&self) -> Result<(), JsValue> {
         self.inner.shutdown().await.map_err(sdk_error)?;
-        self.tasks.close_and_wait().await;
+        self.tasks
+            .close_and_wait()
+            .await
+            .map_err(|error| custom_error("WORKER_FAILED", &error.to_string()))?;
         Ok(())
     }
 }

@@ -25,6 +25,8 @@ pub(crate) enum SchedulerMessage {
         /// boundary before terminating the workers.
         drain: bool,
     },
+    /// A worker trapped; stop the pool instead of waiting for an idle message.
+    WorkerFailed,
     /// Run a promise on a worker thread.
     SpawnAsync(#[derivative(Debug(format_with = "crate::worker_utils::hidden"))] AsyncTask),
     /// Run a blocking operation on a worker thread.
@@ -144,6 +146,9 @@ impl SchedulerMessage {
                     .set(consts::PID, pid)
                     .set(consts::TID, tid)
                     .finish()
+            }
+            SchedulerMessage::WorkerFailed => {
+                Err(anyhow::anyhow!("worker failures are local to the scheduler").into())
             }
             SchedulerMessage::CapiShare { .. }
             | SchedulerMessage::CapiRequest { .. }
