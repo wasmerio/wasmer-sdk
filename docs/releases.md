@@ -18,9 +18,11 @@ not part of this matrix.
 
 ## Prepare and publish
 
-1. Run **Release SDK** (`release.yml`) on `main`, leaving `tag` empty. Release
-   Please opens or updates component PRs from conventional commits. Existing
-   pending JS/Python PRs get explicit CI runs because PRs created with
+1. Merging an ordinary PR into `main` runs **Release SDK** (`release.yml`).
+   Release Please opens or updates component PRs from conventional commits.
+   You can also run it manually on `main` with `tag` empty, including after
+   direct pushes. Merging a component release PR follows the publication path
+   in step 3 instead. Pending JS/Python PRs get explicit CI runs because PRs created with
    `GITHUB_TOKEN` do not trigger another workflow automatically.
 2. If a Swift PR exists, **Prepare Swift release** builds a release XCFramework
    for both architectures. It tests that archive on Apple Silicon and Intel,

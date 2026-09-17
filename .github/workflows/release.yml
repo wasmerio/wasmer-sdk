@@ -12,7 +12,9 @@ on:
     types: [closed]
 
 concurrency:
-  group: release-sdk-${{ github.event.pull_request.head.ref || inputs.tag || 'prepare' }}
+  # Serialize Release Please updates across ordinary merges and manual runs.
+  # Component publication keeps its own group so releases can build in parallel.
+  group: release-sdk-${{ startsWith(github.event.pull_request.head.ref, 'release-please--branches--main--components--wasmer-sdk-') && github.event.pull_request.head.ref || inputs.tag || 'prepare' }}
   cancel-in-progress: false
 
 permissions:
@@ -20,7 +22,10 @@ permissions:
 
 jobs:
   release-prs:
-    if: github.event_name == 'workflow_dispatch' && inputs.tag == '' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.tag == '' && github.ref == 'refs/heads/main') ||
+      (github.event.pull_request.merged == true &&
+       !startsWith(github.event.pull_request.head.ref, 'release-please--branches--main--components--wasmer-sdk-'))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
