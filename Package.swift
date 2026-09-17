@@ -7,7 +7,8 @@ let package = Package(
   platforms: [.macOS(.v12)],
   products: [.library(name: "WasmerSDK", targets: ["WasmerSDK"])],
   targets: [
-    .binaryTarget(name: "WasmerSDKFFI", path: "swift/Artifacts/WasmerSDKFFI.xcframework"),
+    .binaryTarget(name: "WasmerSDKFFI", url: "https://github.com/wasmerio/wasmer-sdk/releases/download/wasmer-sdk-swift-v0.2.1/WasmerSDKFFI-0.2.1-macos-universal.zip",
+      checksum: "80dc53820844b55f52a3888f97dc67a0f547189584560e9b705e3e509f1cb5fa"),
     .target(
       name: "WasmerSDKCore", dependencies: ["WasmerSDKFFI"],
       path: "swift/Sources/WasmerSDKCore",
