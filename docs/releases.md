@@ -50,8 +50,9 @@ PRs, in addition to the normal CI checks.
 
 Swift staging artifacts are retained for 90 days. If the Rust/Swift/build inputs
 change or staging expires, update the PR with `main` and run **Prepare Swift
-release** again with its PR number before merging. The preparation step refuses
-to push over a PR that changed while it was building. The release step refuses
+release** again with its PR number before merging. Preparation can attach the
+tested binary after unrelated JS/Python updates to the PR, but rejects changed
+Swift build inputs and concurrent pushes. The release step refuses
 to tag stale or missing Swift binaries. Published tags are never moved to add
 checksums or generated source.
 
