@@ -112,6 +112,7 @@ jobs:
         run: |
           python -m pip install --force-reinstall wheelhouse/*.whl
           python -m unittest discover -s python/tests -p test_runtime.py -v
+          python -m unittest discover -s python/tests -p test_package_definition.py -v
           python -m unittest discover -s python/tests -p test_postgres_psql.py -v
       - name: Test native N-API
         if: matrix.backend == 'napi-v8'

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import (
@@ -108,11 +108,45 @@ class DirectoryEntry:
     size: int
 
 
+@dataclass(frozen=True)
+class PackageCommandDefinition:
+    """A WASI/WASIX command referencing a module in the same definition."""
+
+    module: str
+
+
+@dataclass(frozen=True)
+class PackageDefinition:
+    """In-memory modules and files; file keys are absolute guest paths.
+
+    The sole command is the default entrypoint. Package contents are captured
+    when create() runs; use the sandbox workspace for persistent writes.
+    """
+
+    modules: Mapping[str, BytesLike]
+    commands: Mapping[str, PackageCommandDefinition]
+    entrypoint: Optional[str] = None
+    files: Mapping[str, FileContents] = field(default_factory=dict)
+
+
 class Packages:
     """Package acquisition operations for one Wasmer client."""
 
     def __init__(self, wasmer: "Wasmer") -> None:
         self._wasmer = wasmer
+
+    async def create(self, definition: PackageDefinition) -> Package:
+        """Create a reusable package without serializing a WEBC archive."""
+        encoded = _native.PackageDefinition(
+            modules={name: bytes(value) for name, value in definition.modules.items()},
+            commands={
+                name: _native.PackageCommandDefinition(module=command.module)
+                for name, command in definition.commands.items()
+            },
+            entrypoint=definition.entrypoint,
+            files={path: _bytes(value) for path, value in definition.files.items()},
+        )
+        return Package(await _async(self._wasmer._core.create_package(encoded)))
 
     async def load(self, source: PackageSource) -> Package:
         if isinstance(source, Package):

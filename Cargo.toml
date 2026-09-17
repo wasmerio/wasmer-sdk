@@ -2,7 +2,6 @@
 members = [
     "js/bindgen",
     "rust",
-    "rust/boltffi",
     "rust/uniffi",
 ]
 default-members = ["rust"]

@@ -45,8 +45,46 @@ public struct Wasmer: Sendable {
   public func close() async throws { try await core.close() }
 }
 
+/// A WASI/WASIX command referencing a module in the same definition.
+public struct PackageCommandDefinition: Sendable {
+  public var module: String
+  public init(module: String) { self.module = module }
+}
+
+/// In-memory module bytes and bundled files at absolute guest paths.
+/// The sole command is the default entrypoint. Use the sandbox workspace for
+/// persistent writes; bundled package contents are captured during creation.
+public struct PackageDefinition: Sendable {
+  public var modules: [String: Data]
+  public var commands: [String: PackageCommandDefinition]
+  public var entrypoint: String?
+  public var files: [String: Data]
+
+  public init(
+    modules: [String: Data], commands: [String: PackageCommandDefinition],
+    entrypoint: String? = nil, files: [String: Data] = [:]
+  ) {
+    self.modules = modules
+    self.commands = commands
+    self.entrypoint = entrypoint
+    self.files = files
+  }
+}
+
 public struct Packages: Sendable {
   fileprivate let core: WasmerCore
+
+  /// Create a reusable package without serializing a WEBC archive.
+  public func create(_ definition: PackageDefinition) async throws -> Package {
+    let value = WasmerSDKCore.PackageDefinition(
+      modules: definition.modules,
+      commands: definition.commands.mapValues {
+        WasmerSDKCore.PackageCommandDefinition(module: $0.module)
+      },
+      entrypoint: definition.entrypoint, files: definition.files
+    )
+    return Package(core: try await core.createPackage(definition: value))
+  }
 
   public func load(_ source: PackageSource) async throws -> Package {
     switch source {

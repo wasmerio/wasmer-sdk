@@ -5,6 +5,9 @@ use wasmer_wasix::bin_factory::BinaryPackage;
 
 use crate::{Error, Result};
 
+mod definition;
+pub use definition::{PackageCommandDefinition, PackageDefinition};
+
 /// A source from which a Wasmer package can be loaded.
 #[derive(Clone, Debug)]
 pub enum PackageSource {

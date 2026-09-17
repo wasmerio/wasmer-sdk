@@ -37,6 +37,21 @@ export type PackageSource = string | Uint8Array | Package;
 export type CommandSelector = string | Package | CommandRef;
 export type FileContents = string | Uint8Array;
 
+/** A WASI/WASIX command referencing a named module in its package. */
+export interface PackageCommandDefinition {
+  module: string;
+}
+
+/** Executable content used to create a package without a WEBC archive. */
+export interface PackageDefinition {
+  modules: Readonly<Record<string, Uint8Array>>;
+  commands: Readonly<Record<string, PackageCommandDefinition>>;
+  /** Command name; inferred when there is exactly one command. */
+  entrypoint?: string;
+  /** Bundled files at canonical absolute guest paths, e.g. /data/config.json. */
+  files?: Readonly<Record<string, FileContents>>;
+}
+
 export interface WispConnectionRequest {
   /** The endpoint that failed, when retrying a configured WISP server. */
   url?: string;
@@ -73,6 +88,8 @@ export interface SandboxOptions {
 }
 
 export interface Packages {
+  /** Create an in-memory package. Module and file bytes are copied. */
+  create(definition: PackageDefinition): Promise<Package>;
   /** Resolve a registry package or decode in-memory WEBC bytes. */
   load(source: string | Uint8Array): Promise<Package>;
 }
@@ -301,7 +318,10 @@ export class Wasmer {
           ? undefined
           : validateParallelism(options.parallelism),
     };
-    this.packages = new PackagesService((source) => this.#loadPackage(source));
+    this.packages = new PackagesService(
+      (source) => this.#loadPackage(source),
+      (definition) => this.#createPackage(definition),
+    );
     this.sandboxes = new SandboxesService((options) =>
       this.#createSandbox(options),
     );
@@ -361,6 +381,45 @@ export class Wasmer {
   /** @deprecated Use `wasmer.sandboxes.create(options)`. */
   async createSandbox(options: SandboxOptions = {}): Promise<Sandbox> {
     return this.sandboxes.create(options);
+  }
+
+  async #createPackage(definition: PackageDefinition): Promise<Package> {
+    // Snapshot before runtime initialization can yield. In particular Buffer.slice()
+    // would retain caller-owned storage, so construct fresh Uint8Arrays instead.
+    let snapshot;
+    try {
+      const copy = (bytes: Uint8Array): Uint8Array => {
+        if (!(bytes instanceof Uint8Array)) {
+          throw new TypeError(
+            "module and binary file contents must be Uint8Array values",
+          );
+        }
+        return new Uint8Array(bytes);
+      };
+      snapshot = {
+        ...definition,
+        modules: Object.fromEntries(
+          Object.entries(definition.modules).map(([name, bytes]) => [name, copy(bytes)]),
+        ),
+        commands: Object.fromEntries(
+          Object.entries(definition.commands).map(([name, command]) => [name, { ...command }]),
+        ),
+        files: Object.fromEntries(
+          Object.entries(definition.files ?? {}).map(([path, contents]) => [
+            path,
+            typeof contents === "string" ? encode(contents) : copy(contents),
+          ]),
+        ),
+      };
+    } catch (cause) {
+      throw new WasmerError(
+        `invalid package definition: ${String(cause)}`,
+        "INVALID_ARGUMENT",
+        { cause },
+      );
+    }
+    const client = await this.getCore();
+    return new Package(await rethrow(client.createPackage(snapshot)));
   }
 
   async #loadPackage(source: string | Uint8Array): Promise<Package> {
@@ -466,9 +525,18 @@ function browserCacheOptions(
 
 class PackagesService implements Packages {
   readonly #load: (source: string | Uint8Array) => Promise<Package>;
+  readonly #create: (definition: PackageDefinition) => Promise<Package>;
 
-  constructor(load: (source: string | Uint8Array) => Promise<Package>) {
+  constructor(
+    load: (source: string | Uint8Array) => Promise<Package>,
+    create: (definition: PackageDefinition) => Promise<Package>,
+  ) {
     this.#load = load;
+    this.#create = create;
+  }
+
+  create(definition: PackageDefinition): Promise<Package> {
+    return this.#create(definition);
   }
 
   /** Resolve a registry package or decode in-memory WEBC bytes. */

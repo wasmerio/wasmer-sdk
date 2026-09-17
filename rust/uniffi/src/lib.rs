@@ -17,6 +17,51 @@ use wasmer_sdk::{
 uniffi::setup_scaffolding!();
 
 const DEFAULT_OUTPUT_BYTES: u64 = 16 * 1024 * 1024;
+
+/// An in-memory package definition shared with the SDK core.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct PackageDefinition {
+    pub modules: HashMap<String, Vec<u8>>,
+    pub commands: HashMap<String, PackageCommandDefinition>,
+    pub entrypoint: Option<String>,
+    pub files: HashMap<String, Vec<u8>>,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct PackageCommandDefinition {
+    pub module: String,
+}
+
+impl From<PackageDefinition> for wasmer_sdk::PackageDefinition {
+    fn from(value: PackageDefinition) -> Self {
+        Self {
+            modules: value
+                .modules
+                .into_iter()
+                .map(|(name, bytes)| (name, bytes.into()))
+                .collect(),
+            commands: value
+                .commands
+                .into_iter()
+                .map(|(name, command)| {
+                    (
+                        name,
+                        wasmer_sdk::PackageCommandDefinition {
+                            module: command.module,
+                        },
+                    )
+                })
+                .collect(),
+            entrypoint: value.entrypoint,
+            files: value
+                .files
+                .into_iter()
+                .map(|(path, bytes)| (path, bytes.into()))
+                .collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct ClientOptions {
     pub cache_root: Option<String>,
@@ -122,6 +167,21 @@ impl WasmerCore {
             Wasmer::with_config(config).map_err(SdkError::from)?
         };
         Ok(Arc::new(Self { context, inner }))
+    }
+
+    pub async fn create_package(
+        &self,
+        definition: PackageDefinition,
+    ) -> Result<Arc<PackageCore>, SdkError> {
+        let client = self.inner.clone();
+        let package = self
+            .context
+            .sdk(async move { client.packages().create(definition.into()).await })
+            .await?;
+        Ok(Arc::new(PackageCore::new(
+            Arc::clone(&self.context),
+            package,
+        )))
     }
 
     pub async fn load_package_registry(

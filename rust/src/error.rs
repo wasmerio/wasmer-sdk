@@ -17,6 +17,9 @@ pub enum Error {
     #[error("the sandbox is closed")]
     SandboxClosed,
 
+    #[error("invalid argument: {message}")]
+    InvalidArgument { message: String },
+
     #[error("invalid package source `{package_source}`: {message}")]
     InvalidPackageSource {
         package_source: String,
@@ -96,6 +99,7 @@ impl Error {
         match self {
             Self::ClientClosed => "CLIENT_CLOSED",
             Self::SandboxClosed => "SANDBOX_CLOSED",
+            Self::InvalidArgument { .. } => "INVALID_ARGUMENT",
             Self::InvalidPackageSource { .. } => "INVALID_PACKAGE_SOURCE",
             Self::PackageLoad { .. } => "PACKAGE_LOAD_FAILED",
             Self::PackageNotInstalled { .. } => "PACKAGE_NOT_INSTALLED",

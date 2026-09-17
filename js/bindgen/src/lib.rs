@@ -16,6 +16,7 @@ mod tasks;
 mod worker_utils;
 
 use std::{
+    collections::BTreeMap,
     sync::{Arc, Mutex as StdMutex},
     time::Duration,
 };
@@ -79,6 +80,52 @@ struct ClientCacheOptions {
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const MAX_WASM32_SIZE: u64 = u32::MAX as u64;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PackageDefinition {
+    modules: BTreeMap<String, serde_bytes::ByteBuf>,
+    commands: BTreeMap<String, PackageCommandDefinition>,
+    entrypoint: Option<String>,
+    #[serde(default)]
+    files: BTreeMap<String, serde_bytes::ByteBuf>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PackageCommandDefinition {
+    module: String,
+}
+
+impl From<PackageDefinition> for wasmer_sdk::PackageDefinition {
+    fn from(value: PackageDefinition) -> Self {
+        Self {
+            modules: value
+                .modules
+                .into_iter()
+                .map(|(name, bytes)| (name, bytes.into_vec().into()))
+                .collect(),
+            commands: value
+                .commands
+                .into_iter()
+                .map(|(name, command)| {
+                    (
+                        name,
+                        wasmer_sdk::PackageCommandDefinition {
+                            module: command.module,
+                        },
+                    )
+                })
+                .collect(),
+            entrypoint: value.entrypoint,
+            files: value
+                .files
+                .into_iter()
+                .map(|(path, bytes)| (path, bytes.into_vec().into()))
+                .collect(),
+        }
+    }
+}
 
 #[wasm_bindgen(js_name = WasmerCore)]
 pub struct JsWasmer {
@@ -156,6 +203,18 @@ impl JsWasmer {
         let inner = Wasmer::from_js_runtime(&config, runtime, query_cache, package_cache)
             .map_err(sdk_error)?;
         Ok(Self { inner, tasks })
+    }
+
+    #[wasm_bindgen(js_name = createPackage)]
+    pub async fn create_package(&self, definition: JsValue) -> Result<JsPackage, JsValue> {
+        let definition: PackageDefinition = serde_wasm_bindgen::from_value(definition)
+            .map_err(|error| custom_error("INVALID_ARGUMENT", &error.to_string()))?;
+        self.inner
+            .packages()
+            .create(definition.into())
+            .await
+            .map(|inner| JsPackage { inner })
+            .map_err(sdk_error)
     }
 
     #[wasm_bindgen(js_name = loadPackage)]

@@ -14,6 +14,33 @@ Published wheels support macOS and Linux on arm64 and x86_64. One wheel works
 across supported Python 3 versions on the same platform because the native
 boundary does not use the CPython ABI.
 
+## Create a package from Wasm
+
+Create a reusable package from module bytes and optional bundled files:
+
+```python
+from pathlib import Path
+from wasmer_sdk import PackageCommandDefinition, PackageDefinition, Wasmer
+
+async def run_module():
+    async with Wasmer() as wasmer:
+        pkg = await wasmer.packages.create(PackageDefinition(
+            modules={"app": Path("hello.wasm").read_bytes()},
+            commands={"hello": PackageCommandDefinition(module="app")},
+            files={"/data/config.json": '{"debug":true}'},
+        ))
+        async with await wasmer.sandboxes.create(packages=[pkg]) as sandbox:
+            print((await sandbox.command(pkg, ["--help"]).run()).text())
+```
+
+Creation copies module and file data into an in-memory package without a WEBC
+archive. Command modules must export `_start` and run with the existing
+WASI/WASIX runner. One command becomes the entrypoint automatically; with
+multiple commands, set `entrypoint="hello"` or select `pkg.command("hello")`.
+File keys are absolute guest paths without `.` or `..` segments. Package file
+writes use private execution overlays; use the sandbox workspace for persistent
+data. The result also works with `sandbox.install_package(pkg)`.
+
 ## Run Python inside Wasmer
 
 ```python

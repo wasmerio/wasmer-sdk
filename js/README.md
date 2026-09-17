@@ -10,6 +10,37 @@ API. The runtime is Wasmer + WASIX compiled to WebAssembly with
 npm install @wasmer/sdk
 ```
 
+## Create a package from Wasm
+
+Use `packages.create()` to run a raw WASI/WASIX module without building a WEBC
+archive. It works with the Node and browser entrypoints:
+
+```javascript
+const pkg = await wasmer.packages.create({
+  modules: { app: wasmBytes }, // Uint8Array; for example, the result of readFile()
+  commands: { hello: { module: "app" } },
+  files: { "/data/config.json": '{"debug":true}' },
+});
+const sandbox = await wasmer.sandboxes.create({ packages: [pkg] });
+try {
+  console.log((await sandbox.command(pkg, ["--help"]).run()).text());
+} finally {
+  await sandbox.close();
+}
+```
+
+Each command references a named module exporting `_start`. A sole command is
+inferred as the entrypoint; for multiple commands, set `entrypoint: "hello"`
+or select `pkg.command("hello")`. Modules and files are captured during
+creation. File paths must be absolute guest paths without `.` or `..` segments;
+bundled files use private writable overlays during execution. Use `/workspace`
+for persistent sandbox data. Close `wasmer` when finished.
+
+`load()` continues to accept registry sources and WEBC bytes. To migrate from
+`Wasmer.fromWasm()`, create the definition above and run its package in a sandbox.
+This API executes WASI/WASIX commands; it does not invoke arbitrary exports or
+WebAssembly components.
+
 ## Run Python from Node.js
 
 ```javascript
