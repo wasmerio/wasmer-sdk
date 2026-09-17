@@ -36,7 +36,14 @@ UniFFI, or a separate binary repository. The ZIP is also available directly on
 the [Swift release](https://github.com/wasmerio/wasmer-sdk/releases/tag/wasmer-sdk-swift-v0.2.1).
 See [release automation](../docs/releases.md) for preparation and publication.
 
-## Create a package from Wasm
+## Load or create a package from Wasm
+
+Load a single raw WASI/WASIX module with
+`let package = try await wasmer.packages.load(wasmData)`.
+The `Data` can contain Wasm or WEBC, detected by its contents. A raw module must
+export `_start` and gets one command and entrypoint named `main` automatically.
+Run it with `sandbox.command(package)` or `sandbox.command("main")`. WEBC
+packages retain their declared commands and entrypoint.
 
 Use a typed definition to execute a raw WASI/WASIX module on macOS:
 
@@ -162,7 +169,9 @@ Pass `network: .host` to grant native guest networking.
 
 Load reusable packages through `wasmer.packages.load(...)`. Sources include a
 registry string, `.file(URL)` for a local package directory or WEBC file,
-`.webc(Data)`, and `.package(Package)`. A raw `.wasm` file is not a package.
+`.bytes(Data)` for WEBC or raw Wasm, and `.package(Package)`. The `.webc(Data)`
+spelling is retained for compatibility. Read a raw `.wasm` file into `Data`
+before loading it.
 `sandbox.installPackage(...)` accepts the same sources. Commands accept a name,
 a loaded `Package` (its entrypoint), or a `CommandRef` from `package.command(...)`.
 

@@ -81,6 +81,30 @@ private func withSandbox(
   }
 }
 
+@Test func loadRawWasmWithAutomaticEntrypoint() async throws {
+  try await withSandbox { client, sandbox, _ in
+    let fixture = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+    let bytes = try Data(contentsOf: fixture.appendingPathComponent("hello.wasm"))
+    let package = try await client.packages.load(bytes)
+    #expect(package.commands == ["main"])
+    #expect(package.entrypoint == "main")
+    let explicit = try await client.packages.create(PackageDefinition(
+      modules: ["main": bytes], commands: ["main": .init(module: "main")]))
+    #expect(package.id == explicit.id)
+    #expect(try await client.packages.load(.bytes(bytes)).id == package.id)
+    let installed = try await sandbox.installPackage(.bytes(bytes))
+    #expect(installed.id == package.id)
+    #expect(try await sandbox.command(package).run().text() == "Hello from Swift!\n")
+    #expect(try await sandbox.command("main").run().text() == "Hello from Swift!\n")
+    do {
+      _ = try await client.packages.load(Data([0, 97, 115, 109, 1, 0, 0, 0]))
+      Issue.record("A raw command must export _start")
+    } catch WasmerError.Failure(let code, _) {
+      #expect(code == "PACKAGE_LOAD_FAILED")
+    }
+  }
+}
+
 @Test func filesAndErrorsCrossTheFFI() async throws {
   try await withSandbox { _, sandbox, _ in
     try await sandbox.fs.mkdir("nested")

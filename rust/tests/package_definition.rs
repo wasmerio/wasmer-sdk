@@ -1,7 +1,8 @@
 use bytes::Bytes;
 use tempfile::TempDir;
 use wasmer_sdk::{
-    CacheConfig, PackageCommandDefinition, PackageDefinition, Result, Wasmer, WasmerConfig,
+    CacheConfig, PackageCommandDefinition, PackageDefinition, PackageSource, Result, Wasmer,
+    WasmerConfig,
 };
 
 const HELLO: &str = r#"(module
@@ -37,6 +38,118 @@ fn client() -> (Wasmer, TempDir) {
     })
     .unwrap();
     (client, dir)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn loads_raw_wasm_with_an_automatic_main_entrypoint() -> Result<()> {
+    let (client, _dir) = client();
+    let wasm = wat::parse_str(HELLO).unwrap();
+    let package = client.packages().load(wasm.clone()).await?;
+    assert_eq!(package.commands(), ["main"]);
+    assert_eq!(package.entrypoint().as_deref(), Some("main"));
+    let explicit = PackageDefinition {
+        modules: [("main".into(), wasm.clone().into())].into(),
+        commands: [(
+            "main".into(),
+            PackageCommandDefinition {
+                module: "main".into(),
+            },
+        )]
+        .into(),
+        ..PackageDefinition::default()
+    };
+    assert_eq!(package.id(), client.packages().create(explicit).await?.id());
+
+    // All byte source entry points share detection, including live installation.
+    let sandbox = client
+        .sandboxes()
+        .create()
+        .package(Bytes::from(wasm.clone()))
+        .await?;
+    let installed = sandbox.install_package(PackageSource::bytes(wasm)).await?;
+    assert_eq!(package.id(), installed.id());
+    assert_eq!(sandbox.command(package).run().await?.text()?, "hello");
+    assert_eq!(sandbox.command("main").run().await?.text()?, "hello");
+    sandbox.close().await?;
+    client.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn byte_detection_preserves_webc_commands_and_entrypoint() -> Result<()> {
+    let (client, _dir) = client();
+    let fixture = TempDir::new().unwrap();
+    std::fs::write(
+        fixture.path().join("wasmer.toml"),
+        r#"
+[package]
+name = "test/hello"
+version = "1.0.0"
+description = "WEBC detection fixture"
+entrypoint = "hello"
+[[module]]
+name = "app"
+source = "app.wasm"
+abi = "wasi"
+[[command]]
+name = "hello"
+module = "app"
+"#,
+    )?;
+    std::fs::write(
+        fixture.path().join("app.wasm"),
+        wat::parse_str(HELLO).unwrap(),
+    )?;
+    let webc = wasmer_package::package::Package::from_manifest(fixture.path().join("wasmer.toml"))
+        .unwrap()
+        .serialize()
+        .unwrap();
+    let explicit = client
+        .packages()
+        .load(PackageSource::webc(webc.clone()))
+        .await?;
+    let detected = client.packages().load(webc).await?;
+    assert_eq!(detected.id(), explicit.id());
+    assert_eq!(detected.commands(), ["hello"]);
+    assert_eq!(detected.entrypoint().as_deref(), Some("hello"));
+    let sandbox = client
+        .sandboxes()
+        .create()
+        .package(detected.clone())
+        .await?;
+    assert_eq!(sandbox.command(detected).run().await?.text()?, "hello");
+    sandbox.close().await?;
+    client.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn raw_wasm_loading_rejects_components_missing_start_and_malformed_bytes() -> Result<()> {
+    let (client, _dir) = client();
+    for bytes in [
+        vec![],
+        b"not wasm or webc".to_vec(),
+        b"\0asm".to_vec(),
+        b"\0asm\x0d\0\x01\0".to_vec(),
+        wat::parse_str("(module)").unwrap(),
+        wat::parse_str("(module (memory (export \"_start\") 1))").unwrap(),
+    ] {
+        assert_eq!(
+            client.packages().load(bytes).await.unwrap_err().code(),
+            "PACKAGE_LOAD_FAILED"
+        );
+    }
+    client.shutdown().await?;
+    assert_eq!(
+        client
+            .packages()
+            .load(wat::parse_str(HELLO).unwrap())
+            .await
+            .unwrap_err()
+            .code(),
+        "CLIENT_CLOSED"
+    );
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -220,7 +220,7 @@ impl WasmerCore {
         let client = self.inner.clone();
         let package = self
             .context
-            .sdk(async move { client.packages().load(PackageSource::webc(bytes)).await })
+            .sdk(async move { client.packages().load(PackageSource::bytes(bytes)).await })
             .await?;
         Ok(Arc::new(PackageCore::new(
             Arc::clone(&self.context),
@@ -390,7 +390,7 @@ impl SandboxCore {
         &self,
         bytes: Vec<u8>,
     ) -> Result<Arc<PackageCore>, SdkError> {
-        self.install(PackageSource::webc(bytes)).await
+        self.install(PackageSource::bytes(bytes)).await
     }
 
     pub async fn install_package_ref(

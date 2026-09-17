@@ -14,7 +14,14 @@ Published wheels support macOS and Linux on arm64 and x86_64. One wheel works
 across supported Python 3 versions on the same platform because the native
 boundary does not use the CPython ABI.
 
-## Create a package from Wasm
+## Load or create a package from Wasm
+
+Load a single raw WASI/WASIX module with
+`pkg = await wasmer.packages.load(Path("hello.wasm").read_bytes())`.
+Byte sources detect Wasm or WEBC by their contents. Raw modules must export
+`_start`; their single command and entrypoint are named `main` automatically.
+Run with `sandbox.command(pkg)` or `sandbox.command("main")`. WEBC packages
+retain their declared commands and entrypoint.
 
 Create a reusable package from module bytes and optional bundled files:
 

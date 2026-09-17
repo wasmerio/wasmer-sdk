@@ -380,7 +380,10 @@ impl Wasmer {
                             .to_owned(),
                 });
             }
-            PackageSource::Webc(bytes) => {
+            PackageSource::Bytes(bytes) if bytes.starts_with(b"\0asm") => {
+                return PackageDefinition::from_wasm(bytes).into_package().await;
+            }
+            PackageSource::Bytes(bytes) | PackageSource::Webc(bytes) => {
                 let container = wasmer_package::utils::from_bytes(bytes).map_err(|error| {
                     Error::PackageLoad {
                         package_source: label.clone(),
@@ -416,6 +419,9 @@ impl Packages {
     }
 
     /// Resolve a registry, local, or in-memory package.
+    ///
+    /// In-memory bytes can contain WEBC or a raw WASI/WASIX module. Raw modules
+    /// must export `_start` and get a single command and entrypoint named `main`.
     ///
     /// # Errors
     ///

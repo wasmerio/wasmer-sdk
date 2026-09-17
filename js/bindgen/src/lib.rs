@@ -231,7 +231,7 @@ impl JsWasmer {
     pub async fn load_package_bytes(&self, bytes: Uint8Array) -> Result<JsPackage, JsValue> {
         self.inner
             .packages()
-            .load(PackageSource::webc(bytes.to_vec()))
+            .load(PackageSource::bytes(bytes.to_vec()))
             .await
             .map(|inner| JsPackage { inner })
             .map_err(sdk_error)
@@ -434,7 +434,7 @@ impl JsSandbox {
     #[wasm_bindgen(js_name = installPackageBytes)]
     pub async fn install_package_bytes(&self, bytes: Uint8Array) -> Result<JsPackage, JsValue> {
         self.inner
-            .install_package(PackageSource::webc(bytes.to_vec()))
+            .install_package(PackageSource::bytes(bytes.to_vec()))
             .await
             .map(|inner| JsPackage { inner })
             .map_err(sdk_error)

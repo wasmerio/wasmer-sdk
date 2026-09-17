@@ -90,7 +90,10 @@ export interface SandboxOptions {
 export interface Packages {
   /** Create an in-memory package. Module and file bytes are copied. */
   create(definition: PackageDefinition): Promise<Package>;
-  /** Resolve a registry package or decode in-memory WEBC bytes. */
+  /**
+   * Resolve a registry package, WEBC bytes, or raw WASI/WASIX bytes.
+   * Raw modules must export `_start`; their command and entrypoint are `main`.
+   */
   load(source: string | Uint8Array): Promise<Package>;
 }
 
@@ -371,7 +374,8 @@ export class Wasmer {
   }
 
   /**
-   * Resolve a registry package or decode in-memory WEBC bytes.
+   * Resolve a registry package, WEBC bytes, or raw WASI/WASIX bytes.
+   * Raw modules must export `_start`; their command and entrypoint are `main`.
    * @deprecated Use `wasmer.packages.load(source)`.
    */
   async loadPackage(source: string | Uint8Array): Promise<Package> {
@@ -423,11 +427,13 @@ export class Wasmer {
   }
 
   async #loadPackage(source: string | Uint8Array): Promise<Package> {
+    // Capture caller-owned bytes before runtime initialization can yield.
+    const snapshot = typeof source === "string" ? source : new Uint8Array(source);
     const client = await this.getCore();
     const core = await rethrow(
-      typeof source === "string"
-        ? client.loadPackage(source)
-        : client.loadPackageBytes(source),
+      typeof snapshot === "string"
+        ? client.loadPackage(snapshot)
+        : client.loadPackageBytes(snapshot),
     );
     return new Package(core);
   }
@@ -539,7 +545,10 @@ class PackagesService implements Packages {
     return this.#create(definition);
   }
 
-  /** Resolve a registry package or decode in-memory WEBC bytes. */
+  /**
+   * Resolve a registry package, WEBC bytes, or raw WASI/WASIX bytes.
+   * Raw modules must export `_start`; their command and entrypoint are `main`.
+   */
   load(source: string | Uint8Array): Promise<Package> {
     return this.#load(source);
   }

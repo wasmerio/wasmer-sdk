@@ -88,3 +88,41 @@ test("creation reports invalid definitions and closed clients", async () => {
   }
   await assert.rejects(() => client.packages.create(definition()), { code: "CLIENT_CLOSED" });
 });
+
+
+test("loads raw Wasm with an automatic main entrypoint and snapshots bytes", async () => {
+  const wasm = await readFile(new URL("../../swift/Tests/WasmerSDKTests/Fixtures/hello.wasm", import.meta.url));
+  const client = new Wasmer({ cache: false });
+  const sandboxes = [];
+  try {
+    const bytes = Buffer.from(wasm);
+    const pending = client.packages.load(bytes);
+    bytes.fill(0);
+    const pkg = await pending;
+    assert.deepEqual(pkg.commands, ["main"]);
+    assert.equal(pkg.entrypoint, "main");
+    const explicit = await client.packages.create({
+      modules: { main: wasm }, commands: { main: { module: "main" } },
+    });
+    assert.equal(pkg.id, explicit.id);
+    const a = await client.sandboxes.create({ packages: [pkg] });
+    sandboxes.push(a);
+    const b = await client.sandboxes.create({ packages: [wasm] });
+    sandboxes.push(b);
+    assert.equal((await b.installPackage(wasm)).id, pkg.id);
+    for (const sandbox of sandboxes) {
+      assert.equal((await sandbox.command(pkg).run()).text(), "Hello from Swift!\n");
+      assert.equal((await sandbox.command("main").run()).text(), "Hello from Swift!\n");
+    }
+    for (const bytes of [
+      new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]), // no _start
+      new Uint8Array([0, 97, 115, 109, 13, 0, 1, 0]), // component
+    ]) {
+      await assert.rejects(() => client.packages.load(bytes), { code: "PACKAGE_LOAD_FAILED" });
+    }
+  } finally {
+    for (const sandbox of sandboxes) await sandbox.close();
+    await client.close();
+  }
+  await assert.rejects(() => client.packages.load(wasm), { code: "CLIENT_CLOSED" });
+});

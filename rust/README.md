@@ -18,7 +18,14 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 The repository root pins the required Wasmer revisions in its
 `[patch.crates-io]` section.
 
-## Create a package from Wasm
+## Load or create a package from Wasm
+
+For a single raw WASI/WASIX module, use
+`wasmer.packages().load(wasm_bytes).await?`, where `wasm_bytes` is a `Vec<u8>`
+or `bytes::Bytes`. Byte sources detect Wasm or WEBC by their contents. A raw
+module must export `_start` and gets one command and entrypoint named `main`
+automatically. WEBC commands and entrypoints are preserved. Use
+`sandbox.command(package)` to run the package entrypoint.
 
 `Packages::create` builds a package directly from owned module bytes and files,
 without a WEBC archive or registry request:

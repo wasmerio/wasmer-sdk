@@ -149,6 +149,11 @@ class Packages:
         return Package(await _async(self._wasmer._core.create_package(encoded)))
 
     async def load(self, source: PackageSource) -> Package:
+        """Load a package or raw WASI/WASIX bytes.
+
+        Raw modules must export ``_start``; their command and entrypoint are
+        named ``main`` automatically.
+        """
         if isinstance(source, Package):
             return source
         if isinstance(source, str):

@@ -31,6 +31,21 @@ pub struct PackageCommandDefinition {
 }
 
 impl PackageDefinition {
+    pub(crate) fn from_wasm(bytes: Bytes) -> Self {
+        Self {
+            modules: [("main".into(), bytes)].into(),
+            commands: [(
+                "main".into(),
+                PackageCommandDefinition {
+                    module: "main".into(),
+                },
+            )]
+            .into(),
+            entrypoint: Some("main".into()),
+            ..Self::default()
+        }
+    }
+
     pub(crate) async fn into_package(mut self) -> Result<Package> {
         self.validate()?;
         if self.entrypoint.is_none() && self.commands.len() == 1 {

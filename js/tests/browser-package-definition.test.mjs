@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { chromium } from "playwright";
 
-test("creates and asynchronously compiles a large browser package with bundled files", { timeout: 60_000 }, async (context) => {
+test("creates and loads large browser modules with automatic entrypoints", { timeout: 60_000 }, async (context) => {
   const root = fileURLToPath(new URL("../", import.meta.url));
   const server = createServer(async (request, response) => {
     response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
@@ -42,7 +42,8 @@ test("creates and asynchronously compiles a large browser package with bundled f
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   const fixture = await readFile(new URL("../../rust/tests/fixtures/package-files.wasm", import.meta.url));
-  const result = await page.evaluate(async (fixture) => {
+  const hello = await readFile(new URL("../../swift/Tests/WasmerSDKTests/Fixtures/hello.wasm", import.meta.url));
+  const result = await page.evaluate(async ({ fixture, hello }) => {
     const { Wasmer } = await import("/dist/index.js");
     // A valid custom section takes the guest over Chromium's sync compilation
     // limit while keeping runtime execution small and deterministic.
@@ -52,26 +53,34 @@ test("creates and asynchronously compiles a large browser package with bundled f
       header.push((value & 127) | (value > 127 ? 128 : 0));
       if (value <= 127) break;
     }
-    const bytes = new Uint8Array(fixture.length + header.length + sectionSize);
-    bytes.set(fixture);
-    bytes.set(header, fixture.length);
+    const largeModule = (module) => {
+      const bytes = new Uint8Array(module.length + header.length + sectionSize);
+      bytes.set(module);
+      bytes.set(header, module.length);
+      return bytes;
+    };
     // The section's first zero is its empty-name length; the rest is payload.
     const client = new Wasmer({ cache: false });
     let sandbox;
     try {
       const pkg = await client.packages.create({
-        modules: { app: bytes }, commands: { hello: { module: "app" } },
+        modules: { app: largeModule(fixture) }, commands: { hello: { module: "app" } },
         files: { "/data/input.txt": "browser data" },
       });
       sandbox = await client.sandboxes.create({ packages: [pkg] });
       const first = (await sandbox.command(pkg).run()).text();
       const second = (await sandbox.command("hello").run()).text();
-      return { first, second, isolated: crossOriginIsolated };
+      const raw = await client.packages.load(largeModule(hello));
+      await sandbox.installPackage(raw);
+      const loaded = (await sandbox.command(raw).run()).text();
+      return { first, second, loaded, entrypoint: raw.entrypoint, commands: raw.commands,
+        isolated: crossOriginIsolated };
     } finally {
       await sandbox?.close();
       await client.close();
     }
-  }, [...fixture]);
-  assert.deepEqual(result, { first: "browser data", second: "browser data", isolated: true });
+  }, { fixture: [...fixture], hello: [...hello] });
+  assert.deepEqual(result, { first: "browser data", second: "browser data",
+    loaded: "Hello from Swift!\n", entrypoint: "main", commands: ["main"], isolated: true });
   assert.deepEqual(errors, []);
 });
