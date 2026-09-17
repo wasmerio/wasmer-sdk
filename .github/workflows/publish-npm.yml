@@ -3,6 +3,10 @@ name: Publish JavaScript to npm
 on:
   workflow_dispatch:
     inputs:
+      tag:
+        description: Existing JS release tag whose attached tarball will be published
+        required: true
+        type: string
       sync_only:
         description: Synchronize wasmer-sh after an existing npm publication
         required: false
@@ -13,115 +17,60 @@ concurrency:
   group: publish-npm
   cancel-in-progress: false
 
-env:
-  CARGO_INCREMENTAL: 0
+permissions:
+  contents: read
 
 jobs:
-  build:
-    name: Build @wasmer/sdk
-    if: github.ref == 'refs/heads/main' && inputs.sync_only != true
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          package-manager-cache: false
-
-      - name: Install npm with trusted-publishing support
-        run: npm install --global npm@11.19.1
-
-      - uses: ./.github/actions/cache-sdk
-        with:
-          cargo-profile: js-nightly
-          cache-compiled-artifacts: "false"
-
-      - name: Install Rust and wasm-bindgen
-        run: |
-          rustup toolchain install nightly --profile minimal --component rust-src --target wasm32-unknown-unknown --no-self-update
-          if ! wasm-bindgen --version 2>/dev/null | grep -qx "wasm-bindgen 0.2.126"; then
-            cargo +nightly install wasm-bindgen-cli --version 0.2.126 --locked --force
-          fi
-
-      - name: Install JavaScript dependencies
-        working-directory: js
-        run: npm ci
-
-      - name: Validate package identity
-        working-directory: js
-        run: |
-          test "$(node --print "require('./package.json').name")" = "@wasmer/sdk"
-          sdk_npm_version="$(node --print "require('./package.json').version")"
-          echo "Publishing @wasmer/sdk@${sdk_npm_version}"
-          if npm view "@wasmer/sdk@${sdk_npm_version}" version >/dev/null 2>&1; then
-            echo "::error::@wasmer/sdk@${sdk_npm_version} is already published"
-            exit 1
-          fi
-          npm --version
-
-      - name: Build
-        working-directory: js
-        run: npm run build
-
-      - name: Test
-        working-directory: js
-        run: timeout --kill-after=30s 6m npm test
-
-      - name: Pack package
-        working-directory: js
-        run: |
-          npm pack --dry-run
-          mkdir -p ../npm-package
-          npm pack --pack-destination ../npm-package
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wasmer-sdk-${{ github.sha }}
-          path: npm-package/*.tgz
-          if-no-files-found: error
-          retention-days: 1
-
   publish:
     name: Publish @wasmer/sdk
-    needs: build
-    if: inputs.sync_only != true
+    if: github.ref == 'refs/heads/main' && inputs.sync_only != true
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment: npm
     permissions:
       contents: read
       id-token: write
     steps:
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: '[[ "$RELEASE_TAG" =~ ^wasmer-sdk-js-v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
       - uses: actions/checkout@v6
-
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: '24'
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-
-      - name: Install npm with trusted-publishing support
+      - name: Install npm with trusted publishing support
         run: npm install --global npm@11.19.1
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: wasmer-sdk-${{ github.sha }}
-          path: npm-package
-
-      - name: Publish with npm trusted publishing
-        run: npm publish ./npm-package/*.tgz --access public --loglevel=verbose
+      - name: Download and verify the exact GitHub release tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python .github/scripts/sdk_release.py check --component js --tag "$RELEASE_TAG"
+          python .github/scripts/github_release.py download --component js --assets release-dist
+          python .github/scripts/registry_pending.py --component js --assets release-dist --output pending
+      - name: Publish any remaining tarball with npm trusted publishing
+        shell: bash
+        run: |
+          shopt -s nullglob
+          tarballs=(pending/*.tgz)
+          if [ "${#tarballs[@]}" -gt 0 ]; then
+            npm publish "${tarballs[0]}" --access public
+          fi
 
   sync-wasmer-sh:
     name: Update wasmer-sh to the published SDK
     needs:
-      - build
       - publish
     if: >-
-      always() &&
+      always() && github.ref == 'refs/heads/main' &&
       (needs.publish.result == 'success' || inputs.sync_only == true)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -141,6 +90,13 @@ jobs:
 
       - name: Install pnpm
         run: npm install --global pnpm@11.19.0
+
+      - name: Select the published SDK version
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^wasmer-sdk-js-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "WASMER_SDK_VERSION=${RELEASE_TAG#wasmer-sdk-js-v}" >> "$GITHUB_ENV"
 
       - name: Update wasmer-sh package manifests
         run: node .github/scripts/sync-wasmer-sh-sdk-version.mjs
@@ -190,8 +146,7 @@ jobs:
             exit 0
           fi
 
-          sdk_version="$(node --print \
-            "require('./js/package.json').version")"
+          sdk_version="$WASMER_SDK_VERSION"
           git config user.name "github-actions[bot]"
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"

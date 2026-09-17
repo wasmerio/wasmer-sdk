@@ -1,0 +1,32 @@
+[package]
+name = "sdk-test/swift"
+version = "1.0.0"
+description = "Offline Swift binding fixtures"
+entrypoint = "hello"
+
+[[module]]
+name = "hello"
+source = "hello.wasm"
+abi = "wasi"
+
+[[module]]
+name = "fail"
+source = "fail.wasm"
+abi = "wasi"
+
+[[module]]
+name = "echo"
+source = "echo.wasm"
+abi = "wasi"
+
+[[command]]
+name = "hello"
+module = "hello"
+
+[[command]]
+name = "fail"
+module = "fail"
+
+[[command]]
+name = "echo"
+module = "echo"

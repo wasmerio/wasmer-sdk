@@ -15,6 +15,15 @@
       "component": "wasmer-sdk-js",
       "include-component-in-tag": true,
       "initial-version": "0.11.0"
+    },
+    "swift": {
+      "release-type": "simple",
+      "package-name": "wasmer-sdk-swift",
+      "component": "wasmer-sdk-swift",
+      "include-component-in-tag": true,
+      "initial-version": "0.2.1"
     }
-  }
+  },
+  "draft": true,
+  "force-tag-creation": true
 }

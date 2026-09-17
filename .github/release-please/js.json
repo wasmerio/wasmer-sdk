@@ -1,0 +1,13 @@
+{
+  "draft": true,
+  "force-tag-creation": true,
+  "packages": {
+    "js": {
+      "release-type": "node",
+      "package-name": "@wasmer/sdk",
+      "component": "wasmer-sdk-js",
+      "include-component-in-tag": true,
+      "initial-version": "0.11.0"
+    }
+  }
+}

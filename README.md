@@ -1,7 +1,7 @@
 # Wasmer SDK
 
 Run real software inside lightweight WebAssembly sandboxes from JavaScript,
-Python, or Rust.
+Python, Swift (macOS preview), or Rust.
 
 The Wasmer SDK turns packages from the
 [Wasmer registry](https://wasmer.io/products/registry) into composable
@@ -89,11 +89,18 @@ applications can inspect every exit reason directly.
 | JavaScript | `npm install @wasmer/sdk` | [JavaScript SDK](js/README.md) |
 | Python | `pip install wasmer-sdk` | [Python SDK](python/README.md) |
 | Rust | Workspace/Git while crate publishing is disabled | [Rust SDK](rust/README.md) |
+| Swift | SwiftPM binary package for macOS | [Swift SDK](swift/README.md) |
 
 JavaScript runs Wasmer and WASIX directly in WebAssembly through
 `wasm-bindgen`; Node networking is bridged through `node:net` and `node:dns`,
 not a native addon. Python uses the Rust SDK through a Python-independent
-UniFFI library. Rust uses Wasmer natively.
+UniFFI library. Swift uses that same UniFFI facade with an async Swift API.
+The Swift preview runs on macOS; the pinned runtime needs an iOS-capable backend
+before it can run on iPhone. Rust uses Wasmer natively.
+
+Each language has its own version, component tag, and GitHub release with
+installable artifacts. npm and PyPI receive the same files attached to their
+respective GitHub releases. See [release automation](docs/releases.md).
 
 ## Fast, shared package caching
 
@@ -112,10 +119,12 @@ Each SDK guide contains its own build and test commands:
 - [Build and test JavaScript](js/README.md#build-and-test-locally)
 - [Build and test Python](python/README.md#build-and-test-locally)
 - [Build and test Rust](rust/README.md#build-and-test-locally)
+- [Build and test Swift](swift/README.md#build-and-use-locally)
 
 CI runs the Rust and UniFFI foundation first, then JavaScript and Python in
-parallel. Cargo outputs, Wasmer registry/package data, and target-specific
-compiled artifacts are cached independently.
+parallel, with a separate native Swift job on macOS. Cargo outputs, Wasmer
+registry/package data, and target-specific compiled artifacts are cached
+independently.
 
 The SDK is currently alpha. Its cross-language shape is intentional, but error
 codes and less common capabilities may still evolve. For the architectural

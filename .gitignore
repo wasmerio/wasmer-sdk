@@ -6,3 +6,9 @@
 /js/pkg
 .DS_Store
 /packages/edgejs/
+
+/.build/
+/.swiftpm/
+/release-dist/
+/release-build/
+__pycache__/

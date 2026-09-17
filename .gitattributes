@@ -1,0 +1,2 @@
+# Preserve UniFFI output verbatim and collapse generated glue in code reviews.
+swift/Sources/WasmerSDKCore/WasmerSDKCore.swift linguist-generated=true -whitespace
