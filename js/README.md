@@ -74,6 +74,10 @@ void pump(bash.stderr);
 Call `sandbox.close()` and `wasmer.close()` when a long-lived application no
 longer needs them.
 
+An unexpected worker failure stops the client's worker pool and completes its
+active processes with a nonzero exit status. `wasmer.close()` rejects with
+`WORKER_FAILED`, including when shutdown was already waiting for that worker.
+
 ## Node.js networking and caching
 
 Use `network: { mode: "host" }` when a package needs TCP or DNS:

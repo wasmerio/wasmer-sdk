@@ -62,8 +62,8 @@ impl ThreadPool {
         })
     }
 
-    pub async fn close_and_wait(&self) {
-        self.scheduler.close_and_wait().await;
+    pub async fn close_and_wait(&self) -> Result<(), anyhow::Error> {
+        self.scheduler.close_and_wait().await
     }
 
     fn terminate_worker(
@@ -233,7 +233,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(receiver.await.unwrap(), 2);
-        pool.close_and_wait().await;
+        pool.close_and_wait().await.unwrap();
     }
 
     #[wasm_bindgen_test]
@@ -249,7 +249,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(receiver.await.unwrap(), 42);
-        pool.close_and_wait().await;
+        pool.close_and_wait().await.unwrap();
     }
 
     /// Regression test for wasmer-js#355: a worker must be marked busy before
@@ -274,6 +274,6 @@ mod tests {
             _ = timeout.fuse() => panic!("interdependent blocking tasks deadlocked"),
             _ = receiver_2 => {}
         }
-        pool.close_and_wait().await;
+        pool.close_and_wait().await.unwrap();
     }
 }

@@ -1,7 +1,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt::Debug,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
 };
 
 use anyhow::{Context, Error};
@@ -20,6 +23,7 @@ use crate::tasks::{
 pub(crate) struct Scheduler {
     scheduler_thread_id: u32,
     channel: UnboundedSender<SchedulerMessage>,
+    failure: Arc<Mutex<Option<String>>>,
 }
 
 impl Scheduler {
@@ -43,6 +47,15 @@ impl Scheduler {
                         break;
                     };
                     tracing::trace!(?msg, "Executing a message");
+                    if let SchedulerMessage::WorkerFailed = msg {
+                        // A trapped worker cannot send its final idle message.
+                        // Finish outstanding process joins before dropping the
+                        // pool, and preserve the failure for client shutdown.
+                        for worker in scheduler.wasm_workers.values() {
+                            worker.process.terminate(1.into());
+                        }
+                        break;
+                    }
                     if let SchedulerMessage::Close { completion, drain } = msg {
                         if let Some(completion) = completion {
                             close_completions.push(completion);
@@ -95,6 +108,7 @@ impl Scheduler {
         Scheduler {
             channel,
             scheduler_thread_id,
+            failure: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -121,6 +135,13 @@ impl Scheduler {
         }
     }
 
+    pub fn worker_failed(&self, worker_id: u32, message: String) {
+        let mut failure = self.failure.lock().unwrap();
+        failure.get_or_insert_with(|| format!("worker {worker_id} failed: {message}"));
+        drop(failure);
+        let _ = self.channel.send(SchedulerMessage::WorkerFailed);
+    }
+
     pub fn close(&self) {
         let _ = self.channel.send(SchedulerMessage::Close {
             completion: None,
@@ -128,7 +149,7 @@ impl Scheduler {
         });
     }
 
-    pub async fn close_and_wait(&self) {
+    pub async fn close_and_wait(&self) -> Result<(), Error> {
         let (completion, receiver) = tokio::sync::oneshot::channel();
         if self
             .channel
@@ -139,6 +160,10 @@ impl Scheduler {
             .is_ok()
         {
             let _ = receiver.await;
+        }
+        match self.failure.lock().unwrap().as_ref() {
+            Some(message) => Err(Error::msg(message.clone())),
+            None => Ok(()),
         }
     }
 
@@ -190,6 +215,7 @@ struct SchedulerState {
 #[derive(Debug)]
 struct WasmWorker {
     worker_id: u32,
+    process: wasmer_wasix::WasiProcess,
 }
 
 impl SchedulerState {
@@ -217,7 +243,7 @@ impl SchedulerState {
         message: SchedulerMessage,
     ) -> Result<(), Error> {
         match message {
-            SchedulerMessage::Close { .. } => {
+            SchedulerMessage::Close { .. } | SchedulerMessage::WorkerFailed => {
                 // Unreachable in practice: the receive loop breaks on Close
                 // before calling execute(), and dropping the state terminates
                 // every worker via WorkerHandle::drop.
@@ -237,10 +263,12 @@ impl SchedulerState {
             } => self.execute_from(Some(source_worker_id), *message),
             SchedulerMessage::SpawnWasm(task) => {
                 let task_key = task.task_key();
+                let process = task.process();
                 self.post_wasm_message_from(
                     source_worker_id,
                     PostMessagePayload::Blocking(BlockingJob::SpawnWasm(task)),
                     task_key,
+                    process,
                 )
             }
             SchedulerMessage::WorkerBusy { worker_id } => {
@@ -376,6 +404,7 @@ impl SchedulerState {
         source_worker_id: Option<u32>,
         msg: PostMessagePayload,
         task_key: (u32, u32),
+        process: wasmer_wasix::WasiProcess,
     ) -> Result<(), Error> {
         let reason = format!("wasm-{}.{}", task_key.0, task_key.1);
         let worker = self.next_available_worker(&reason)?;
@@ -384,6 +413,7 @@ impl SchedulerState {
             task_key,
             WasmWorker {
                 worker_id: worker.id(),
+                process,
             },
         );
         worker

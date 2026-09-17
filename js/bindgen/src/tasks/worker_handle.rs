@@ -45,7 +45,10 @@ impl WorkerHandle {
         worker.set_onmessage(Some(&on_message));
 
         let on_error: Closure<dyn FnMut(web_sys::ErrorEvent)> =
-            Closure::new(move |msg| on_error(msg, worker_id));
+            Closure::new(move |msg: web_sys::ErrorEvent| {
+                sender.worker_failed(worker_id, msg.message());
+                on_error(msg, worker_id);
+            });
         let on_error: js_sys::Function = on_error.into_js_value().unchecked_into();
         worker.set_onerror(Some(&on_error));
 

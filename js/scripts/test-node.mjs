@@ -2,6 +2,22 @@ import { spawn } from "node:child_process";
 
 const tests = [
   {
+    name: "worker-failure",
+    file: "tests/worker-failure.test.mjs",
+    testTimeoutMs: 15_000,
+    processTimeoutMs: 30_000,
+    attempts: 1,
+  },
+  {
+    name: "edgejs",
+    file: "tests/edgejs-http.test.mjs",
+    nodeArgs: ["--experimental-wasm-jspi"],
+    testTimeoutMs: 60_000,
+    processTimeoutMs: 120_000,
+    attempts: 1,
+    explicit: true,
+  },
+  {
     name: "service-worker-lifecycle",
     file: "tests/service-worker-lifecycle.test.mjs",
     testTimeoutMs: 15_000,
@@ -41,10 +57,10 @@ const tests = [
 const requested = new Set(process.argv.slice(2));
 const selected =
   requested.size === 0
-    ? tests
+    ? tests.filter((test) => !test.explicit)
     : tests.filter(({ name }) => requested.has(name));
 
-if (selected.length !== (requested.size || tests.length)) {
+if (requested.size > 0 && selected.length !== requested.size) {
   const known = new Set(tests.map(({ name }) => name));
   const unknown = [...requested].filter((name) => !known.has(name));
   throw new Error(`unknown Node test group: ${unknown.join(", ")}`);
@@ -70,7 +86,7 @@ for (const test of selected) {
 }
 
 function runTest(test) {
-  const args = ["--test"];
+  const args = [...(test.nodeArgs ?? []), "--test"];
   if (test.testTimeoutMs !== undefined) {
     args.push(`--test-timeout=${test.testTimeoutMs}`);
   }
@@ -79,26 +95,33 @@ function runTest(test) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
       stdio: "inherit",
+      // Node's test runner starts child processes of its own. Put the whole
+      // test in a process group so a stuck worker cannot survive its runner.
+      detached: process.platform !== "win32",
     });
     let timedOut = false;
-    let forceKill;
     const deadline = setTimeout(() => {
       timedOut = true;
       console.error(
         `${test.name} exceeded ${test.processTimeoutMs}ms; terminating it`,
       );
-      child.kill("SIGTERM");
-      forceKill = setTimeout(() => child.kill("SIGKILL"), 10_000);
+      if (process.platform === "win32") {
+        child.kill("SIGKILL");
+      } else {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch (error) {
+          if (error.code !== "ESRCH") throw error;
+        }
+      }
     }, test.processTimeoutMs);
 
     child.once("error", (error) => {
       clearTimeout(deadline);
-      clearTimeout(forceKill);
       reject(error);
     });
     child.once("close", (code, signal) => {
       clearTimeout(deadline);
-      clearTimeout(forceKill);
       resolve({
         code: timedOut ? 124 : code,
         signal,

@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import net from "node:net";
-import test from "node:test";
+import test, { afterEach } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { Wasmer } from "../dist/node.js";
+import { nodeWorkerStats } from "../dist/node-worker-adapter.js";
+
+afterEach(async () => {
+  const deadline = performance.now() + 5_000;
+  while (nodeWorkerStats().activeWorkers > 0) {
+    assert.ok(performance.now() < deadline, "workers did not stop after cleanup");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(nodeWorkerStats().workerFailures, 0, "a Wasmer worker crashed");
+});
 
 const serverSource = await readFile(
   new URL("../../fixtures/edgejs/server.js", import.meta.url),
