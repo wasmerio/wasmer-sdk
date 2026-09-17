@@ -97,8 +97,11 @@ import PackageDescription
 
 let package = Package(
   name: "WasmerSDK",
-  platforms: [.macOS(.v12)],
-  products: [.library(name: "WasmerSDK", targets: ["WasmerSDK"])],
+  platforms: [.macOS(.v12), .iOS("27.0")],
+  products: [
+    .library(name: "WasmerSDK", targets: ["WasmerSDK"]),
+    .library(name: "WasmerWKSDK", type: .static, targets: ["WasmerWKSDK"]),
+  ],
   targets: [
     .binaryTarget(name: "WasmerSDKFFI", {binary}),
     .target(
@@ -111,6 +114,10 @@ let package = Package(
       ]
     ),
     .target(name: "WasmerSDK", dependencies: ["WasmerSDKCore"], path: "swift/Sources/WasmerSDK"),
+    .target(
+      name: "WasmerWKSDK", path: "swift/WasmerWKSDK/Sources/WasmerWKSDK",
+      resources: [.copy("Web")]
+    ),
   ]
 )
 '''

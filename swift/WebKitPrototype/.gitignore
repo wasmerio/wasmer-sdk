@@ -1,5 +1,0 @@
-.build/
-__pycache__/
-.swiftpm/
-Artifacts/
-Sources/WasmerWebKit/Web/sdk/

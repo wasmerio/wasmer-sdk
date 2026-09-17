@@ -1,0 +1,17 @@
+{
+  "files": {
+    "LICENSE": "6350e730ed61a3ec83b5843634aa0a476505ec9b96792600606ced736835b45c",
+    "dist/browser-worker.js": "67e37f15fad0d5e9a87e85ed9903527a20c922ef70cfbf8f90b3f2c0df6221d9",
+    "dist/capi-worker-bridge.js": "fabe7fa99b107fcd08e14076ca2be50fc45ea73816fc15c96b13766e4eea260d",
+    "dist/host-filesystem.js": "69c372620cd28781f968b5f1e388e2814ebf22258d53a2422e82845ff99d1036",
+    "dist/node-network-rpc.js": "55fff532a77e467a13d99f8f77d189c334224b05783c73788ab2eb2e6971f4ca",
+    "pkg/snippets/wasmer-napi-4dc421676e010b84/acorn.LICENSE": "76a876cf886ff9be2a8b5e2e86514fed06223c8c9f0c1e9ee9606e93841e00b7",
+    "pkg/snippets/wasmer-napi-4dc421676e010b84/acorn.mjs": "953573b8fdab71599749ea5f2b33d3e760c2116178f9423ee7458dbe39d59453",
+    "pkg/snippets/wasmer-napi-4dc421676e010b84/inline0.js": "9f2ae7628f2ee0b054392499f3eff9496ec4e07e106e7db511dfea3513846c4c",
+    "pkg/wasmer_sdk_js.js": "7e43be2ea7769e3d79dc75048b82a91eb44dab2d3137252ab98484cfd6c18b99",
+    "pkg/wasmer_sdk_js_bg.wasm": "1f6a945a67043b2e262a8c696f93d5ca761ea7325fc5308479702b5b294eb954"
+  },
+  "rebuild": "python3 swift/WasmerWKSDK/scripts/prototype.py prepare --rebuild-wasm",
+  "sdk_version": "0.14.0",
+  "source_sha256": "87751d7e912bf12bf760671de0c5f30ded971a5d5e74a79c81ac6bfc7c281127"
+}

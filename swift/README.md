@@ -1,18 +1,26 @@
-# Wasmer SDK for Swift on macOS
+# Wasmer SDK for Swift
 
-Swift 6 bindings generated with UniFFI from the same Rust facade as the Python
-SDK. `WasmerSDK` adds an `async/await` API for packages, sandboxes, commands,
-process streams, files, and ports.
+Two SwiftPM products are available from this repository:
 
-This package targets native macOS applications. iOS support is deferred until
-the pinned Wasmer runtime has an iOS-capable backend.
+| Product | Platform | Backend |
+| --- | --- | --- |
+| `WasmerSDK` | macOS 12+ | Native Wasmer with UniFFI |
+| `WasmerWKSDK` | iOS 27+ | WASIX in a hidden, unattached WKWebView with JSPI |
 
-An experimental [invisible WebKit prototype](WebKitPrototype) runs Python on
-iOS 27+ using the JavaScript/WASIX backend, JSPI, and a native filesystem bridge. It is a
-separate package and is not yet part of this SDK's supported platform matrix.
-The [iOS terminal example](Examples/iOSTerminal) adds a native libghostty-vt
-terminal with an interactive Bash shell, Node.js, Python REPL, and cowsay,
-plus an in-app browser for guest HTTP servers.
+For iOS, add the **WasmerWKSDK** product in Xcode and `import WasmerWKSDK`.
+Its JavaScript and WebAssembly resources are bundled, so no Node or Rust
+installation is required. See the [iOS setup and Swift API](WasmerWKSDK/README.md)
+for the package revision, Info.plist entry, Python execution, and terminal APIs.
+The iOS backend remains experimental; it has been tested in the iOS 27 simulator
+and cross-compiled for devices, but has not been tested on a physical iPhone.
+
+[WasmerShell](Examples/WasmerShell) demonstrates a native libghostty-vt terminal
+with Bash, Node.js via Edge.js, Python, and cowsay. Native filesystem, DNS, and
+TCP allow `pnpm i react`; guest HTTP servers open in a separate browser view.
+
+The rest of this guide covers the native macOS `WasmerSDK` product. Its Swift 6
+bindings provide an `async/await` API for packages, sandboxes, commands, process
+streams, files, and ports.
 
 ## Install a binary release
 

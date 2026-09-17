@@ -90,9 +90,13 @@ downloads the checksummed XCFramework automatically; only the Swift wrapper is
 compiled on the consumer's machine. Swift 6 and macOS 12 or newer are required.
 See [the Swift guide](../swift/README.md) for the API and application entitlements.
 
-The root manifest in the initial development checkout points at the local
-XCFramework until the first Swift release is prepared. Use `swift/Package.swift`
-and `swift/scripts/build.py` for ongoing source development.
+Use `swift/Package.swift` and `swift/scripts/build.py` for ongoing native source
+development. The root manifest also exposes the `WasmerWKSDK` product for
+iOS 27+. Its JavaScript/Wasm resources are versioned under `swift/WasmerWKSDK`
+and need no native cross-compilation. The release manifest generator preserves
+both products. The existing 0.2.1 tag predates the iOS product; see the
+[iOS installation guide](../swift/WasmerWKSDK/README.md#add-to-an-ios-app) for
+the prerelease revision and resource regeneration instructions.
 
 ## Local validation
 
