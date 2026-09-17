@@ -357,18 +357,25 @@ fn handle_capi_delete(data: &JsValue, sender: &Scheduler, worker_id: u32) -> boo
 /// thread while a WASIX process blocks inside a worker.
 fn handle_host_rpc(data: &JsValue) -> bool {
     let global = js_sys::global();
-    let Ok(handler) = js_sys::Reflect::get(&global, &JsValue::from_str("__wasmerHandleNetworkRpc"))
-    else {
-        return false;
-    };
-    let Some(handler) = handler.dyn_ref::<js_sys::Function>() else {
-        return false;
-    };
-    handler
-        .call1(&global, data)
-        .ok()
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
+    for name in [
+        "__wasmerHandleFileSystemRpc",
+        "__wasmerHandleNetworkRpc",
+        "__wasmerHandleDiagnostic",
+    ] {
+        if let Ok(handler) = js_sys::Reflect::get(&global, &JsValue::from_str(name)) {
+            if let Some(handler) = handler.dyn_ref::<js_sys::Function>() {
+                if handler
+                    .call1(&global, data)
+                    .ok()
+                    .and_then(|value| value.as_bool())
+                    == Some(true)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 impl Drop for WorkerHandle {

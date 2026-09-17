@@ -25,6 +25,13 @@ const tests = [
     explicit: true,
   },
   {
+    name: "host-filesystem",
+    file: "tests/host-filesystem.test.mjs",
+    testTimeoutMs: 10_000,
+    processTimeoutMs: 15_000,
+    attempts: 1,
+  },
+  {
     name: "service-worker-lifecycle",
     file: "tests/service-worker-lifecycle.test.mjs",
     testTimeoutMs: 15_000,

@@ -7,6 +7,13 @@ process streams, files, and ports.
 This package targets native macOS applications. iOS support is deferred until
 the pinned Wasmer runtime has an iOS-capable backend.
 
+An experimental [invisible WebKit prototype](WebKitPrototype) runs Python on
+iOS 27+ using the JavaScript/WASIX backend, JSPI, and a native filesystem bridge. It is a
+separate package and is not yet part of this SDK's supported platform matrix.
+The [iOS terminal example](Examples/iOSTerminal) adds a native libghostty-vt
+terminal with an interactive Bash shell, Node.js, Python REPL, and cowsay,
+plus an in-app browser for guest HTTP servers.
+
 ## Install a binary release
 
 Swift releases use `wasmer-sdk-swift-v<version>` tags and attach a universal
