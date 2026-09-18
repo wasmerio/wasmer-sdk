@@ -1,0 +1,306 @@
+{
+  "investigatedOn": "2026-09-18",
+  "environment": {
+    "device": "iPhone 18 Pro simulator",
+    "iosVersion": "27.0 (24A434)",
+    "webkitVersion": "8625.1.29.10.29",
+    "chromiumVersion": "151.0.7922.34",
+    "v8Version": "15.1.206.8",
+    "webkitSourceRevision": "7ed302f504e22a82977a3ef7301b6580c5ba92a4",
+    "webkitSourceMatchesShippedBinary": "not established"
+  },
+  "notes": [
+    "Collection probe always uses shared memory with initial 133 and maximum 2048 Wasm pages.",
+    "Collection pressure on iOS does not guarantee full garbage collection.",
+    "passed refers to completing the allocation loop, not to diagnostic retry success.",
+    "Wrapper counts are WeakRef observations, not a count of distinct native reservations.",
+    "Four-worker allocation control predates the additional size/access metadata fields; it uses initial 133, maximum 2048, and buffer access.",
+    "Counts depend on collection timing and are not fixed engine limits."
+  ],
+  "runs": [
+    {
+      "artifact": "chromium-20-collection-none.json",
+      "result": {
+        "kind": "result",
+        "probe": "collection",
+        "gcMode": "none",
+        "workers": 20,
+        "iterations": 2000,
+        "count": 124,
+        "passed": false,
+        "error": "RangeError: WebAssembly.Memory(): could not allocate memory",
+        "collectionMethod": "explicit GC",
+        "producerBefore": {
+          "tracked": 124,
+          "alive": 1
+        },
+        "receiversBefore": {
+          "tracked": 124,
+          "alive": 124,
+          "buffers": {
+            "tracked": 124,
+            "alive": 124
+          }
+        },
+        "producerAfter": {
+          "tracked": 124,
+          "alive": 1
+        },
+        "retryAfterProducerCollection": "RangeError: WebAssembly.Memory(): could not allocate memory",
+        "receiversAfter": {
+          "tracked": 124,
+          "alive": 0,
+          "buffers": {
+            "tracked": 124,
+            "alive": 0
+          }
+        },
+        "retryAfterReceiverCollection": "success",
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.7922.34 Safari/537.36",
+        "crossOriginIsolated": true,
+        "browserVersion": "151.0.7922.34",
+        "jsVersion": "15.1.206.8"
+      }
+    },
+    {
+      "artifact": "chromium-20-collection-producer.json",
+      "result": {
+        "kind": "result",
+        "probe": "collection",
+        "gcMode": "producer",
+        "workers": 20,
+        "iterations": 2000,
+        "count": 123,
+        "passed": false,
+        "error": "RangeError: WebAssembly.Memory(): could not allocate memory",
+        "collectionMethod": "explicit GC",
+        "producerBefore": {
+          "tracked": 123,
+          "alive": 1
+        },
+        "receiversBefore": {
+          "tracked": 123,
+          "alive": 123,
+          "buffers": {
+            "tracked": 123,
+            "alive": 123
+          }
+        },
+        "producerAfter": {
+          "tracked": 123,
+          "alive": 1
+        },
+        "retryAfterProducerCollection": "RangeError: WebAssembly.Memory(): could not allocate memory",
+        "receiversAfter": {
+          "tracked": 123,
+          "alive": 0,
+          "buffers": {
+            "tracked": 123,
+            "alive": 0
+          }
+        },
+        "retryAfterReceiverCollection": "success",
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.7922.34 Safari/537.36",
+        "crossOriginIsolated": true,
+        "browserVersion": "151.0.7922.34",
+        "jsVersion": "15.1.206.8"
+      }
+    },
+    {
+      "artifact": "chromium-20-collection-receivers.json",
+      "result": {
+        "kind": "result",
+        "probe": "collection",
+        "gcMode": "receivers",
+        "workers": 20,
+        "iterations": 2000,
+        "count": 2000,
+        "passed": true,
+        "error": null,
+        "collectionMethod": "explicit GC",
+        "producerBefore": {
+          "tracked": 2000,
+          "alive": 20
+        },
+        "receiversBefore": {
+          "tracked": 2000,
+          "alive": 0,
+          "buffers": {
+            "tracked": 2000,
+            "alive": 0
+          }
+        },
+        "producerAfter": {
+          "tracked": 2000,
+          "alive": 1
+        },
+        "retryAfterProducerCollection": "success",
+        "receiversAfter": {
+          "tracked": 2000,
+          "alive": 0,
+          "buffers": {
+            "tracked": 2000,
+            "alive": 0
+          }
+        },
+        "retryAfterReceiverCollection": "success",
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.7922.34 Safari/537.36",
+        "crossOriginIsolated": true,
+        "browserVersion": "151.0.7922.34",
+        "jsVersion": "15.1.206.8"
+      }
+    },
+    {
+      "artifact": "ios-20-collection-none-visible0.json",
+      "result": {
+        "collectionMethod": "128 MiB temporary allocation pressure",
+        "count": 53,
+        "crossOriginIsolated": true,
+        "error": "RangeError: Out of memory",
+        "gcMode": "none",
+        "iterations": 2000,
+        "kind": "result",
+        "osVersion": "Version 27.0 (Build 24A434)",
+        "passed": false,
+        "probe": "collection",
+        "producerAfter": {
+          "alive": 0,
+          "tracked": 53
+        },
+        "producerBefore": {
+          "alive": 1,
+          "tracked": 53
+        },
+        "receiversAfter": {
+          "alive": 7,
+          "buffers": {
+            "alive": 7,
+            "tracked": 53
+          },
+          "tracked": 53
+        },
+        "receiversBefore": {
+          "alive": 33,
+          "buffers": {
+            "alive": 33,
+            "tracked": 53
+          },
+          "tracked": 53
+        },
+        "retryAfterProducerCollection": "RangeError: Out of memory",
+        "retryAfterReceiverCollection": "success",
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        "webViewAttached": false,
+        "workers": 20
+      }
+    },
+    {
+      "artifact": "ios-1-shared-initial133-max2048-ignore-delay0-recycle0-visible0.json",
+      "result": {
+        "count": 33,
+        "crossOriginIsolated": true,
+        "delayMs": 0,
+        "elapsedMs": 14,
+        "error": "RangeError: Out of memory",
+        "initial": 133,
+        "iterations": 2000,
+        "kind": "result",
+        "maximum": 2048,
+        "mode": "shared",
+        "osVersion": "Version 27.0 (Build 24A434)",
+        "passed": false,
+        "receiverAccess": "ignore",
+        "recycleEvery": 0,
+        "stack": "Memory@[native code]\nmodule code@http://127.0.0.1:64042/producer.js:48:42",
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        "webViewAttached": false,
+        "workers": 1
+      }
+    },
+    {
+      "artifact": "ios-20-shared-initial1-max2048-buffer-delay0-recycle0-visible0.json",
+      "result": {
+        "count": 33,
+        "crossOriginIsolated": true,
+        "delayMs": 0,
+        "elapsedMs": 27,
+        "error": "RangeError: Out of memory",
+        "initial": 1,
+        "iterations": 2000,
+        "kind": "result",
+        "maximum": 2048,
+        "mode": "shared",
+        "osVersion": "Version 27.0 (Build 24A434)",
+        "passed": false,
+        "receiverAccess": "buffer",
+        "recycleEvery": 0,
+        "stack": "Memory@[native code]\nmodule code@http://127.0.0.1:64048/producer.js:48:42",
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        "webViewAttached": false,
+        "workers": 20
+      }
+    },
+    {
+      "artifact": "ios-20-shared-initial133-max512-buffer-delay0-recycle0-visible0.json",
+      "result": {
+        "count": 2000,
+        "crossOriginIsolated": true,
+        "delayMs": 0,
+        "elapsedMs": 901,
+        "initial": 133,
+        "iterations": 2000,
+        "kind": "result",
+        "maximum": 512,
+        "mode": "shared",
+        "osVersion": "Version 27.0 (Build 24A434)",
+        "passed": true,
+        "receiverAccess": "buffer",
+        "recycleEvery": 0,
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        "webViewAttached": false,
+        "workers": 20
+      }
+    },
+    {
+      "artifact": "ios-20-shared-initial133-max2048-buffer-delay0-recycle0-visible1.json",
+      "result": {
+        "count": 54,
+        "crossOriginIsolated": true,
+        "delayMs": 0,
+        "elapsedMs": 49,
+        "error": "RangeError: Out of memory",
+        "initial": 133,
+        "iterations": 2000,
+        "kind": "result",
+        "maximum": 2048,
+        "mode": "shared",
+        "osVersion": "Version 27.0 (Build 24A434)",
+        "passed": false,
+        "receiverAccess": "buffer",
+        "recycleEvery": 0,
+        "stack": "Memory@[native code]\nmodule code@http://127.0.0.1:64058/producer.js:48:42",
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        "webViewAttached": true,
+        "workers": 20
+      }
+    },
+    {
+      "artifact": "ios-shared-4-delay0-recycle0.json",
+      "result": {
+        "count": 2000,
+        "crossOriginIsolated": true,
+        "delayMs": 0,
+        "elapsedMs": 25326,
+        "iterations": 2000,
+        "kind": "result",
+        "mode": "shared",
+        "osVersion": "Version 27.0 (Build 24A434)",
+        "passed": true,
+        "recycleEvery": 0,
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+        "webViewAttached": false,
+        "workers": 4
+      }
+    }
+  ]
+}

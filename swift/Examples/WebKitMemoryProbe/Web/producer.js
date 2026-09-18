@@ -5,14 +5,20 @@ const workerCount = Number(options.get('workers') ?? 20);
 const iterations = Number(options.get('iterations') ?? 2000);
 const delayMs = Number(options.get('delayMs') ?? 0);
 const recycleEvery = Number(options.get('recycleEvery') ?? 0);
+const initial = Number(options.get('initial') ?? 133);
+const maximum = Number(options.get('maximum') ?? 2048);
+const receiverAccess = options.get('receiverAccess') ?? 'buffer';
 if (!['shared', 'local'].includes(mode) || !Number.isInteger(workerCount)
     || workerCount < 1 || workerCount > 64 || !Number.isInteger(iterations)
     || iterations < 1 || !Number.isFinite(delayMs) || delayMs < 0
-    || !Number.isInteger(recycleEvery) || recycleEvery < 0)
+    || !Number.isInteger(recycleEvery) || recycleEvery < 0
+    || !Number.isInteger(initial) || !Number.isInteger(maximum)
+    || initial < 1 || maximum < initial || maximum > 65536
+    || !['buffer', 'ignore'].includes(receiverAccess))
   throw new Error('Invalid probe options');
 
 const createWorkers = () => Array.from({ length: workerCount }, () =>
-  new Worker('./consumer.js', { type: 'module' }));
+  new Worker(`./consumer.js?receiverAccess=${receiverAccess}`, { type: 'module' }));
 let workers = createWorkers();
 
 function send(worker, message) {
@@ -28,7 +34,8 @@ function send(worker, message) {
 let count = 0;
 const started = performance.now();
 function report(kind, extra = {}) {
-  postMessage({ kind, mode, workers: workerCount, iterations, delayMs, recycleEvery, count,
+  postMessage({ kind, mode, workers: workerCount, iterations, delayMs, recycleEvery,
+    initial, maximum, receiverAccess, count,
     elapsedMs: Math.round(performance.now() - started), ...extra });
 }
 try {
@@ -38,7 +45,7 @@ try {
       for (const worker of workers) worker.terminate();
       workers = createWorkers();
     }
-    const memory = new WebAssembly.Memory({ initial: 133, maximum: 2048, shared: true });
+    const memory = new WebAssembly.Memory({ initial, maximum, shared: true });
     // Both modes allocate the same memory and wait for the same worker ack.
     // Only shared mode gives the receiver another wrapper for that memory.
     await send(workers[count % workers.length], mode === 'shared'

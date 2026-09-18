@@ -11,6 +11,10 @@ verified dispatcher retention bug, but a clean full iOS run still failed after
 error without Wasmer or any package manager. The evidence points to delayed
 reclamation of shared-memory reservations across worker heaps.
 
+The [follow-up research](ios-webkit-memory-research.md) directly tests producer
+versus receiver collection, reproduces failure with a visible WebView, and
+traces the reservation/accounting paths in pinned WebKit and V8 source.
+
 ## Failing allocation
 
 The failure is reproducible after repeated package installs, but the number
@@ -99,7 +103,7 @@ delays were present in that validation run.
 ## Engine-only reproduction
 
 [`WebKitMemoryProbe`](../swift/Examples/WebKitMemoryProbe/README.md) is a small
-Swift app plus three web assets. Its WKWebView remains unattached. A producer
+Swift app plus web assets. Its WKWebView is unattached by default. A producer
 creates shared `WebAssembly.Memory` objects with `{initial: 133, maximum: 2048}`
 and sends each to a receiving worker, which touches one byte and acknowledges
 it. No module is instantiated and neither side keeps a collection of memories.

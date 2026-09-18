@@ -2,8 +2,9 @@ import SwiftUI
 import WebKit
 
 @MainActor final class Probe: NSObject, ObservableObject, WKScriptMessageHandler {
-  @Published var status = "Starting unattached WKWebView memory probe"
-  private var webView: WKWebView?
+  @Published var status = "Starting WKWebView memory probe"
+  @Published var webView: WKWebView?
+  let visible = CommandLine.arguments.contains("--visible")
 
   func start() {
     guard webView == nil else { return }
@@ -35,6 +36,19 @@ import WebKit
 @main struct MemoryProbe: App {
   @StateObject private var probe = Probe()
   var body: some Scene {
-    WindowGroup { ScrollView { Text(probe.status).monospaced() }.task { probe.start() } }
+    WindowGroup {
+      VStack {
+        if probe.visible, let view = probe.webView {
+          VisibleProbe(view: view).frame(height: 200)
+        }
+        ScrollView { Text(probe.status).monospaced() }
+      }.task { probe.start() }
+    }
   }
+}
+
+private struct VisibleProbe: UIViewRepresentable {
+  let view: WKWebView
+  func makeUIView(context: Context) -> WKWebView { view }
+  func updateUIView(_ view: WKWebView, context: Context) {}
 }

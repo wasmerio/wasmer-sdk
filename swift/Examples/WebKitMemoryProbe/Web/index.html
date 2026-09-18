@@ -10,7 +10,9 @@
     if (data.kind === 'result') globalThis.probeResult = data;
     window.webkit?.messageHandlers?.probe?.postMessage(data);
   }
-  const worker = new Worker(`./producer.js${location.search}`, { type: 'module' });
+  const probe = new URL(location.href).searchParams.get('probe') ?? 'allocation';
+  const script = probe === 'collection' ? 'collection-producer.js' : 'producer.js';
+  const worker = new Worker(`./${script}${location.search}`, { type: 'module' });
   worker.onmessage = ({ data }) => report(data);
   worker.onerror = event => report({
     kind: 'result', passed: false, error: event.message, stack: event.error?.stack,
