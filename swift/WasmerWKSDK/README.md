@@ -73,6 +73,10 @@ guest HTTP to a browser with `sandbox.ports.expose(port)`. Retain the returned
 `ExposedPort`, use its `url`, and call `close()` when done. Closing the sandbox or
 client also stops its preview listeners. Networking is disabled by default.
 
+As in the Rust/JS SDK, `sandbox.fs` manages the sandbox workspace. Directory
+mounts are attached to guest processes; access them from guest code or through
+the original native directory URL.
+
 Swift task cancellation cancels the affected bridge request and terminates its
 associated process where applicable. Other sandboxes keep running. Explicitly
 close sandboxes and the client to release workers, native handles, and listeners.

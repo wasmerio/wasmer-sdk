@@ -100,18 +100,27 @@ func runSDKContract(fixtures: URL) async throws -> [String] {
       for directory in [firstDirectory, secondDirectory] {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
       }
+      let python = try await client.packages.load("python/python@=3.13.20")
       let mountedA = try await client.sandboxes.create(
-        network: .host, mounts: [.init("/host", directory: firstDirectory)])
+        packages: [.package(python)], network: .host,
+        mounts: [.init("/host", directory: firstDirectory)])
       let mountedB = try await client.sandboxes.create(
-        network: .host, mounts: [.init("/host", directory: secondDirectory)])
-      try await mountedA.fs.writeText("/host/file", "first")
-      try await mountedB.fs.writeText("/host/file", "second")
+        packages: [.package(python)], network: .host,
+        mounts: [.init("/host", directory: secondDirectory)])
+      _ = try await mountedA.command(
+        "python", ["-c", "from pathlib import Path; Path('/host/file').write_text('first')"]
+      ).run(timeout: 60)
+      _ = try await mountedB.command(
+        "python", ["-c", "from pathlib import Path; Path('/host/file').write_text('second')"]
+      ).run(timeout: 60)
       try check(
         try String(contentsOf: firstDirectory.appendingPathComponent("file"), encoding: .utf8)
           == "first", "mount isolation")
       try await mountedA.close()
       try check(
-        try await mountedB.fs.readText("/host/file") == "second", "independent mount lifetime")
+        try await mountedB.command(
+          "python", ["-c", "from pathlib import Path; print(Path('/host/file').read_text())"]
+        ).run(timeout: 60).text() == "second\n", "independent mount lifetime")
       try check(try await mountedB.ports.listening() == [], "independent network lifetime")
       try await mountedB.close()
       do {
