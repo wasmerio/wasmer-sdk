@@ -91,7 +91,7 @@ jobs:
         run: python3 swift/scripts/test.py
 
   swift-webkit:
-    name: Swift (WasmerWKSDK)
+    name: Swift (WebKit backend)
     runs-on: macos-15
     timeout-minutes: 15
     steps:

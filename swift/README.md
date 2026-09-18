@@ -1,26 +1,42 @@
 # Wasmer SDK for Swift
 
-Two SwiftPM products are available from this repository:
+One SwiftPM product, **`WasmerSDK`**, provides the same Swift API on both platforms:
 
-| Product | Platform | Backend |
+| Platform | Internal backend |
+| --- | --- |
+| macOS 12+ | Native Wasmer with UniFFI |
+| iOS 27+ | WASIX in a hidden, unattached WKWebView with JSPI |
+
+Both use `import WasmerSDK` and the same `Wasmer → packages / sandboxes → command → run / spawn`
+model as the Rust, Python, and JavaScript SDKs. Package definitions, raw Wasm and
+WEBC bytes, registry packages, command references, captured output, live streams,
+exit checking, timeouts, files, and sandbox lifetime share one facade. Applications
+do not create or attach a runtime WebView, and SDK calls are not main-actor-only.
+
+The iOS backend is experimental. Its JS/Wasm resources ship in the Swift package;
+consumers need neither Node nor Rust. See [iOS setup](WasmerWKSDK/README.md).
+The existing `wasmer-sdk-swift-v0.2.1` release predates iOS support: use the
+`codex/wasmer-shell-ios` branch until a release includes this change.
+
+Optional features have explicit capability flags and throw `CAPABILITY_UNAVAILABLE`
+when unsupported by the selected backend:
+
+| Capability | macOS native binding | iOS WebKit binding |
 | --- | --- | --- |
-| `WasmerSDK` | macOS 12+ | Native Wasmer with UniFFI |
-| `WasmerWKSDK` | iOS 27+ | WASIX in a hidden, unattached WKWebView with JSPI |
+| Local package directories | Yes | Use a package definition or WEBC instead |
+| App directory mounts | Not yet exposed | `DirectoryMount` |
+| Terminal / resize | Not yet exposed | `TerminalOptions`, `resizeTerminal` |
+| HTTP discovery / exposure | Not yet exposed | `ports.listening()`, `ports.expose()` |
 
-For iOS, add the **WasmerWKSDK** product in Xcode and `import WasmerWKSDK`.
-Its JavaScript and WebAssembly resources are bundled, so no Node or Rust
-installation is required. See the [iOS setup and Swift API](WasmerWKSDK/README.md)
-for the package revision, Info.plist entry, Python execution, and terminal APIs.
-The iOS backend remains experimental; it has been tested in the iOS 27 simulator
-and cross-compiled for devices, but has not been tested on a physical iPhone.
+Inspect `wasmer.capabilities` when using these optional features. `.host` networking
+uses the native runtime on macOS and native DNS/TCP on iOS; iOS does not support UDP
+or arbitrary inbound native sockets. The Swift surface is shared; backend capabilities
+and platform restrictions are not identical.
 
-[WasmerShell](Examples/WasmerShell) demonstrates a native libghostty-vt terminal
-with Bash, Node.js via Edge.js, Python, and cowsay. Native filesystem, DNS, and
-TCP allow `pnpm i react`; guest HTTP servers open in a separate browser view.
-
-The rest of this guide covers the native macOS `WasmerSDK` product. Its Swift 6
-bindings provide an `async/await` API for packages, sandboxes, commands, process
-streams, files, and ports.
+[WasmerShell](Examples/WasmerShell) uses only the public SDK API for its native
+libghostty-vt terminal, Bash, Node.js via Edge.js, Python, cowsay, and `pnpm i react`.
+Guest HTTP servers open in a separate browser view. The iOS implementation has been
+tested in the simulator and cross-compiled for devices; physical-device testing remains.
 
 ## Install a binary release
 

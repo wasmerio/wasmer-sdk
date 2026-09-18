@@ -83,3 +83,22 @@ test('RPC reports DNS errors and binary/would-block/EOF without hanging a worker
   assert.equal(control[1], 5);
   bridge.close();
 });
+
+test('separate sandbox bridges route independently and close only their own requests', async () => {
+  const { installNativeNetworkGlobals, receiveNativeNetworkReply } = await import('../Sources/WasmerWKSDK/Web/native-network.js');
+  const original = globalThis.postMessage;
+  const messages = [];
+  globalThis.postMessage = message => messages.push(message);
+  const a = new NativeNetworkBridge(), b = new NativeNetworkBridge();
+  try {
+    installNativeNetworkGlobals(a); installNativeNetworkGlobals(b);
+    assert.notEqual(a.id, b.id);
+    const first = globalThis.__wasmerHostResolve(a.id, 'first.test');
+    const second = globalThis.__wasmerHostResolve(b.id, 'second.test');
+    const rejected = assert.rejects(first, /closed/);
+    a.close(); await rejected;
+    receiveNativeNetworkReply({ kind: 'networkResult', id: messages[1].id, value: ['127.0.0.2'] });
+    assert.deepEqual(await second, ['127.0.0.2']);
+    assert.throws(() => globalThis.__wasmerHostResolve(a.id, 'first.test'), /unknown/);
+  } finally { a.close(); b.close(); globalThis.postMessage = original; }
+});

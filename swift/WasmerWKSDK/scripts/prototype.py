@@ -15,7 +15,7 @@ REPO = ROOT.parents[1]
 ARTIFACTS = ROOT / "Artifacts"
 BUNDLE_ID = "io.wasmer.sdk.webkit-prototype"
 MINIMUM_IOS = 27
-SDKS = {"simulator": "iphonesimulator", "device": "iphoneos", "macos": "macosx"}
+SDKS = {"simulator": "iphonesimulator", "device": "iphoneos"}
 ENV = {**os.environ, "DEVELOPER_DIR": os.environ.get("DEVELOPER_DIR", "/Applications/Xcode.app/Contents/Developer")}
 
 
@@ -37,11 +37,10 @@ def prepare(rebuild=False):
 def build_package(platform, scratch):
     """Build the repository's public SwiftPM product, including its resources."""
     sdk = SDKS[platform]
-    target = {"simulator": "arm64-apple-ios27.0-simulator", "device": "arm64-apple-ios27.0",
-              "macos": "arm64-apple-macos14.0"}[platform]
+    target = {"simulator": "arm64-apple-ios27.0-simulator", "device": "arm64-apple-ios27.0"}[platform]
     options = ["--package-path", REPO, "--scratch-path", scratch, "--configuration", "release",
                "--triple", target, "--sdk", output("xcrun", "--sdk", sdk, "--show-sdk-path")]
-    run("xcrun", "swift", "build", *options, "--product", "WasmerWKSDK")
+    run("xcrun", "swift", "build", *options, "--product", "WasmerSDK")
     return Path(output("xcrun", "swift", "build", *options, "--show-bin-path"))
 
 
@@ -55,31 +54,29 @@ def copy_resources(library, destination):
 
 def build(platform):
     sdk = SDKS[platform]
-    target = {"simulator": "arm64-apple-ios27.0-simulator", "device": "arm64-apple-ios27.0", "macos": "arm64-apple-macos14.0"}[platform]
+    target = {"simulator": "arm64-apple-ios27.0-simulator", "device": "arm64-apple-ios27.0"}[platform]
     app = ARTIFACTS / platform / "WasmerWKSDKProbe.app"
-    resources = app / "Contents/Resources" if platform == "macos" else app
-    executable = app / "Contents/MacOS/WasmerWKSDKProbe" if platform == "macos" else app / "WasmerWKSDKProbe"
+    resources = app
+    executable = app / "WasmerWKSDKProbe"
     executable.parent.mkdir(parents=True, exist_ok=True)
     resources.mkdir(parents=True, exist_ok=True)
     library = build_package(platform, ROOT / ".build/package")
-    main = ROOT / "Demo" / ("macOSMain.swift" if platform == "macos" else "iOSApp.swift")
+    main = ROOT / "Demo/iOSApp.swift"
     run("xcrun", "--sdk", sdk, "swiftc", "-swift-version", "6", "-parse-as-library", "-target", target,
         "-sdk", output("xcrun", "--sdk", sdk, "--show-sdk-path"), "-O", "-I", library, "-I", library / "Modules",
-        ROOT / "Demo/Probe.swift", main, library / "libWasmerWKSDK.a", "-o", executable)
+        ROOT / "Demo/Probe.swift", REPO / "swift/Tests/WasmerSDKTests/SDKContract.swift", main, library / "libWasmerSDK.a", "-o", executable)
     copy_resources(library, resources)
     shutil.copyfile(ROOT / "Demo/python-smoke.py", resources / "python-smoke.py")
+    shutil.copytree(REPO / "swift/Tests/WasmerSDKTests/Fixtures", resources / "Fixtures", dirs_exist_ok=True)
     info = {
         "CFBundleIdentifier": BUNDLE_ID, "CFBundleExecutable": "WasmerWKSDKProbe",
         "CFBundleName": "WasmerWKSDK Probe", "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "1",
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
     }
-    if platform == "macos":
-        info.update(LSMinimumSystemVersion="14.0", LSUIElement=True)
-    else:
-        info.update(MinimumOSVersion="27.0", UIDeviceFamily=[1, 2], UILaunchScreen={},
+    info.update(MinimumOSVersion="27.0", UIDeviceFamily=[1, 2], UILaunchScreen={},
                     UIApplicationSceneManifest={"UIApplicationSupportsMultipleScenes": False})
-    with (app / "Contents/Info.plist" if platform == "macos" else app / "Info.plist").open("wb") as stream:
+    with (app / "Info.plist").open("wb") as stream:
         plistlib.dump(info, stream)
     run("codesign", "--force", "--sign", "-", app)
     return app
@@ -133,12 +130,12 @@ def simulator_run(app, selected):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["prepare", "build", "run"])
-    parser.add_argument("--platform", choices=["simulator", "device", "macos"], default="simulator")
+    parser.add_argument("--platform", choices=["simulator", "device"], default="simulator")
     parser.add_argument("--device", help="Simulator UDID")
     parser.add_argument("--rebuild-wasm", action="store_true")
     args = parser.parse_args()
     selected = None
-    if args.action != "prepare" and args.platform != "macos":
+    if args.action != "prepare":
         version = output("xcrun", "--sdk", SDKS[args.platform], "--show-sdk-version")
         if int(version.split(".", 1)[0]) < MINIMUM_IOS:
             raise SystemExit(f"iOS 27+ SDK required (found {version}); point DEVELOPER_DIR at Xcode 27")
@@ -155,8 +152,6 @@ def main():
     if args.action == "run":
         if args.platform == "simulator":
             simulator_run(app, selected)
-        elif args.platform == "macos":
-            run(app / "Contents/MacOS/WasmerWKSDKProbe")
         else:
             raise SystemExit("Device builds need development signing before installation; use the Swift package in an Xcode iOS app")
 

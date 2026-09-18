@@ -91,11 +91,12 @@ compiled on the consumer's machine. Swift 6 and macOS 12 or newer are required.
 See [the Swift guide](../swift/README.md) for the API and application entitlements.
 
 Use `swift/Package.swift` and `swift/scripts/build.py` for ongoing native source
-development. The root manifest also exposes the `WasmerWKSDK` product for
-iOS 27+. Its JavaScript/Wasm resources are versioned under `swift/WasmerWKSDK`
+development. The root manifest exposes the same `WasmerSDK` product for
+iOS 27+, selecting the WebKit backend internally. Its JavaScript/Wasm resources are versioned under `swift/WasmerWKSDK`
 and need no native cross-compilation. The release manifest generator preserves
-both products. The existing 0.2.1 tag predates the iOS product; see the
-[iOS installation guide](../swift/WasmerWKSDK/README.md#add-to-an-ios-app) for
+the conditional backend dependencies and resource bundle. The existing 0.2.1 tag
+predates iOS support; see the
+[iOS installation guide](../swift/WasmerWKSDK/README.md#add-to-an-app) for
 the prerelease revision and resource regeneration instructions.
 
 ## Local validation

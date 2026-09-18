@@ -54,7 +54,7 @@ def build(platform):
         "-c", ROOT / "GhosttyBridge.c", "-o", obj)
     run("xcrun", "--sdk", sdk, "swiftc", "-swift-version", "6", "-parse-as-library",
         "-target", target, "-sdk", sdk_path, "-O", "-import-objc-header", ROOT / "GhosttyBridge.h",
-        "-I", library, "-I", library / "Modules", *sorted(ROOT.glob("*.swift")), obj, library / "libWasmerWKSDK.a",
+        "-I", library, "-I", library / "Modules", *sorted(ROOT.glob("*.swift")), obj, library / "libWasmerSDK.a",
         prefix / "lib/libghostty-vt.a", "-o", app / "WasmerShell")
     copy_resources(library, app)
     examples = app / "Examples"

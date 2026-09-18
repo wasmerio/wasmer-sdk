@@ -1,4 +1,4 @@
-import WasmerWKSDK
+import WasmerSDK
 import Foundation
 import SwiftUI
 
@@ -69,11 +69,11 @@ final class TerminalSession: ObservableObject {
   private var listeningPorts: Set<UInt16> = []
   private var openingPorts: Set<UInt16> = []
   private var previewGeneration = 0
-  private var runtime: HeadlessWasmer?
+  private var runtime: ShellRuntime?
   private var inputTask: Task<Void, Never>?
   private var resizeGeneration = 0
   private var transcript = Data()
-  private var exit: CommandOutput?
+  private var exit: Output?
   private let smoke = ProcessInfo.processInfo.arguments.contains("--smoke-test")
   private let directory = URL.documentsDirectory.appendingPathComponent("WasmerTerminal")
 
@@ -94,7 +94,7 @@ final class TerminalSession: ObservableObject {
         print("Saved hello.txt in the native Documents directory.")
         """.utf8).write(to: demo)
       }
-      let host = try HeadlessWasmer(directory: directory)
+      let host = try ShellRuntime(directory: directory)
       runtime = host
       transcript.removeAll(); exit = nil
       host.onProgress = { [weak self] message in
@@ -132,8 +132,8 @@ final class TerminalSession: ObservableObject {
           } catch is CancellationError {} catch { self?.status = error.localizedDescription }
         }
       }
-      let capabilities = try await host.start()
-      guard capabilities.jspi, !capabilities.webViewAttached else { throw WebKitRuntimeError.failed("iOS 27 JSPI is required") }
+      try await host.start()
+      guard !host.isWebViewAttached else { throw DemoError.failed("Runtime WebView was attached") }
       view.feed(Data("\u{1b}[2J\u{1b}[H\u{1b}[1;32mLocal programs. Native terminal.\u{1b}[0m\r\nTry python, node, or cowsay hello.\r\nRun node node/server.js to open a browser.\r\nExamples are in /native/node and /native/python.\r\n\r\n".utf8))
       try await host.startTerminal(columns: view.columns, rows: view.rows)
       ready = true; status = "Bash · Node.js · Python"
@@ -199,7 +199,7 @@ final class TerminalSession: ObservableObject {
     presentedPreview = preview
   }
 
-  private func updatePorts(_ ports: [UInt16], host: HeadlessWasmer) {
+  private func updatePorts(_ ports: [UInt16], host: ShellRuntime) {
     listeningPorts = Set(ports)
     for preview in previews where !listeningPorts.contains(preview.port) {
       if presentedPreview?.id == preview.id { presentedPreview = nil }
@@ -213,19 +213,15 @@ final class TerminalSession: ObservableObject {
       Task { [weak self, weak host] in
         guard let self, let host else { return }
         defer { if self.previewGeneration == generation { self.openingPorts.remove(port) } }
-        let server = GuestHTTPServer { [weak host] request in
-          guard let host else { throw WebKitRuntimeError.failed("Runtime closed") }
-          return try await host.handleHTTPRequest(port: port, request: request)
-        }
         do {
-          let url = try await server.start()
+          let server = try await host.expose(port)
           guard self.runtime === host, self.previewGeneration == generation, self.listeningPorts.contains(port) else {
-            server.stop(); return
+            server.close(); return
           }
-          let preview = ServerPreview(port: port, server: server, url: url)
+          let preview = ServerPreview(port: port, server: server, url: server.url)
           self.previews.append(preview)
           self.present(preview)
-        } catch { server.stop(); self.status = error.localizedDescription }
+        } catch { self.status = error.localizedDescription }
       }
     }
   }
@@ -245,12 +241,12 @@ final class TerminalSession: ObservableObject {
   private func waitFor(_ marker: String, after offset: Int = 0, timeout: Int = 45) async throws {
     let deadline = ContinuousClock.now + .seconds(timeout)
     while !String(text.dropFirst(offset)).contains(marker) {
-      if let exit { throw WebKitRuntimeError.failed("Session exited early: \(exit.exitCode)") }
-      guard ContinuousClock.now < deadline else { throw WebKitRuntimeError.failed("Timed out waiting for \(marker)") }
+      if let exit { throw DemoError.failed("Session exited early: \(exit.exitCode)") }
+      guard ContinuousClock.now < deadline else { throw DemoError.failed("Timed out waiting for \(marker)") }
       try await Task.sleep(for: .milliseconds(50))
     }
   }
-  private func runSmokeTest(_ host: HeadlessWasmer) async {
+  private func runSmokeTest(_ host: ShellRuntime) async {
     var report: [String: Any] = ["passed": false, "renderer": "libghostty-vt", "osVersion": ProcessInfo.processInfo.operatingSystemVersionString]
     do {
       try? FileManager.default.removeItem(at: directory.appendingPathComponent("terminal-test.txt"))
@@ -291,11 +287,11 @@ final class TerminalSession: ObservableObject {
       try await host.writeTerminal(Data("printf '\\033[32mRENDER_OK\\033[0m\\n'\r".utf8))
       try await waitFor("\nRENDER_OK\n")
       guard String(decoding: transcript, as: UTF8.self).contains("\u{1b}[32mRENDER_OK") else {
-        throw WebKitRuntimeError.failed("Missing ANSI output")
+        throw DemoError.failed("Missing ANSI output")
       }
-      guard view.visibleText.contains("RENDER_OK") else { throw WebKitRuntimeError.failed("Ghostty did not render terminal output") }
+      guard view.visibleText.contains("RENDER_OK") else { throw DemoError.failed("Ghostty did not render terminal output") }
       guard try String(contentsOf: directory.appendingPathComponent("terminal-test.txt"), encoding: .utf8) == "native terminal IO" else {
-        throw WebKitRuntimeError.failed("Native file verification failed")
+        throw DemoError.failed("Native file verification failed")
       }
       // Exercise the Ghostty encoder and native input queue with shell history.
       let beforeHistory = text.count
@@ -324,7 +320,7 @@ final class TerminalSession: ObservableObject {
         "return await (await fetch('/inspect?q=ios', {method:'POST', body:'hello from WebKit'})).text();",
         arguments: [:], in: nil, contentWorld: .page) as? String
       guard paths?.contains("POST /inspect?q=ios") == true else {
-        throw WebKitRuntimeError.failed("Preview lost the request method or query string")
+        throw DemoError.failed("Preview lost the request method or query string")
       }
       let beforeNodeStop = text.count
       view.sendControl(3); await inputTask?.value
@@ -345,10 +341,10 @@ final class TerminalSession: ObservableObject {
       try await host.writeTerminal(Data("exit 0\r".utf8))
       let deadline = ContinuousClock.now + .seconds(20)
       while exit == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
-      guard exit?.exitCode == 0, !host.isWebViewAttached else { throw WebKitRuntimeError.failed("Terminal exit \(String(describing: exit?.exitCode)); runtime attached: \(host.isWebViewAttached)") }
+      guard exit?.exitCode == 0, !host.isWebViewAttached else { throw DemoError.failed("Terminal exit \(String(describing: exit?.exitCode)); runtime attached: \(host.isWebViewAttached)") }
       let network = await host.nativeNetworkStats
       guard network.resolutions >= 2, network.connections >= 2, network.bytesRead > 0, network.openSockets == 0 else {
-        throw WebKitRuntimeError.failed("Native network did not transfer data or release sockets")
+        throw DemoError.failed("Native network did not transfer data or release sockets")
       }
       report["nativeNetworkAfterExit"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(network))
       report["passed"] = true
@@ -360,7 +356,7 @@ final class TerminalSession: ObservableObject {
     report["transcript"] = text
     writeReport(report)
   }
-  private func shellCheck(_ host: HeadlessWasmer, command: String, marker: String, timeout: Int = 60) async throws {
+  private func shellCheck(_ host: ShellRuntime, command: String, marker: String, timeout: Int = 60) async throws {
     let before = text.count
     try await host.writeTerminal(Data((command + "\r").utf8))
     try await waitFor(marker, after: before, timeout: timeout)
@@ -379,20 +375,20 @@ final class TerminalSession: ObservableObject {
           arguments: ["heading": heading, "health": health], in: nil, contentWorld: .page) as? Bool
         if ready == true {
           guard preview.error == nil else {
-            throw WebKitRuntimeError.failed("Preview displayed an error: \(preview.error!)")
+            throw DemoError.failed("Preview displayed an error: \(preview.error!)")
           }
           return preview
         }
       }
       try await Task.sleep(for: .milliseconds(100))
     }
-    throw WebKitRuntimeError.failed("Visible preview did not load \(heading) and fetch /health")
+    throw DemoError.failed("Visible preview did not load \(heading) and fetch /health")
   }
 
   private func waitForPreviewClosure(port: UInt16) async throws {
     let deadline = ContinuousClock.now + .seconds(5)
     while previews.contains(where: { $0.port == port }) || openingPorts.contains(port) {
-      guard ContinuousClock.now < deadline else { throw WebKitRuntimeError.failed("Stopped server preview stayed open") }
+      guard ContinuousClock.now < deadline else { throw DemoError.failed("Stopped server preview stayed open") }
       try await Task.sleep(for: .milliseconds(100))
     }
   }

@@ -1,4 +1,4 @@
-import WasmerWKSDK
+import WasmerSDK
 import SwiftUI
 import WebKit
 
@@ -9,12 +9,12 @@ final class ServerPreview: NSObject, ObservableObject, Identifiable, WKNavigatio
   let id = UUID()
   let port: UInt16
   let webView: WKWebView
-  private let server: GuestHTTPServer
+  private let server: ExposedPort
   private let bootstrapURL: URL
   @Published var title = "Loading server…"
   @Published var error: String?
 
-  init(port: UInt16, server: GuestHTTPServer, url: URL) {
+  init(port: UInt16, server: ExposedPort, url: URL) {
     self.port = port; self.server = server; bootstrapURL = url
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
@@ -26,7 +26,7 @@ final class ServerPreview: NSObject, ObservableObject, Identifiable, WKNavigatio
   }
 
   func reload() { error = nil; webView.reload() }
-  func close() { webView.stopLoading(); webView.navigationDelegate = nil; server.stop() }
+  func close() { webView.stopLoading(); webView.navigationDelegate = nil; server.close() }
 
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
     title = webView.title ?? "Local server"

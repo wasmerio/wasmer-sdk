@@ -1,15 +1,14 @@
 import Foundation
+#if os(iOS)
+import WasmerWKSDK
+#else
 import WasmerSDKCore
+#endif
 
 public typealias WasmerError = SdkError
 public typealias NetworkPolicy = NetworkMode
 public typealias ExitReason = ProcessExitReason
 public typealias Output = ProcessOutput
-public typealias FileKind = WasmerSDKCore.FileKind
-public typealias FileStat = WasmerSDKCore.FileStat
-public typealias DirectoryEntry = WasmerSDKCore.DirectoryEntry
-public typealias InputMode = WasmerSDKCore.InputMode
-public typealias OutputMode = WasmerSDKCore.OutputMode
 
 /// A registry specifier, local package directory, WEBC file, in-memory bytes,
 /// or reusable package.
@@ -25,7 +24,7 @@ public enum PackageSource: Sendable, ExpressibleByStringLiteral {
   public init(stringLiteral value: String) { self = .registry(value) }
 }
 
-/// A client owns a native runtime, package cache, and sandbox services.
+/// A client owns a runtime, package cache, and sandbox services.
 /// Keep it alive while its sandboxes are in use and explicitly close them first.
 public struct Wasmer: Sendable {
   private let core: WasmerCore
@@ -80,10 +79,10 @@ public struct Packages: Sendable {
 
   /// Create a reusable package without serializing a WEBC archive.
   public func create(_ definition: PackageDefinition) async throws -> Package {
-    let value = WasmerSDKCore.PackageDefinition(
+    let value = CorePackageDefinition(
       modules: definition.modules,
       commands: definition.commands.mapValues {
-        WasmerSDKCore.PackageCommandDefinition(module: $0.module)
+        CorePackageCommandDefinition(module: $0.module)
       },
       entrypoint: definition.entrypoint, files: definition.files
     )
@@ -134,16 +133,21 @@ public struct Sandboxes: Sendable {
 
   public func create(
     packages: [PackageSource] = [], files: [String: Data] = [:],
-    env: [String: String] = [:], network: NetworkPolicy = .disabled
+    env: [String: String] = [:], network: NetworkPolicy = .disabled,
+    mounts: [DirectoryMount] = []
   ) async throws -> Sandbox {
     var resolved: [PackageCore] = []
     for source in packages {
       resolved.append(try await Packages(core: core).load(source).core)
     }
-    return Sandbox(
-      core: try await core.createSandbox(
-        packages: resolved, files: files, env: env, network: network
-      ))
+    #if os(iOS)
+    return Sandbox(core: try await core.createSandbox(
+      packages: resolved, files: files, env: env, network: network,
+      mounts: try mounts.map { .init(path: $0.path, directory: URL(fileURLWithPath: try localPath($0.directory)), readOnly: $0.readOnly) }))
+    #else
+    guard mounts.isEmpty else { throw unavailable("Native directory mounts") }
+    return Sandbox(core: try await core.createSandbox(packages: resolved, files: files, env: env, network: network))
+    #endif
   }
 }
 
@@ -211,14 +215,16 @@ public struct Command: Sendable {
   public func spawn(
     stdin: InputMode = .closed, stdout: OutputMode = .pipe,
     stderr: OutputMode = .pipe, timeout: TimeInterval? = nil,
-    outputBytes: UInt64? = nil
+    outputBytes: UInt64? = nil, terminal: TerminalOptions? = nil
   ) async throws -> Process {
-    Process(
-      core: try await core.spawn(
-        options: SpawnOptions(
-          timeoutMs: milliseconds(timeout), outputBytes: outputBytes,
-          stdin: stdin, stdout: stdout, stderr: stderr
-        )))
+    let options = try SpawnOptions(timeoutMs: milliseconds(timeout), outputBytes: outputBytes,
+      stdin: stdin, stdout: stdout, stderr: stderr)
+    #if os(iOS)
+    return Process(core: try await core.spawn(options: options, terminalColumns: terminal?.columns, terminalRows: terminal?.rows))
+    #else
+    guard terminal == nil else { throw unavailable("Terminal mode") }
+    return Process(core: try await core.spawn(options: options))
+    #endif
   }
 }
 
@@ -378,4 +384,100 @@ private func milliseconds(_ seconds: TimeInterval?) throws -> UInt64? {
     )
   }
   return UInt64(value)
+}
+
+/// Mount an app-accessible directory at an absolute guest path.
+public struct DirectoryMount: Sendable {
+  public let path: String
+  public let directory: URL
+  public let readOnly: Bool
+  public init(_ path: String, directory: URL, readOnly: Bool = false) {
+    self.path = path; self.directory = directory; self.readOnly = readOnly
+  }
+}
+public struct TerminalOptions: Sendable {
+  public let columns: UInt32
+  public let rows: UInt32
+  public init(columns: UInt32 = 80, rows: UInt32 = 24) { self.columns = columns; self.rows = rows }
+}
+/// Optional features vary by backend; the package/command/filesystem API is shared.
+public struct Capabilities: Sendable {
+  public let localPackageDirectories: Bool
+  public let directoryMounts: Bool
+  public let terminal: Bool
+  public let httpExposure: Bool
+}
+extension Wasmer {
+  public var capabilities: Capabilities {
+    #if os(iOS)
+    return Capabilities(localPackageDirectories: false, directoryMounts: true, terminal: true, httpExposure: true)
+    #else
+    return Capabilities(localPackageDirectories: true, directoryMounts: false, terminal: false, httpExposure: false)
+    #endif
+  }
+  /// Diagnostic counters for integration tests, independent of the selected backend.
+  public func diagnostics() async -> RuntimeDiagnostics {
+    #if os(iOS)
+    let value = await core.diagnostics()
+    return RuntimeDiagnostics(webViewAttached: value.webViewAttached, nativeOperations: value.nativeOperations,
+      network: NetworkDiagnostics(resolutions: value.network?.resolutions ?? 0, connections: value.network?.connections ?? 0,
+        bytesRead: value.network?.bytesRead ?? 0, bytesWritten: value.network?.bytesWritten ?? 0, openSockets: value.network?.openSockets ?? 0))
+    #else
+    return RuntimeDiagnostics(webViewAttached: false, nativeOperations: 0, network: NetworkDiagnostics())
+    #endif
+  }
+}
+public struct RuntimeDiagnostics: Sendable, Codable {
+  public let webViewAttached: Bool
+  public let nativeOperations: Int
+  public let network: NetworkDiagnostics
+}
+public struct NetworkDiagnostics: Sendable, Codable {
+  public var resolutions = 0
+  public var connections = 0
+  public var bytesRead = 0
+  public var bytesWritten = 0
+  public var openSockets = 0
+}
+extension Process {
+  public func resizeTerminal(columns: UInt32, rows: UInt32) async throws {
+    #if os(iOS)
+    try await core.resizeTerminal(columns: columns, rows: rows)
+    #else
+    throw unavailable("Terminal mode")
+    #endif
+  }
+}
+extension Ports {
+  /// Known guest HTTP listeners; nil means the guest network lock is busy.
+  public func listening() async throws -> [UInt16]? {
+    #if os(iOS)
+    return try await core.listening()
+    #else
+    throw unavailable("HTTP listener discovery")
+    #endif
+  }
+  /// Expose a guest HTTP server through an authenticated app-local URL.
+  public func expose(_ port: UInt16) async throws -> ExposedPort {
+    #if os(iOS)
+    return ExposedPort(core: try await core.expose(port: port))
+    #else
+    throw unavailable("HTTP exposure")
+    #endif
+  }
+}
+public final class ExposedPort: Sendable {
+  #if os(iOS)
+  private let core: ExposedPortCore
+  fileprivate init(core: ExposedPortCore) { self.core = core }
+  public var url: URL { core.url }
+  public func close() { core.close() }
+  #else
+  private init(url: URL) { self.url = url }
+  public let url: URL
+  public func close() {}
+  #endif
+}
+private func unavailable(_ feature: String) -> WasmerError {
+  .Failure(code: "CAPABILITY_UNAVAILABLE", message: "\(feature) is not supported by this backend")
 }

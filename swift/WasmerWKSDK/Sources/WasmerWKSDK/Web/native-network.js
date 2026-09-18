@@ -7,6 +7,8 @@ const METHODS = ["resolve", "connectTcp", "socketRead", "socketWrite", "socketFl
   "socketReadable", "socketWritable", "socketSetNoDelay", "socketSetKeepAlive", "socketRefresh"];
 let nextID = 0;
 const pending = new Map();
+const bridges = new Map();
+let nextBridgeID = 0;
 
 export function receiveNativeNetworkReply(data) {
   if (data?.kind !== "networkResult") return false;
@@ -17,10 +19,10 @@ export function receiveNativeNetworkReply(data) {
   }
   return true;
 }
-function callNative(method, args) {
+function callNative(method, args, owner) {
   return new Promise((resolve, reject) => {
     const id = ++nextID;
-    pending.set(id, { resolve, reject });
+    pending.set(id, { resolve, reject, owner });
     postMessage({ kind: "network", id, method, args });
   });
 }
@@ -33,12 +35,12 @@ function encode(bytes) {
 }
 
 export class NativeNetworkBridge {
-  id = 1;
+  id = ++nextBridgeID;
   #call;
   #sockets = new Map();
   #wake = () => true;
   #closed = false;
-  constructor(call = callNative) { this.#call = call; }
+  constructor(call) { this.#call = call ?? ((method, args) => callNative(method, args, this.id)); }
   setWakeCallback(callback) { this.#wake = callback; }
   async resolve(host) { this.#checkOpen(); return await this.#call("resolve", [host]); }
   async connectTcp(local, peer) {
@@ -126,8 +128,11 @@ export class NativeNetworkBridge {
   close() {
     for (const id of this.#sockets.keys()) this.socketClose(id);
     this.#closed = true; this.#wake = () => true;
-    for (const reply of pending.values()) reply.reject(new Error("ENOTCONN: native bridge closed"));
-    pending.clear();
+    bridges.delete(this.id);
+    for (const [id, reply] of pending) {
+      if (reply.owner !== this.id) continue;
+      pending.delete(id); reply.reject(new Error("ENOTCONN: native bridge closed"));
+    }
   }
   #option(method, id, enabled) {
     const state = this.#require(id);
@@ -188,16 +193,18 @@ export class NativeNetworkBridge {
 }
 
 export function installNativeNetworkGlobals(bridge) {
+  bridges.set(bridge.id, bridge);
   for (const method of METHODS) {
     const name = "__wasmerHost" + method[0].toUpperCase() + method.slice(1);
     globalThis[name] = (bridgeID, ...args) => {
-      if (bridgeID !== bridge.id) throw new Error("ENOTCONN: unknown native network bridge");
-      return bridge[method](...args);
+      const selected = bridges.get(bridgeID);
+      if (!selected) throw new Error("ENOTCONN: unknown native network bridge");
+      return selected[method](...args);
     };
   }
   globalThis.__wasmerHandleNetworkRpc = (request) => {
     if (request?.type !== "wasmer-network-rpc") return false;
-    void respondToNetworkRequest(bridge, request);
+    void respondToNetworkRequest(bridges.get(request.bridgeId), request);
     return true;
   };
 }
@@ -206,7 +213,7 @@ export async function respondToNetworkRequest(bridge, request) {
   const control = new Int32Array(request.response, 0, 4);
   const payload = new Uint8Array(request.response, 16);
   try {
-    if (request.bridgeId !== bridge.id || !METHODS.includes(request.method)) throw new Error("Invalid native network operation");
+    if (request.bridgeId !== bridge?.id || !METHODS.includes(request.method)) throw new Error("Invalid native network operation");
     const result = await bridge[request.method](...request.args);
     if (result === undefined) control[1] = 3;
     else if (result === null) control[1] = 4;

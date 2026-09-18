@@ -8,7 +8,7 @@ JSPI. No remote shell or terminal webpage is involved.
 ## Run
 
 Requires an Apple Silicon Mac, Xcode 27 with an iOS 27 simulator, Zig **0.16.0**,
-and Python 3 for the build script. The [WasmerWKSDK](../../WasmerWKSDK/README.md)
+and Python 3 for the build script. The [WasmerSDK](../../WasmerWKSDK/README.md)
 Swift package includes its runtime assets; Node and Rust are not required.
 
 From the repository root:
@@ -18,7 +18,7 @@ python3 swift/Examples/WasmerShell/build.py run
 ```
 
 The script builds libghostty-vt from a pinned upstream revision, links the
-repository root’s `WasmerWKSDK` SwiftPM product and resource bundle, builds the app,
+repository root’s `WasmerSDK` SwiftPM product and resource bundle, builds the app,
 installs it, and opens Xcode’s simulator UI (Device Hub in Xcode 27). `DEVELOPER_DIR` defaults to
 `/Applications/Xcode.app/Contents/Developer`; set it to use another Xcode.
 Select a particular iOS 27+ simulator with `--device <UDID>`.
@@ -90,7 +90,7 @@ depends on the WASIX/Edge.js runtime; native Node addons are not iOS binaries.
 ## Architecture
 
 ```text
-UIKit keyboard → HeadlessWasmer → worker → WASIX terminal stdin
+UIKit keyboard → WasmerSDK → worker → WASIX terminal stdin
 UIKit cells ← libghostty-vt ← native output callback ← stdout / stderr
                                   │
                hidden WKWebView: control page + SDK / guest workers
@@ -98,11 +98,11 @@ UIKit cells ← libghostty-vt ← native output callback ← stdout / stderr
                     native filesystem RPC → app Documents
 ```
 
-The `WasmerWKSDK.HeadlessWasmer` runtime provides `startTerminal`, `writeTerminal`,
-`resizeTerminal`, and `stopTerminal`, plus output/exit callbacks. A terminal
-keeps its coordinator worker alive until the shell exits. Output is drained
-concurrently in chunks of at most 16 KiB with native acknowledgements for
-backpressure. Input remains ordered; dimensions follow the view and keyboard.
+`ShellRuntime.swift` is app orchestration built on `Wasmer`, `Sandbox`, and
+`Process`. It loads packages, mounts the Documents directory, and spawns Bash
+with `TerminalOptions`. Piped output uses `ProcessStream` with pull-based
+backpressure; input uses `ProcessInput`. Input remains ordered, and dimensions
+follow the view and keyboard through `resizeTerminal`.
 The shell redirects stderr into stdout before entering interactive mode to
 preserve the order of prompts, redraws, and program output. WASIX terminal
 handling supplies line discipline and process-tree signals. Ghostty’s newline
@@ -113,10 +113,9 @@ state, draws colors/styles and Unicode cells, handles scrollback, encodes keys,
 and sends terminal query responses back to the guest. This is a UIKit renderer
 using Ghostty's VT engine, not Ghostty's desktop Metal renderer.
 
-The runtime watches `sandbox.httpListeningPorts()`. Each listener gets a
-`GuestHTTPServer` on a separate, random native loopback port. Browser requests
-are forwarded through `HeadlessWasmer.handleHTTPRequest` to the SDK's
-`handleHttpRequest`, which feeds the guest's in-memory TCP listener. Method,
+The app watches `sandbox.ports.listening()` and calls `ports.expose(port)`.
+Each returned `ExposedPort` provides an authenticated loopback URL for its
+visible WebView. The internal HTTP bridge feeds the guest's in-memory TCP listener. Method,
 path/query, headers, status, and binary bodies cross this bridge. Root-relative
 links and subresources work without rewriting the guest HTML.
 

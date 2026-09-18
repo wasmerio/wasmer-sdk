@@ -6,6 +6,7 @@ import CryptoKit
 /// All mutable connection state is confined to `queue`.
 final class LoopbackServer: @unchecked Sendable {
   private let directory: URL
+  private let cacheDirectory: URL
   private let token = UUID().uuidString
   private let queue = DispatchQueue(label: "io.wasmer.webkit.assets")
   private var listener: NWListener?
@@ -13,7 +14,11 @@ final class LoopbackServer: @unchecked Sendable {
   private var startupCompleted = false
   private let downloads = URLSession(configuration: .ephemeral)
 
-  init(directory: URL) { self.directory = directory.standardizedFileURL }
+  init(directory: URL, cacheDirectory: URL? = nil) {
+    self.directory = directory.standardizedFileURL
+    self.cacheDirectory = cacheDirectory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("WasmerWKSDKPackages")
+  }
 
   func start() async throws -> URL {
     try await withCheckedThrowingContinuation { continuation in
@@ -106,8 +111,7 @@ final class LoopbackServer: @unchecked Sendable {
       hash.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
       send(connection, id: id, status: 404, contentType: "text/plain", body: Data()); return
     }
-    let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("WasmerWKSDKPackages")
+    let cache = cacheDirectory
     let destination = cache.appendingPathComponent(filename)
     let valid: @Sendable (Data) -> Bool = { bytes in
       SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() == hash
