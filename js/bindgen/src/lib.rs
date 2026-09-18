@@ -9,6 +9,7 @@
 )]
 
 mod browser_http;
+mod host_filesystem;
 mod node_network;
 mod package_cache;
 mod task_manager;
@@ -306,6 +307,28 @@ impl JsSandboxBuilder {
     pub fn env(&mut self, key: String, value: String) -> Result<(), JsValue> {
         let builder = self.take()?.env(key, value);
         self.inner = Some(builder);
+        Ok(())
+    }
+
+    /// Experimental worker-only native directory mount. The embedder installs
+    /// the synchronous `__wasmerHostFileSystem` bridge on every SDK worker.
+    #[wasm_bindgen(js_name = mountHost)]
+    pub fn mount_host(
+        &mut self,
+        path: String,
+        mount_id: u32,
+        read_only: bool,
+    ) -> Result<(), JsValue> {
+        let mode = if read_only {
+            wasmer_sdk::MountMode::ReadOnly
+        } else {
+            wasmer_sdk::MountMode::ReadWrite
+        };
+        self.inner = Some(self.take()?.mount(
+            path,
+            host_filesystem::HostFileSystem { mount_id },
+            mode,
+        ));
         Ok(())
     }
 

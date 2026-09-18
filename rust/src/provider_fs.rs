@@ -1,5 +1,3 @@
-#![cfg_attr(not(feature = "sys"), allow(dead_code))]
-
 use std::{
     fmt::Debug,
     future::Future,
@@ -21,6 +19,12 @@ use virtual_fs::{
     FileOpener as VirtualFileOpener, FileSystem as VirtualFileSystem, OpenOptionsConfig,
     VirtualFile,
 };
+
+#[cfg(feature = "sys")]
+type ProviderRuntime = tokio::runtime::Handle;
+#[cfg(not(feature = "sys"))]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ProviderRuntime;
 
 /// Result type for external filesystem providers.
 pub type FsResult<T> = std::result::Result<T, FsError>;
@@ -448,14 +452,14 @@ pub(crate) fn remove_directory_tree(
 pub(crate) struct ProviderAdapter {
     provider: Arc<dyn FileSystem>,
     mode: MountMode,
-    runtime: tokio::runtime::Handle,
+    runtime: ProviderRuntime,
 }
 
 impl ProviderAdapter {
     pub(crate) fn new(
         provider: Arc<dyn FileSystem>,
         mode: MountMode,
-        runtime: tokio::runtime::Handle,
+        runtime: ProviderRuntime,
     ) -> Self {
         Self {
             provider,
@@ -634,7 +638,7 @@ impl VirtualFileSystem for ProviderAdapter {
 #[derive(Debug)]
 struct ProviderFile {
     file: Arc<dyn File>,
-    runtime: tokio::runtime::Handle,
+    runtime: ProviderRuntime,
     cursor: u64,
     len: u64,
     writable: bool,
@@ -829,7 +833,8 @@ fn provider_io_error(error: FsError) -> io::Error {
 /// `block_in_place` keeps the rest of the runtime making progress; on a
 /// current-thread runtime that safety valve does not exist, so providers
 /// should not be driven from the runtime's own thread there.
-fn run_provider<T, F>(runtime: &tokio::runtime::Handle, future: F) -> T
+#[cfg(feature = "sys")]
+fn run_provider<T, F>(runtime: &ProviderRuntime, future: F) -> T
 where
     T: Send + 'static,
     F: Future<Output = T> + Send + 'static,
@@ -844,19 +849,22 @@ where
             .recv()
             .expect("the provider runtime stopped before completing an operation")
     };
-    #[cfg(feature = "sys")]
-    {
-        match tokio::runtime::Handle::try_current() {
-            Ok(current)
-                if current.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread =>
-            {
-                tokio::task::block_in_place(recv)
-            }
-            _ => recv(),
+    match tokio::runtime::Handle::try_current() {
+        Ok(current) if current.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(recv)
         }
+        _ => recv(),
     }
-    #[cfg(not(feature = "sys"))]
-    {
-        recv()
-    }
+}
+
+/// Browser providers run on workers. Their host bridge synchronously waits
+/// through shared memory while a separate control page performs the I/O.
+/// Do not await JavaScript promises on this same worker: its event loop cannot
+/// make progress while a synchronous VFS operation is in flight.
+#[cfg(not(feature = "sys"))]
+fn run_provider<T, F>(_runtime: &ProviderRuntime, future: F) -> T
+where
+    F: Future<Output = T>,
+{
+    futures::executor::block_on(future)
 }

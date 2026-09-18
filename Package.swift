@@ -4,13 +4,15 @@ import PackageDescription
 
 let package = Package(
   name: "WasmerSDK",
-  platforms: [.macOS(.v12)],
-  products: [.library(name: "WasmerSDK", targets: ["WasmerSDK"])],
+  platforms: [.macOS(.v12), .iOS("27.0")],
+  products: [
+    .library(name: "WasmerSDK", type: .static, targets: ["WasmerSDK"]),
+  ],
   targets: [
     .binaryTarget(name: "WasmerSDKFFI", url: "https://github.com/wasmerio/wasmer-sdk/releases/download/wasmer-sdk-swift-v0.2.1/WasmerSDKFFI-0.2.1-macos-universal.zip",
       checksum: "80dc53820844b55f52a3888f97dc67a0f547189584560e9b705e3e509f1cb5fa"),
     .target(
-      name: "WasmerSDKCore", dependencies: ["WasmerSDKFFI"],
+      name: "WasmerSDKCore", dependencies: [.target(name: "WasmerSDKFFI", condition: .when(platforms: [.macOS]))],
       path: "swift/Sources/WasmerSDKCore",
       linkerSettings: [
         .linkedLibrary("c++"), .linkedLibrary("iconv"), .linkedLibrary("resolv"),
@@ -18,6 +20,13 @@ let package = Package(
         .linkedFramework("CoreFoundation"),
       ]
     ),
-    .target(name: "WasmerSDK", dependencies: ["WasmerSDKCore"], path: "swift/Sources/WasmerSDK"),
+    .target(name: "WasmerSDK", dependencies: [
+      .target(name: "WasmerSDKCore", condition: .when(platforms: [.macOS])),
+      .target(name: "WasmerWKSDK", condition: .when(platforms: [.iOS])),
+    ], path: "swift/Sources/WasmerSDK"),
+    .target(
+      name: "WasmerWKSDK", path: "swift/WasmerWKSDK/Sources/WasmerWKSDK",
+      resources: [.copy("Web")]
+    ),
   ]
 )

@@ -285,7 +285,9 @@ impl std::fmt::Debug for Sandbox {
 }
 
 fn validate_mount_path(path: &Path) -> Result<()> {
-    if !path.is_absolute() {
+    // Guest paths are rooted Unix paths. `is_absolute()` is always false for
+    // wasm32-unknown-unknown in current Rust std, even for `/native`.
+    if !path.has_root() {
         return Err(Error::InvalidGuestPath {
             path: path.to_owned(),
             message: "mount paths must be absolute".to_owned(),

@@ -90,6 +90,24 @@ jobs:
       - name: Test Swift against local Wasm fixtures
         run: python3 swift/scripts/test.py
 
+  swift-webkit:
+    name: Swift (WebKit backend)
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "26"
+      - name: Verify bundled runtime and simulator selection
+        run: |
+          python3 swift/WasmerWKSDK/scripts/bundle_sdk.py --check
+          python3 -m unittest discover -s swift/WasmerWKSDK/scripts -p 'test_*.py'
+      - name: Test native filesystem, DNS, TCP, and HTTP bridges
+        run: swift test --package-path swift/WasmerWKSDK
+      - name: Test worker transport and JSPI
+        run: node --test swift/WasmerWKSDK/scripts/*.test.mjs
+
   javascript:
     name: JavaScript
     needs: rust

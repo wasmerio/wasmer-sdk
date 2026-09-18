@@ -220,3 +220,9 @@ func registryPython() async throws {
     throw error
   }
 }
+
+@Test func sharedBackendContract() async throws {
+  let fixture = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+  let checks = try await runSDKContract(fixtures: fixture)
+  #expect(checks.count >= 25)
+}

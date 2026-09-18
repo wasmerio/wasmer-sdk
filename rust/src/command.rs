@@ -21,7 +21,6 @@ use wasmer_wasix::{
     runners::wasi::{PackageOrHash, RuntimeOrEngine, WasiRunner},
 };
 
-#[cfg(feature = "sys")]
 use crate::provider_fs::ProviderAdapter;
 use crate::{
     CommandSelector, Error, Package, Process, ProcessExitError, ProcessStderr, ProcessStdin,
@@ -332,14 +331,17 @@ impl Command {
             .with_stdin(guest_stdin)
             .with_stdout(guest_stdout)
             .with_stderr(guest_stderr);
-        #[cfg(feature = "sys")]
         for mount in &self.sandbox.inner.mounts {
+            #[cfg(feature = "sys")]
+            let provider_runtime = self.sandbox.inner.client.inner.tasks.runtime_handle();
+            #[cfg(not(feature = "sys"))]
+            let provider_runtime = crate::provider_fs::ProviderRuntime;
             runner.with_mount(
                 mount.guest_path.to_string_lossy().into_owned(),
                 Arc::new(ProviderAdapter::new(
                     Arc::clone(&mount.filesystem),
                     mount.mode,
-                    self.sandbox.inner.client.inner.tasks.runtime_handle(),
+                    provider_runtime,
                 )),
             );
         }

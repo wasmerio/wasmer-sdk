@@ -89,7 +89,7 @@ applications can inspect every exit reason directly.
 | JavaScript | `npm install @wasmer/sdk` | [JavaScript SDK](js/README.md) |
 | Python | `pip install wasmer-sdk` | [Python SDK](python/README.md) |
 | Rust | Workspace/Git while crate publishing is disabled | [Rust SDK](rust/README.md) |
-| Swift | SwiftPM binary package for macOS | [Swift SDK](swift/README.md) |
+| Swift | SwiftPM for macOS and iOS 27+ | [Swift SDK](swift/README.md) |
 
 JavaScript runs Wasmer and WASIX directly in WebAssembly through
 `wasm-bindgen`; Node networking is bridged through `node:net` and `node:dns`,
