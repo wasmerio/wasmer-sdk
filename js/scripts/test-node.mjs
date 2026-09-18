@@ -16,6 +16,13 @@ const tests = [
     attempts: 1,
   },
   {
+    name: "worker-message-lifetime",
+    file: "tests/worker-message-lifetime.test.mjs",
+    testTimeoutMs: 15_000,
+    processTimeoutMs: 30_000,
+    attempts: 1,
+  },
+  {
     name: "edgejs",
     file: "tests/edgejs-http.test.mjs",
     nodeArgs: ["--experimental-wasm-jspi"],

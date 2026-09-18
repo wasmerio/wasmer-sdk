@@ -402,7 +402,7 @@ final class TerminalSession: ObservableObject {
           commands.append(("import \(example) \(round)", "python -c 'import \(example); print(\(example).__version__)'"))
         }
       }
-      for round in 0..<(quick ? 100 : 30) {
+      for round in 0..<(quick ? 100 : 150) {
         let script = quick ? "import threading,time; ts=[threading.Thread(target=lambda: time.sleep(.01)) for _ in range(3)]; [t.start() for t in ts]; [t.join() for t in ts]; print('KEYBOARD_READY:%s'%\(round))" : "print('KEYBOARD_READY:%s'%\(round))"
         commands.append(("keyboard and child process \(round)", "python -c \"\(script)\""))
       }

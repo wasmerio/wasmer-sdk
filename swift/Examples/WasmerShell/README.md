@@ -172,7 +172,7 @@ to `Artifacts/terminal-result.json`.
 The test ends its shell; run `build.py run` afterward for an interactive session.
 
 The stress test repeatedly reinstalls Flask, Django and FastAPI with the cache
-disabled, imports the installed packages, drives 30 Python launches through the
+disabled, imports the installed packages, drives 150 Python launches through the
 UIKit keyboard path, types during a 2 MiB output burst, and restarts with input
 pending. `--quick` replaces the network installs with 100 Python launches,
 each creating and joining three threads.
@@ -180,9 +180,14 @@ Each command has a deadline; results are saved to
 `Artifacts/terminal-stress-result.json`. Use a separate simulator with
 `--device <UDID>` to keep stress-test package files out of your normal workspace.
 
-Known stress failure on iOS 27.0 (24A434): the full run completed all 11 pip
-installs, then stopped with WebKit `RangeError: Out of memory` during the 15th
-subsequent Python launch (37 of 55 checks completed). This remains unresolved.
+Known stress failure on iOS 27.0 (24A434): the latest full run completed all 11
+pip installs and 16 subsequent Python launches, then stopped with WebKit
+`RangeError: Out of memory` (39 of 175 checks completed). This remains unresolved.
+The failing allocation is a guest memory created during Bash fork, while the
+SDK heap remains below its cap. A separate engine-only worker test reproduces
+the allocation failure without Wasmer. See the
+[memory investigation](../../../docs/ios-webkit-memory.md) and
+[standalone probe](../WebKitMemoryProbe/README.md).
 The separate 103-check quick run and 24 integration checks pass; these do not
 establish stability for prolonged package-manager sessions.
 

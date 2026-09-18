@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WebKit shared Wasm memory probe</title>
+<pre id="status">Starting…</pre>
+<script type="module">
+  function report(data) {
+    data.userAgent = navigator.userAgent;
+    data.crossOriginIsolated = crossOriginIsolated;
+    document.querySelector('#status').textContent = JSON.stringify(data, null, 2);
+    if (data.kind === 'result') globalThis.probeResult = data;
+    window.webkit?.messageHandlers?.probe?.postMessage(data);
+  }
+  const worker = new Worker(`./producer.js${location.search}`, { type: 'module' });
+  worker.onmessage = ({ data }) => report(data);
+  worker.onerror = event => report({
+    kind: 'result', passed: false, error: event.message, stack: event.error?.stack,
+  });
+</script>

@@ -43,7 +43,10 @@ async function handleMessage(data) {
             worker.collectSharedObjects();
         }
         else {
-            await worker.handle(data);
+            // Rust consumes the shared-object envelope when it dispatches the task.
+            // Awaiting here keeps that envelope (and every attached guest memory)
+            // alive for the whole task, including long-lived background jobs.
+            return worker.handle(data);
         }
     }
     else
