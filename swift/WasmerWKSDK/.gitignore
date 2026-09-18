@@ -2,3 +2,4 @@
 __pycache__/
 .swiftpm/
 Artifacts/
+Sources/WasmerWKSDK/Web/sdk/

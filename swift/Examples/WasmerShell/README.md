@@ -8,12 +8,15 @@ JSPI. No remote shell or terminal webpage is involved.
 ## Run
 
 Requires an Apple Silicon Mac, Xcode 27 with an iOS 27 simulator, Zig **0.16.0**,
-and Python 3 for the build script. The [WasmerSDK](../../WasmerWKSDK/README.md)
-Swift package includes its runtime assets; Node and Rust are not required.
+and Python 3 for the build script. This source example also needs the JS/Rust
+build prerequisites from the [SDK guide](../../WasmerWKSDK/README.md#build-runtime-assets).
+Published Swift releases supply a prebuilt runtime instead.
 
 From the repository root:
 
 ```sh
+npm ci --prefix js
+python3 swift/WasmerWKSDK/scripts/prototype.py prepare --rebuild-wasm
 python3 swift/Examples/WasmerShell/build.py run
 ```
 
@@ -180,17 +183,6 @@ Each command has a deadline; results are saved to
 `Artifacts/terminal-stress-result.json`. Use a separate simulator with
 `--device <UDID>` to keep stress-test package files out of your normal workspace.
 
-Known stress failure on iOS 27.0 (24A434): the latest full run completed all 11
-pip installs and 16 subsequent Python launches, then stopped with WebKit
-`RangeError: Out of memory` (39 of 175 checks completed). This remains unresolved.
-The failing allocation is a guest memory created during Bash fork, while the
-SDK heap remains below its cap. A separate engine-only worker test reproduces
-the allocation failure without Wasmer. See the
-[memory investigation](../../../docs/ios-webkit-memory.md) and
-[standalone probe](../WebKitMemoryProbe/README.md).
-The separate 103-check quick run and 24 integration checks pass; these do not
-establish stability for prolonged package-manager sessions.
-
 The device command cross-compiles an ad-hoc-signed app; physical
 installation requires development signing. Simulator validation does not
 establish physical-device compatibility.
@@ -225,4 +217,5 @@ libghostty-vt is built from [Ghostty](https://github.com/ghostty-org/ghostty) co
 require checking this wrapper. Ghostty is MIT licensed; the build copies its
 license into the app as `Ghostty-LICENSE.txt`. Source and build caches under
 `.build/`, app binaries, and test artifacts are ignored by Git. The SDK’s
-JavaScript and WebAssembly resources are versioned with its Swift package.
+JavaScript and WebAssembly resources are generated locally for this example and
+packaged by CI in the Swift release's runtime XCFramework.

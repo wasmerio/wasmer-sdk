@@ -13,10 +13,11 @@ WEBC bytes, registry packages, command references, captured output, live streams
 exit checking, timeouts, files, and sandbox lifetime share one facade. Applications
 do not create or attach a runtime WebView, and SDK calls are not main-actor-only.
 
-The iOS backend is experimental. Its JS/Wasm resources ship in the Swift package;
+The iOS backend is experimental. CI packages its JS/Wasm resources in a separate
+`WasmerWKRuntime` XCFramework, downloaded and embedded by SwiftPM in releases;
 consumers need neither Node nor Rust. See [iOS setup](WasmerWKSDK/README.md).
-The existing `wasmer-sdk-swift-v0.2.1` release predates iOS support: use the
-`codex/wasmer-shell-ios` branch until a release includes this change.
+The existing `wasmer-sdk-swift-v0.2.1` release predates iOS support. Until the next
+Swift release, build the runtime locally using the iOS guide.
 
 Optional features have explicit capability flags and throw `CAPABILITY_UNAVAILABLE`
 when unsupported by the selected backend:

@@ -17,6 +17,7 @@ BUNDLE_ID = "io.wasmer.sdk.webkit-prototype"
 MINIMUM_IOS = 27
 SDKS = {"simulator": "iphonesimulator", "device": "iphoneos"}
 ENV = {**os.environ, "DEVELOPER_DIR": os.environ.get("DEVELOPER_DIR", "/Applications/Xcode.app/Contents/Developer")}
+ENV["WASMER_SDK_LOCAL_WEB_RUNTIME"] = "1"
 
 
 def run(*args, **kwargs):

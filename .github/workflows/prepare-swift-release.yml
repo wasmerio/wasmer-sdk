@@ -43,8 +43,48 @@ jobs:
           echo "sha=$(jq -r .head.sha pr.json)" >> "$GITHUB_OUTPUT"
           echo "branch=$(jq -r .head.ref pr.json)" >> "$GITHUB_OUTPUT"
 
-  build:
+  web-runtime:
     needs: select
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.select.outputs.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: js-nightly
+          cache-compiled-artifacts: 'false'
+      - name: Install Rust and wasm-bindgen
+        run: |
+          rustup toolchain install nightly --profile minimal --component rust-src --target wasm32-unknown-unknown --no-self-update
+          if ! wasm-bindgen --version 2>/dev/null | grep -qx 'wasm-bindgen 0.2.126'; then
+            cargo +nightly install wasm-bindgen-cli --version 0.2.126 --locked --force
+          fi
+      - run: npm ci
+        working-directory: js
+      - run: npm run build
+        working-directory: js
+      - name: Test the runtime
+        working-directory: js
+        run: |
+          npm test
+          npx playwright install --with-deps chromium
+          npm run test:browser
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swift-web-runtime
+          path: |
+            js/dist
+            js/pkg
+          if-no-files-found: error
+
+  build:
+    needs: [select, web-runtime]
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -54,6 +94,15 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: swift-web-runtime
+          path: js
+      - name: Package and test the WebKit runtime
+        run: |
+          python swift/WasmerWKSDK/scripts/bundle_sdk.py
+          python swift/WasmerWKSDK/scripts/build_runtime.py
+          python swift/WasmerWKSDK/scripts/verify_runtime.py
       - uses: ./.github/actions/cache-sdk
         with:
           cargo-profile: swift-1.95-universal-release

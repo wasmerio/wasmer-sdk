@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vendor the browser runtime for SwiftPM; consumers need no JS or Rust toolchain."""
+"""Stage generated browser assets for local builds and CI release packaging."""
 import argparse
 import hashlib
 import json
@@ -31,9 +31,11 @@ def source_digest():
 
 
 def check():
+    if not MANIFEST.is_file():
+        raise SystemExit("SDK assets are not built. Run python3 swift/WasmerWKSDK/scripts/prototype.py prepare --rebuild-wasm.")
     manifest = json.loads(MANIFEST.read_text())
     if manifest["source_sha256"] != source_digest():
-        raise SystemExit("Bundled SDK sources changed. Run prototype.py prepare --rebuild-wasm and commit the resources.")
+        raise SystemExit("Bundled SDK sources changed. Run prototype.py prepare --rebuild-wasm.")
     actual = {str(p.relative_to(DESTINATION)): sha256(p) for p in DESTINATION.rglob("*")
               if p.is_file() and p != MANIFEST}
     if actual != manifest["files"]:

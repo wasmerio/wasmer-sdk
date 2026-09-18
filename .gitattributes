@@ -1,4 +1,2 @@
 # Preserve UniFFI output verbatim and collapse generated glue in code reviews.
 swift/Sources/WasmerSDKCore/WasmerSDKCore.swift linguist-generated=true -whitespace
-# Versioned SwiftPM runtime resources; edit the Rust/TypeScript sources instead.
-swift/WasmerWKSDK/Sources/WasmerWKSDK/Web/sdk/** linguist-generated=true -whitespace

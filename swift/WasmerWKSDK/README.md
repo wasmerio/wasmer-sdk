@@ -11,24 +11,27 @@ scheduling APIs allow detached execution; normal iOS app suspension still applie
 
 ## Add to an app
 
-In Xcode, add `https://github.com/wasmerio/wasmer-sdk.git` and select **WasmerSDK**.
-The `wasmer-sdk-swift-v0.2.1` tag predates iOS support. Until a release includes this
-change, select branch `codex/wasmer-shell-ios` (then `main` after merge), or pin its commit.
+For releases including iOS support, add `https://github.com/wasmerio/wasmer-sdk.git`
+in Xcode, select the release tag as a revision, and choose **WasmerSDK**.
+The `wasmer-sdk-swift-v0.2.1` tag predates iOS support. Until the next Swift release,
+clone this repository, [build the runtime assets](#build-runtime-assets), and add
+the repository root as a local package:
 
 ```swift
 // Package.swift
 platforms: [.iOS("27.0")],
 dependencies: [
-    .package(url: "https://github.com/wasmerio/wasmer-sdk.git",
-             branch: "codex/wasmer-shell-ios"),
+    .package(path: "../wasmer-sdk"),
 ],
 // Your target's dependencies:
 .product(name: "WasmerSDK", package: "wasmer-sdk")
 ```
 
-SwiftPM embeds the JS/Wasm resources automatically. No npm, Rust compilation, JIT
-entitlement, Ghostty dependency, or manually copied assets are required. Only macOS
-links the native UniFFI binary. Add this to the app's Info.plist for private loopback I/O:
+Release consumers receive a checksummed `WasmerWKRuntime` XCFramework that SwiftPM
+downloads and Xcode embeds, including its JS/Wasm resources. No npm, Rust compilation,
+JIT entitlement, Ghostty dependency, or manually copied assets are required for those
+releases. Only macOS links the native UniFFI binary. Add this to the app's Info.plist
+for private loopback I/O:
 
 ```xml
 <key>NSAppTransportSecurity</key>
@@ -138,9 +141,11 @@ Scripts default to `/Applications/Xcode.app`; set `DEVELOPER_DIR` to override. T
 development signing to install on a physical device. Device memory limits and sustained
 execution still need physical-device testing before a production release.
 
-## Update bundled assets
+## Build runtime assets
 
-Consumers do not run this. Maintainers changing Rust or JS SDK inputs regenerate:
+Generated JS/Wasm files are ignored by git. CI builds them from source for every PR
+and Swift release. For local source development, install the JS build prerequisites
+from [the JS guide](../../js/README.md), then run:
 
 ```sh
 npm ci --prefix js
@@ -148,6 +153,19 @@ python3 swift/WasmerWKSDK/scripts/prototype.py prepare --rebuild-wasm
 python3 swift/WasmerWKSDK/scripts/bundle_sdk.py --check
 ```
 
-`Web/sdk/manifest.json` records the source fingerprint and per-file SHA-256. CI rejects
-stale assets. Swift release tags include these source resources alongside the checksum
-pinned universal macOS XCFramework; the release process does not rebuild these assets.
+`Web/sdk/manifest.json` records the source fingerprint and per-file SHA-256.
+`prototype.py` and the WasmerShell build script use these local assets and reject
+stale builds. On a release checkout, set `WASMER_SDK_LOCAL_WEB_RUNTIME=1` when
+building in Xcode or SwiftPM to select locally generated assets instead of the
+released runtime; the example scripts set it automatically.
+
+Swift release preparation builds `WasmerWKRuntime-<version>.zip` for iOS devices,
+the simulator, and macOS; tests the archived framework through a clean SwiftPM
+consumer; and pins its URL/checksum alongside the native macOS archive. Only the
+manifest and checksums are committed. The generated runtime stays in CI artifacts
+and GitHub release assets. To validate this packaging locally (Python 3.11+):
+
+```sh
+python3.13 swift/WasmerWKSDK/scripts/build_runtime.py
+python3.13 swift/WasmerWKSDK/scripts/verify_runtime.py
+```
