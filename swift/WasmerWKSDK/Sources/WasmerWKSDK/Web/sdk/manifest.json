@@ -9,9 +9,9 @@
     "pkg/snippets/wasmer-napi-4dc421676e010b84/acorn.mjs": "953573b8fdab71599749ea5f2b33d3e760c2116178f9423ee7458dbe39d59453",
     "pkg/snippets/wasmer-napi-4dc421676e010b84/inline0.js": "9f2ae7628f2ee0b054392499f3eff9496ec4e07e106e7db511dfea3513846c4c",
     "pkg/wasmer_sdk_js.js": "13e575e529e4a23348edd9b2aa35e28e726672c3d1c73792e4beeacb904eb12d",
-    "pkg/wasmer_sdk_js_bg.wasm": "3a5e3a9199f88a0f873f880f9741d1bc8fb9b4d5592a738effa83aef62bd54aa"
+    "pkg/wasmer_sdk_js_bg.wasm": "23181eb6283298a85a5ab0ddf69e12c52e48e392ce17c5a31fa6144ff45e1907"
   },
   "rebuild": "python3 swift/WasmerWKSDK/scripts/prototype.py prepare --rebuild-wasm",
   "sdk_version": "0.14.0",
-  "source_sha256": "85e7f70f764dcec6f96d8739fb997219819eb3104f5270cf45847f532bab310e"
+  "source_sha256": "d3fc59c3717f494b7329cce29c15b8d1c8443a1adfa16a26b8024bafec278411"
 }

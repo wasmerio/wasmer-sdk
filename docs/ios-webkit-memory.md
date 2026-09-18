@@ -5,11 +5,13 @@ iOS 27.0 (24A434), WebKit 8625.1.29.10.29. The execution WKWebView was
 unattached. The SDK heap limit remained 512 MiB and the shared guest-memory
 limit remained 128 MiB.
 
-**The long-session iOS failure remains unresolved.** We fixed an independently
-verified dispatcher retention bug, but a clean full iOS run still failed after
-39 of 175 checks. An engine-only reproduction now triggers the same allocation
-error without Wasmer or any package manager. The evidence points to delayed
-reclamation of shared-memory reservations across worker heaps.
+**Update:** reusing the most recently idle worker now passes the full iOS
+workload twice (175/175 checks each). See the
+[SDK experiment results](ios-webkit-memory-experiments.md). The measurements
+below document the earlier failure: the dispatcher retention fix alone still
+failed after 39 of 175 checks. An engine-only reproduction triggers allocation
+failure without Wasmer or any package manager, pointing to delayed reclamation
+of shared-memory reservations across worker heaps.
 
 The [follow-up research](ios-webkit-memory-research.md) directly tests producer
 versus receiver collection, reproduces failure with a visible WebView, and
@@ -95,7 +97,7 @@ initialization, and keeps all task promises pending. Before the fix all sixteen
 memories remain reachable after garbage collection; after the fix none do.
 It also checks that a later task rejection is still reported.
 
-This fix does **not** eliminate the iOS OOM. The subsequent clean production
+The dispatcher fix alone did **not** eliminate the iOS OOM. Its clean production
 run completed eleven pip installs and sixteen Python launches, then failed on
 the next launch (39 of 175 checks). No diagnostic allocation wrappers or retry
 delays were present in that validation run.
@@ -143,13 +145,14 @@ Captured results are in [the result data](ios-webkit-memory-results.json).
 The result separates application ownership bugs from an engine reclamation
 limitation. JavaScript has no portable explicit collection or memory-disposal
 operation that would make this allocation pattern deterministic. The next SDK
-step is to establish when workers are genuinely idle and can be retired, and
-reduce the number of realms that receive each guest memory. These require lifecycle
+steps were to reduce the number of realms receiving each guest memory and
+establish when workers could safely be retired. The locality experiment addresses
+the former through worker selection. Worker retirement still requires lifecycle
 changes: terminating a worker that still owns a WASIX task would break the
 session. Increasing the SDK heap cap does not address the measured reservation
 pressure.
 
-## Reproduction and validation
+## Reproduction and validation before the locality change
 
 ```sh
 npm --prefix js run build:ts
@@ -162,9 +165,9 @@ python3 swift/Examples/WebKitMemoryProbe/run.py --device <IOS_27_SIMULATOR_UDID>
 
 The dispatcher regression, five worker/filesystem tests, and two browser
 worker/Python tests pass. Chromium's full 45-check terminal stress run passes,
-with a final SDK heap of 360,579,072 bytes (343.9 MiB). The full iOS run fails as
-described above. Earlier passing quick/integration runs do not clear that
-failure.
+with a final SDK heap of 360,579,072 bytes (343.9 MiB). The full iOS run at that
+stage failed as described above. Earlier passing quick/integration runs did
+not clear that failure; the later locality validation is linked at the top.
 
 The full iOS test now includes 150 keyboard-driven Python launches after the
 eleven package installs, then output pressure and restart with pending input.

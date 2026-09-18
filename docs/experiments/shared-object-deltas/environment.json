@@ -1,0 +1,15 @@
+{
+  "sdkBase": "49dbb7c3f08689e80b05cbb0da7a72a39c2c1578",
+  "runtimeBase": "195137ff236201ba701a1fe9184f79d14d6d27ab",
+  "rustc": "rustc 1.100.0-nightly (0dfb098f3 2026-08-31)",
+  "candidateWasmSHA256": "29806f2cb862c281c7066e61752b08d11156c60906d5bd237caa51ce457c58f2",
+  "sdkPatchSHA256": "9c3de6e8aca242eb299bd9509490e48b40c686d97ac8bcdc97933d6872a7299a",
+  "runtimePatchSHA256": "a1fdb23d16674ecfc325f6a33ddebe7ce4bd1bc3232beddcc3f3470d0970b6ea",
+  "controlAppWasmSHA256": "3a5e3a9199f88a0f873f880f9741d1bc8fb9b4d5592a738effa83aef62bd54aa",
+  "deltaAppWasmSHA256": "29806f2cb862c281c7066e61752b08d11156c60906d5bd237caa51ce457c58f2",
+  "ios": "27.0 (24A434)",
+  "webkit": "8625.1.29.10.29",
+  "device": "iPhone 18 Pro simulator",
+  "chromium": "151.0.7922.34",
+  "localityAppWasmSHA256": "23181eb6283298a85a5ab0ddf69e12c52e48e392ce17c5a31fa6144ff45e1907"
+}

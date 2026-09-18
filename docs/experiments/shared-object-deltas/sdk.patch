@@ -1,0 +1,158 @@
+diff --git a/js/bindgen/src/tasks/interop.rs b/js/bindgen/src/tasks/interop.rs
+index 2e3c4978..12954789 100644
+--- a/js/bindgen/src/tasks/interop.rs
++++ b/js/bindgen/src/tasks/interop.rs
+@@ -136,6 +136,62 @@ mod tests {
+     use wasm_bindgen_test::wasm_bindgen_test;
+     use wasmer::{Memory, MemoryType, Module, SharedMemory, Store};
+ 
++    #[wasm_bindgen_test]
++    fn shared_object_deltas_are_per_connection_and_retry_failed_posts() {
++        let store = Store::default();
++        let first = Module::new(&store, b"\0asm\x01\0\0\0").unwrap();
++        let mut sender = wasmer::js::SharedObjectSender::default();
++        let prepare = || wasmer::js::prepare_shared_object_message(JsValue::from_str("task"));
++        let count = |value: &JsValue| Array::from(&Array::from(value).get(2)).length();
++        sender
++            .send(prepare(), |message| -> Result<(), JsValue> {
++                assert_eq!(count(message), 1);
++                assert_eq!(
++                    unsafe { wasmer::js::receive_shared_object_message(message.clone()) }?,
++                    "task"
++                );
++                Ok(())
++            })
++            .unwrap();
++        sender
++            .send(prepare(), |message| -> Result<(), JsValue> {
++                assert_eq!(count(message), 0);
++                Ok(())
++            })
++            .unwrap();
++
++        let second = Module::new(&store, b"\0asm\x01\0\0\0").unwrap();
++        assert!(
++            sender
++                .send(prepare(), |message| -> Result<(), JsValue> {
++                    assert_eq!(count(message), 1);
++                    Err(JsValue::from_str("postMessage failed"))
++                })
++                .is_err()
++        );
++        sender
++            .send(prepare(), |message| -> Result<(), JsValue> {
++                assert_eq!(count(message), 1);
++                Ok(())
++            })
++            .unwrap();
++
++        let mut replacement = wasmer::js::SharedObjectSender::default();
++        replacement
++            .send(prepare(), |message| -> Result<(), JsValue> {
++                assert_eq!(count(message), 2);
++                Ok(())
++            })
++            .unwrap();
++        drop((first, second));
++        sender
++            .send(prepare(), |message| -> Result<(), JsValue> {
++                assert_eq!(count(message), 0);
++                Ok(())
++            })
++            .unwrap();
++    }
++
+     #[wasm_bindgen_test]
+     fn lifecycle_messages_stay_plain_with_live_objects() {
+         let store = Store::default();
+diff --git a/js/bindgen/src/tasks/worker_handle.rs b/js/bindgen/src/tasks/worker_handle.rs
+index 3409523d..5ef13c68 100644
+--- a/js/bindgen/src/tasks/worker_handle.rs
++++ b/js/bindgen/src/tasks/worker_handle.rs
+@@ -1,4 +1,4 @@
+-use std::fmt::Debug;
++use std::{cell::RefCell, fmt::Debug};
+ 
+ use anyhow::{Context, Error};
+ use js_sys::{Array, JsString, Uint8Array};
+@@ -22,6 +22,7 @@ pub(crate) struct CapiTransfer {
+ pub(crate) struct WorkerHandle {
+     id: u32,
+     inner: web_sys::Worker,
++    shared_objects: RefCell<wasmer::js::SharedObjectSender>,
+ }
+ 
+ impl WorkerHandle {
+@@ -62,6 +63,7 @@ impl WorkerHandle {
+         Ok(WorkerHandle {
+             id: worker_id,
+             inner: worker,
++            shared_objects: RefCell::default(),
+         })
+     }
+ 
+@@ -135,15 +137,16 @@ impl WorkerHandle {
+     ) -> Result<(), Error> {
+         tracing::trace!(?msg, worker.id = self.id(), "sending a message to a worker");
+         let payload = msg.into_js().map_err(|e| e.into_anyhow())?;
+-        let js = if transfers.is_empty() {
+-            payload
+-        } else {
+-            capi_dispatch_message(payload, transfers)?
+-        };
+-
+-        self.inner
+-            .post_message(&js)
+-            .map_err(crate::worker_utils::js_error)?;
++        self.shared_objects.borrow_mut().send(payload, |payload| {
++            let js = if transfers.is_empty() {
++                payload.clone()
++            } else {
++                capi_dispatch_message(payload.clone(), transfers)?
++            };
++            self.inner
++                .post_message(&js)
++                .map_err(crate::worker_utils::js_error)
++        })?;
+ 
+         Ok(())
+     }
+diff --git a/js/bindgen/src/tasks/worker_message.rs b/js/bindgen/src/tasks/worker_message.rs
+index dfa7a8c3..0a5e72ac 100644
+--- a/js/bindgen/src/tasks/worker_message.rs
++++ b/js/bindgen/src/tasks/worker_message.rs
+@@ -1,6 +1,12 @@
+ use wasm_bindgen::{JsCast, JsValue};
+ use web_sys::DedicatedWorkerGlobalScope;
+ 
++thread_local! {
++    // A dedicated worker has one parent connection for its whole lifetime.
++    static SHARED_OBJECTS: std::cell::RefCell<wasmer::js::SharedObjectSender> =
++        std::cell::RefCell::default();
++}
++
+ use crate::{
+     tasks::{
+         SchedulerMessage,
+@@ -57,8 +63,19 @@ impl WorkerMessage {
+         );
+         let scope: DedicatedWorkerGlobalScope = js_sys::global().unchecked_into();
+ 
+-        let value = self.into_js()?;
+-        scope.post_message(&value).map_err(Error::js)?;
++        if let Self::Scheduler(message) = self {
++            let message = message.into_js()?;
++            SHARED_OBJECTS.with_borrow_mut(|sender| {
++                sender.send(message, |message| {
++                    let value = Serializer::new(consts::TYPE_SCHEDULER)
++                        .set(consts::MESSAGE, message.clone())
++                        .finish()?;
++                    scope.post_message(&value).map_err(Error::js)
++                })
++            })?;
++        } else {
++            scope.post_message(&self.into_js()?).map_err(Error::js)?;
++        }
+ 
+         tracing::debug!(
+             current_thread = wasmer::js::current_thread_id(),

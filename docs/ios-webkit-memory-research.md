@@ -2,8 +2,10 @@
 
 Follow-up investigation, September 18, 2026. The [original report](ios-webkit-memory.md)
 contains the failing WasmerShell stack, memory map, dispatcher fix, and full
-application stress results. **The full iOS failure remains unresolved.** This
-follow-up changes the diagnostic probe only, not the SDK runtime.
+application stress results. The full iOS failure was unresolved at this stage;
+the later [SDK experiments](ios-webkit-memory-experiments.md) obtain two full
+passes by changing worker reuse. This research stage changed the diagnostic
+probe only, not the SDK runtime.
 
 The new evidence isolates a reclamation problem across worker heaps: collecting
 the allocating worker is insufficient, while collecting receiving workers
@@ -184,7 +186,7 @@ include browser/OS versions and actual WebView attachment state. The hidden
 and visible iOS controls ran in a dedicated simulator, preserving WasmerShell's
 session on the user's simulator. Physical iPhone execution remains untested.
 
-This investigation does not clear the previous clean full iOS failure at
+This engine investigation alone did not clear the clean full iOS failure at
 39/175 checks. Chromium's full terminal stress run remains passing, while the
 concentrated engine-only probe demonstrates a related reclamation limit there.
 An upstream engine patch and an SDK transport/lifecycle mitigation both need

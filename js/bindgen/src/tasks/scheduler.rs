@@ -436,8 +436,10 @@ impl SchedulerState {
     }
 
     fn next_available_worker(&mut self, reason: &str) -> Result<WorkerHandle, Error> {
-        // First, try to send the message to an idle worker
-        if let Some(worker) = self.idle.pop_front() {
+        // Reuse the most recently available worker. Rotating through the idle
+        // pool spreads short-lived guest memories across otherwise quiet JS
+        // heaps, delaying reclamation of their shared backing reservations.
+        if let Some(worker) = self.idle.pop_back() {
             tracing::trace!(
                 worker.id = worker.id(),
                 "Sending the message to an idle worker"

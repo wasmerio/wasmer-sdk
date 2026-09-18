@@ -99,7 +99,9 @@ proving that a retired worker owns no live WASIX tasks.
 
 Chromium 151 also reproduces allocation failure in this deliberately rapid
 test; this is not a claim that only WebKit has reclamation limits. The full
-browser terminal stress test passes, while the full iOS test still fails.
+browser terminal stress test passes. The full iOS SDK test originally failed;
+the later [worker-locality experiment](../../../docs/ios-webkit-memory-experiments.md)
+passes that workload twice. The engine-only allocation failure remains reproducible.
 The probe isolates allocation pressure from application ownership and package
 manager behavior; it does not establish the exact engine-internal defect.
 

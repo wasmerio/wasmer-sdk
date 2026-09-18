@@ -1,0 +1,73 @@
+diff --git a/lib/api/src/backend/js/utils/mod.rs b/lib/api/src/backend/js/utils/mod.rs
+index 2457b6784..abc51cdfe 100644
+--- a/lib/api/src/backend/js/utils/mod.rs
++++ b/lib/api/src/backend/js/utils/mod.rs
+@@ -5,6 +5,6 @@ pub(crate) mod shared_handle;
+ pub use convert::*;
+ pub use js_handle::*;
+ pub use shared_handle::{
+-    collect_shared_objects, export_shared_objects, import_shared_objects,
++    SharedObjectSender, collect_shared_objects, export_shared_objects, import_shared_objects,
+     prepare_shared_object_message, receive_shared_object_message, shared_object_stats,
+ };
+diff --git a/lib/api/src/backend/js/utils/shared_handle.rs b/lib/api/src/backend/js/utils/shared_handle.rs
+index 3f74796e8..4f9ddf090 100644
+--- a/lib/api/src/backend/js/utils/shared_handle.rs
++++ b/lib/api/src/backend/js/utils/shared_handle.rs
+@@ -218,6 +218,56 @@ pub fn prepare_shared_object_message(payload: JsValue) -> JsValue {
+     .into()
+ }
+ 
++/// Send shared objects once per ordered, reliable worker connection.
++///
++/// Create a fresh sender whenever the receiving realm is replaced. A receiver
++/// must import every delivered envelope before accessing its task, and retain
++/// imported objects while their Rust owner is alive. Only IDs are cached here;
++/// this sender never keeps JavaScript memories or modules alive.
++#[derive(Debug, Default)]
++pub struct SharedObjectSender {
++    sent: HashSet<u32>,
++}
++
++impl SharedObjectSender {
++    /// Filter an envelope prepared by `prepare_shared_object_message`, then
++    /// record delivery only when `post` succeeds. Plain messages pass through.
++    pub fn send<E>(
++        &mut self,
++        message: JsValue,
++        post: impl FnOnce(&JsValue) -> Result<(), E>,
++    ) -> Result<(), E> {
++        if !Array::is_array(&message) {
++            return post(&message);
++        }
++        let envelope: Array = message.unchecked_into();
++        // Leave foreign/malformed envelopes to the normal receiver validation.
++        if envelope.length() != 3
++            || envelope.get(0).as_string().as_deref() != Some(NAMESPACE.as_str())
++            || !Array::is_array(&envelope.get(2))
++        {
++            return post(envelope.as_ref());
++        }
++        let snapshot: Array = envelope.get(2).unchecked_into();
++        let mut live = HashSet::new();
++        let delta = Array::new();
++        for entry in snapshot.iter() {
++            let entry: Array = entry.unchecked_into();
++            let id = entry.get(0).as_f64().expect("prepared object ID") as u32;
++            live.insert(id);
++            if !self.sent.contains(&id) {
++                delta.push(&entry);
++            }
++        }
++        let message = Array::of3(&envelope.get(0), &envelope.get(1), &delta);
++        post(message.as_ref())?;
++        // Bound metadata by the current snapshot. An absent ID may be resent
++        // later, which is safe; omitting an undelivered ID would not be.
++        self.sent = live;
++        Ok(())
++    }
++}
++
+ /// Import a transport envelope and return its application payload.
+ /// Plain non-array lifecycle messages pass through unchanged.
+ ///
