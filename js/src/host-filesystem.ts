@@ -18,6 +18,10 @@ export function isHostFileSystemRequest(value: unknown): value is HostFileSystem
 }
 
 export function installHostFileSystemWorkerBridge(): void {
+  // Calls block this worker, so only one reply can be in flight. Reuse its
+  // storage: pip performs tens of thousands of metadata calls; reserving
+  // 512 KiB for every call creates gigabytes of transient shared buffers.
+  let responseBuffer: SharedArrayBuffer | undefined;
   const scope = globalThis as Record<string, unknown>;
   scope.__wasmerHandleFileSystemRpc = (message: unknown) => {
     if (!isHostFileSystemRequest(message)) return false;
@@ -26,11 +30,21 @@ export function installHostFileSystemWorkerBridge(): void {
   };
   scope.__wasmerHostFileSystem = (mount: number, method: string, args: unknown[]) => {
     if (typeof window !== "undefined") throw new Error("Native filesystem calls require a worker");
-    const response = new SharedArrayBuffer(RESPONSE_BYTES);
+    const response = responseBuffer ??= new SharedArrayBuffer(RESPONSE_BYTES);
     const control = new Int32Array(response, 0, 2);
+    control.fill(0);
     globalThis.postMessage({ type: HOST_FS_MESSAGE, mount, method, args, response });
-    if (Atomics.wait(control, 0, 0, TIMEOUT_MS) === "timed-out") {
-      throw Object.assign(new Error(`Native filesystem ${method} timed out`), { code: "ETIMEDOUT" });
+    const deadline = Date.now() + TIMEOUT_MS;
+    // A notification from the preceding reply can race with buffer reuse.
+    // Always check the completion flag rather than treating a wake as a reply.
+    while (Atomics.load(control, 0) === 0) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || Atomics.wait(control, 0, 0, remaining) === "timed-out") {
+        // A late host reply still owns this buffer. Never let it overwrite the
+        // next call's response after a timeout.
+        responseBuffer = undefined;
+        throw Object.assign(new Error(`Native filesystem ${method} timed out`), { code: "ETIMEDOUT" });
+      }
     }
     const bytes = new Uint8Array(response, HEADER_BYTES, control[1]).slice();
     const result = JSON.parse(new TextDecoder().decode(bytes));

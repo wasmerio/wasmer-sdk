@@ -87,6 +87,19 @@ TLS stays in the guest: Node performs its normal HTTPS and certificate
 verification over the native TCP connection. Package compatibility still
 depends on the WASIX/Edge.js runtime; native Node addons are not iOS binaries.
 
+Python uses the same WASIX wheel index and pip settings as wasmer.sh. Plain
+`pip install flask` installs into the persistent `/native/wasix-packages`
+directory, which is included in `PYTHONPATH`. The bundled framework examples
+also include their requirements:
+
+```sh
+pip install -r /native/python-django/requirements.txt
+pip install -r /native/python-fastapi/requirements.txt
+```
+
+Pip requests binary wheels for `wasix_wasm32`; packages requiring a native
+extension need a compatible WASIX wheel.
+
 ## Architecture
 
 ```text
@@ -140,6 +153,8 @@ execution WKWebView remains unattached throughout.
 
 ```sh
 python3 swift/Examples/WasmerShell/build.py test
+python3 swift/Examples/WasmerShell/build.py stress
+python3 swift/Examples/WasmerShell/build.py stress --quick
 python3 swift/Examples/WasmerShell/build.py build --platform device
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path swift/WasmerWKSDK
 node --test swift/WasmerWKSDK/scripts/native-network.test.mjs
@@ -155,6 +170,21 @@ npm registry, fetches React metadata over HTTPS, runs `pnpm i react` in a fresh
 project, imports React, and checks native socket cleanup. Results are saved
 to `Artifacts/terminal-result.json`.
 The test ends its shell; run `build.py run` afterward for an interactive session.
+
+The stress test repeatedly reinstalls Flask, Django and FastAPI with the cache
+disabled, imports the installed packages, drives 30 Python launches through the
+UIKit keyboard path, types during a 2 MiB output burst, and restarts with input
+pending. `--quick` replaces the network installs with 100 Python launches,
+each creating and joining three threads.
+Each command has a deadline; results are saved to
+`Artifacts/terminal-stress-result.json`. Use a separate simulator with
+`--device <UDID>` to keep stress-test package files out of your normal workspace.
+
+Known stress failure on iOS 27.0 (24A434): the full run completed all 11 pip
+installs, then stopped with WebKit `RangeError: Out of memory` during the 15th
+subsequent Python launch (37 of 55 checks completed). This remains unresolved.
+The separate 103-check quick run and 24 integration checks pass; these do not
+establish stability for prolonged package-manager sessions.
 
 The device command cross-compiles an ad-hoc-signed app; physical
 installation requires development signing. Simulator validation does not

@@ -75,6 +75,8 @@ final class TerminalSession: ObservableObject {
   private var transcript = Data()
   private var exit: Output?
   private let smoke = ProcessInfo.processInfo.arguments.contains("--smoke-test")
+  private let stress = ProcessInfo.processInfo.arguments.contains("--stress-test")
+  private var stressHasRun = false
   private let directory = URL.documentsDirectory.appendingPathComponent("WasmerTerminal")
 
   func start() async {
@@ -99,7 +101,7 @@ final class TerminalSession: ObservableObject {
       transcript.removeAll(); exit = nil
       host.onProgress = { [weak self] message in
         self?.status = message
-        if self?.smoke == true {
+        if self?.smoke == true || self?.stress == true {
           try? Data(message.utf8).write(to: URL.documentsDirectory.appendingPathComponent("terminal-progress.txt"), options: .atomic)
         }
       }
@@ -114,6 +116,12 @@ final class TerminalSession: ObservableObject {
         self.exit = result; self.ready = false
         self.status = "Session exited · \(result.exitCode)"
         self.view.feed(Data("\r\n\u{1b}[90m[Session exited. Tap restart to begin again.]\u{1b}[0m\r\n".utf8))
+      }
+      host.onTerminalFailure = { [weak self, weak host] error in
+        guard let self, let host, self.runtime === host else { return }
+        self.ready = false
+        self.status = error.localizedDescription
+        self.view.feed(Data("\r\n[Session stopped: \(error.localizedDescription). Tap restart to begin again.]\r\n".utf8))
       }
       host.onListeningPortsChanged = { [weak self, weak host] ports in
         guard let self, let host, self.runtime === host else { return }
@@ -137,7 +145,11 @@ final class TerminalSession: ObservableObject {
       view.feed(Data("\u{1b}[2J\u{1b}[H\u{1b}[1;32mLocal programs. Native terminal.\u{1b}[0m\r\nTry python, node, or cowsay hello.\r\nRun node node/server.js to open a browser.\r\nExamples are in /native/node and /native/python.\r\n\r\n".utf8))
       try await host.startTerminal(columns: view.columns, rows: view.rows)
       ready = true; status = "Bash · Node.js · Python"
-      if smoke { Task { await runSmokeTest(host) } }
+      if stress, !stressHasRun {
+        stressHasRun = true
+        Task { await runStressTest(host) }
+      }
+      else if smoke { Task { await runSmokeTest(host) } }
       else if let name = ["node", "python"].first(where: { ProcessInfo.processInfo.arguments.contains("--example-" + $0) }) {
         Task {
           do { try await waitFor("wasmer:"); runExample(name) }
@@ -174,15 +186,18 @@ final class TerminalSession: ObservableObject {
     let previous = inputTask
     inputTask = Task { [weak self] in
       await previous?.value
+      guard let self, self.runtime === host, self.ready else { return }
       do { try await host.writeTerminal(bytes) }
-      catch { self?.status = error.localizedDescription }
+      catch { if self.runtime === host, self.ready { self.status = error.localizedDescription } }
     }
   }
   func restart() async {
     closePreviews()
     ready = false; resizeGeneration += 1
     runtime?.onTerminalExit = nil
+    runtime?.onTerminalFailure = nil
     runtime?.onTerminalOutput = nil
+    runtime?.onProgress = nil
     await runtime?.close(); runtime = nil
     await inputTask?.value; inputTask = nil
     await start()
@@ -242,6 +257,7 @@ final class TerminalSession: ObservableObject {
     let deadline = ContinuousClock.now + .seconds(timeout)
     while !String(text.dropFirst(offset)).contains(marker) {
       if let exit { throw DemoError.failed("Session exited early: \(exit.exitCode)") }
+      guard ready else { throw DemoError.failed("Session unavailable: \(status)") }
       guard ContinuousClock.now < deadline else { throw DemoError.failed("Timed out waiting for \(marker)") }
       try await Task.sleep(for: .milliseconds(50))
     }
@@ -365,6 +381,70 @@ final class TerminalSession: ObservableObject {
     // Output alone does not mean the foreground process has restored Bash's TTY.
     try await waitFor("wasmer: $ ", after: output.distance(from: output.startIndex, to: range.upperBound), timeout: timeout)
     try await Task.sleep(for: .milliseconds(200))
+  }
+  private func runStressTest(_ host: ShellRuntime) async {
+    let quick = ProcessInfo.processInfo.arguments.contains("--stress-quick")
+    var checks: [String] = []
+    var report: [String: Any] = ["passed": false, "osVersion": ProcessInfo.processInfo.operatingSystemVersionString]
+    do {
+      try await waitFor("$ ")
+      try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
+      var commands = [
+        ("Python baseline", "python -c \"print('PYTHON_READY')\""),
+      ]
+      for round in 0..<(quick ? 0 : 5) {
+        commands.append(("pip Flask \(round)", "pip install --force-reinstall --no-cache-dir --upgrade -t /native/stress-python flask"))
+        commands.append(("input after pip \(round)", "PYTHONPATH=/native/stress-python python -c \"import flask; print('FLASK_READY')\""))
+      }
+      for round in 0..<(quick ? 0 : 3) {
+        for example in ["django", "fastapi"] {
+          commands.append(("pip requirements \(example) \(round)", "pip install --force-reinstall --no-cache-dir --upgrade -r /native/python-\(example)/requirements.txt"))
+          commands.append(("import \(example) \(round)", "python -c 'import \(example); print(\(example).__version__)'"))
+        }
+      }
+      for round in 0..<(quick ? 100 : 30) {
+        let script = quick ? "import threading,time; ts=[threading.Thread(target=lambda: time.sleep(.01)) for _ in range(3)]; [t.start() for t in ts]; [t.join() for t in ts]; print('KEYBOARD_READY:%s'%\(round))" : "print('KEYBOARD_READY:%s'%\(round))"
+        commands.append(("keyboard and child process \(round)", "python -c \"\(script)\""))
+      }
+      commands.append(("input during output pressure", "python -u -c \"import sys,threading,time; print('OUTPUT_BUSY'); t=threading.Thread(target=lambda: [(sys.stdout.write('x'*4096+'\\\\n'),time.sleep(.002)) for _ in range(512)]); t.start(); s=input(); t.join(); assert s=='stress-input'\""))
+      for (index, item) in commands.enumerated() {
+        status = "Stress: \(item.0)"
+        try Data(status.utf8).write(to: URL.documentsDirectory.appendingPathComponent("terminal-progress.txt"), options: .atomic)
+        let command = item.1 + "; printf '\\n__STRESS_%s_DONE__:%s\\n' \(index) \"$?\"\r"
+        if item.0.hasPrefix("keyboard") {
+          for letter in command { view.insertText(String(letter)) }
+        } else {
+          try await host.writeTerminal(Data(command.utf8))
+        }
+        if item.0 == "input during output pressure" {
+          try await waitFor("\nOUTPUT_BUSY\n")
+          for letter in "stress-input\n" { view.insertText(String(letter)) }
+        }
+        // Unique split markers survive transcript rotation during output floods.
+        try await waitFor("__STRESS_\(index)_DONE__:", timeout: 180)
+        guard text.contains("__STRESS_\(index)_DONE__:0") else { throw DemoError.failed("\(item.0) failed") }
+        if item.0.hasPrefix("keyboard"), let round = item.0.split(separator: " ").last {
+          guard text.contains("\nKEYBOARD_READY:\(round)\n") else { throw DemoError.failed("\(item.0) lost output") }
+        }
+        checks.append(item.0)
+      }
+      // Restart with a pending read and queued input; closing must not depend
+      // on a guest RPC completing first.
+      report["nativeNetwork"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(await host.nativeNetworkStats))
+      report["transcriptBeforeRestart"] = String(text.suffix(16000))
+      try await host.writeTerminal(Data("python -c 'import time; time.sleep(120)'\r".utf8))
+      try await Task.sleep(for: .milliseconds(300))
+      send(Data(repeating: 120, count: 256 * 1024))
+      await restart()
+      try await waitFor("$ ")
+      view.insertText("printf '\\n%s\\n' RESTART_OK\n")
+      try await waitFor("\nRESTART_OK\n")
+      checks.append("restart with pending input")
+      report["passed"] = true
+    } catch { report["error"] = error.localizedDescription }
+    report["checks"] = checks
+    report["transcript"] = text
+    writeReport(report)
   }
   private func waitForPreview(port: UInt16, heading: String, health: String) async throws -> ServerPreview {
     let deadline = ContinuousClock.now + .seconds(60)

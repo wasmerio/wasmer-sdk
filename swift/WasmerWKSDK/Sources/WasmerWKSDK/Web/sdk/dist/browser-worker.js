@@ -10,14 +10,24 @@ globalThis.addEventListener("error", (event) => {
     console.error("[wasmer-sdk-worker-error]", runtimeMemory?.buffer.byteLength, event.error?.stack ?? event.message);
 });
 globalThis.addEventListener("unhandledrejection", (event) => {
-    console.error("[wasmer-sdk-worker-rejection]", event.reason?.stack ?? event.reason);
+    event.preventDefault();
+    reportWorkerFailure(event.reason);
 });
 let worker;
 const pendingMessages = [];
+let failureReported = false;
+function reportWorkerFailure(error) {
+    if (failureReported)
+        return;
+    failureReported = true;
+    console.error("Wasmer SDK worker failed:", error);
+    // Logging a rejected handler leaves the scheduler waiting forever for Idle.
+    // An uncaught worker error reaches WorkerHandle.onerror, which fails joins
+    // and closes the pool.
+    globalThis.reportError(error);
+}
 globalThis.onmessage = ({ data }) => {
-    void handleMessage(data).catch((error) => {
-        console.error("Wasmer SDK worker failed:", error);
-    });
+    void handleMessage(data).catch(reportWorkerFailure);
 };
 async function handleMessage(data) {
     data = receiveCapiDispatch(data);
@@ -29,7 +39,12 @@ async function handleMessage(data) {
         return;
     }
     if (worker) {
-        await worker.handle(data);
+        if (data?.type === "wasmer-collect-shared") {
+            worker.collectSharedObjects();
+        }
+        else {
+            await worker.handle(data);
+        }
     }
     else
         pendingMessages.push(data);
@@ -41,9 +56,7 @@ async function initialize(data) {
     const initialized = new sdk.ThreadPoolWorker(data.id);
     worker = initialized;
     while (pendingMessages.length > 0) {
-        void initialized.handle(pendingMessages.shift()).catch((error) => {
-            console.error("Wasmer SDK worker failed:", error);
-        });
+        void handleMessage(pendingMessages.shift()).catch(reportWorkerFailure);
     }
 }
 function installNetworkProxy() {

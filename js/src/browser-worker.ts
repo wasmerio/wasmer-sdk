@@ -13,6 +13,7 @@ import {
 
 interface WorkerRuntime {
   handle(message: unknown): Promise<void>;
+  collectSharedObjects(): void;
 }
 
 interface InitMessage {
@@ -36,16 +37,26 @@ globalThis.addEventListener("error", (event) => {
   );
 });
 globalThis.addEventListener("unhandledrejection", (event) => {
-  console.error("[wasmer-sdk-worker-rejection]", event.reason?.stack ?? event.reason);
+  event.preventDefault();
+  reportWorkerFailure(event.reason);
 });
 
 let worker: WorkerRuntime | undefined;
 const pendingMessages: unknown[] = [];
+let failureReported = false;
+
+function reportWorkerFailure(error: unknown): void {
+  if (failureReported) return;
+  failureReported = true;
+  console.error("Wasmer SDK worker failed:", error);
+  // Logging a rejected handler leaves the scheduler waiting forever for Idle.
+  // An uncaught worker error reaches WorkerHandle.onerror, which fails joins
+  // and closes the pool.
+  globalThis.reportError(error);
+}
 
 globalThis.onmessage = ({ data }: MessageEvent<unknown>) => {
-  void handleMessage(data).catch((error: unknown) => {
-    console.error("Wasmer SDK worker failed:", error);
-  });
+  void handleMessage(data).catch(reportWorkerFailure);
 };
 
 async function handleMessage(data: unknown): Promise<void> {
@@ -58,7 +69,11 @@ async function handleMessage(data: unknown): Promise<void> {
   }
 
   if (worker) {
-    await worker.handle(data);
+    if ((data as { type?: string })?.type === "wasmer-collect-shared") {
+      worker.collectSharedObjects();
+    } else {
+      await worker.handle(data);
+    }
   }
   else pendingMessages.push(data);
 }
@@ -76,9 +91,7 @@ async function initialize(data: InitMessage): Promise<void> {
   const initialized = new sdk.ThreadPoolWorker(data.id);
   worker = initialized;
   while (pendingMessages.length > 0) {
-    void initialized.handle(pendingMessages.shift()).catch((error: unknown) => {
-      console.error("Wasmer SDK worker failed:", error);
-    });
+    void handleMessage(pendingMessages.shift()).catch(reportWorkerFailure);
   }
 }
 

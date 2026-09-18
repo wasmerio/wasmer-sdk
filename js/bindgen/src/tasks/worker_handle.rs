@@ -69,6 +69,19 @@ impl WorkerHandle {
         self.id
     }
 
+    pub(crate) fn collect_shared_objects(&self) -> Result<(), Error> {
+        let message = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &message,
+            &JsValue::from_str("type"),
+            &JsValue::from_str("wasmer-collect-shared"),
+        )
+        .map_err(crate::worker_utils::js_error)?;
+        self.inner
+            .post_message(&message)
+            .map_err(crate::worker_utils::js_error)
+    }
+
     /// Deliver a host value to a worker that requested it while already
     /// executing a WASIX thread. Worker.postMessage() performs the structured
     /// clone; the SDK does not serialize the JavaScript value itself.

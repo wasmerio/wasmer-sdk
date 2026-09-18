@@ -200,6 +200,19 @@ outputs on ports 4173 and 4174.
 
 ## Browser smoke test
 
+For repeated Python installs and terminal input stress, run `npm run test:stress`.
+This starts its own Vite server, WISP proxy and headless Chromium. It reinstalls
+the Django and FastAPI requirements three times with the cache disabled, imports
+the packages, runs 30 Python processes through the browser keyboard, types during
+a 2 MiB output burst, and checks Ctrl-C recovery. Commands have deadlines and
+runtime errors fail the test. It loads Python, Node and cowsay, caps the SDK heap
+at the same 512 MiB used on iOS, and checks that repeated commands add less than
+128 MiB after startup. The report includes heap sizes for each command.
+`WASMER_STRESS_ROUNDS=5` increases install cycles;
+`WASMER_STRESS_REPORT=/path/to/result.json` selects the JSON report path (the
+default is `wasmer-browser-stress-result.json` in the system temporary directory).
+Failure reports include the terminal tail, console diagnostics and worker stacks.
+
 Install Chromium once, then exercise a real registry package through the
 browser terminal:
 

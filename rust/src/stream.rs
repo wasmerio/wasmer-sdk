@@ -8,6 +8,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use crossbeam_queue::SegQueue;
 use futures::task::AtomicWaker;
 use tokio::{
     io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf},
@@ -30,7 +31,28 @@ struct PipeState {
     buffered: AtomicUsize,
     capacity: usize,
     closed: AtomicBool,
-    writer_waker: AtomicWaker,
+    writers: SegQueue<Arc<WriterWaiter>>,
+}
+
+#[derive(Debug, Default)]
+struct WriterWaiter {
+    queued: AtomicBool,
+    waker: AtomicWaker,
+}
+
+impl PipeState {
+    fn wake_writers(&self) {
+        // Each producer (including terminal echo) needs its own registration.
+        // A single AtomicWaker loses notifications when another producer waits.
+        // Bound the drain so concurrently re-registering writers cannot starve
+        // the reader. A writer arriving later rechecks capacity after registering.
+        for _ in 0..self.writers.len() {
+            if let Some(writer) = self.writers.pop() {
+                writer.queued.store(false, Ordering::Release);
+                writer.waker.wake();
+            }
+        }
+    }
 }
 
 /// Create a byte-bounded asynchronous pipe without a blocking mutex.
@@ -45,7 +67,7 @@ pub(crate) fn bounded_pipe(capacity: usize) -> (PipeReader, PipeWriter, PipeClos
         buffered: AtomicUsize::new(0),
         capacity: capacity.max(1),
         closed: AtomicBool::new(false),
-        writer_waker: AtomicWaker::new(),
+        writers: SegQueue::new(),
     });
     (
         PipeReader {
@@ -60,6 +82,7 @@ pub(crate) fn bounded_pipe(capacity: usize) -> (PipeReader, PipeWriter, PipeClos
             state: Arc::clone(&state),
             active: true,
             owns_lifetime: true,
+            waiter: Arc::default(),
         },
         PipeCloser { sender, state },
     )
@@ -75,7 +98,7 @@ impl PipeCloser {
     pub(crate) fn close(&self) {
         if !self.state.closed.swap(true, Ordering::AcqRel) {
             let _ = self.sender.send(PipeMessage::Close);
-            self.state.writer_waker.wake();
+            self.state.wake_writers();
         }
     }
 }
@@ -135,7 +158,7 @@ impl AsyncRead for PipeReader {
                 buffer.put_slice(&available[..read]);
                 self.offset += read;
                 self.state.buffered.fetch_sub(read, Ordering::AcqRel);
-                self.state.writer_waker.wake();
+                self.state.wake_writers();
 
                 if self.offset < pending.len() {
                     self.pending = Some(pending);
@@ -169,7 +192,7 @@ impl Drop for PipeReader {
     fn drop(&mut self) {
         self.receiver.close();
         self.state.closed.store(true, Ordering::Release);
-        self.state.writer_waker.wake();
+        self.state.wake_writers();
     }
 }
 
@@ -179,6 +202,7 @@ pub(crate) struct PipeWriter {
     state: Arc<PipeState>,
     active: bool,
     owns_lifetime: bool,
+    waiter: Arc<WriterWaiter>,
 }
 
 impl PipeWriter {
@@ -192,6 +216,7 @@ impl PipeWriter {
             state: Arc::clone(&self.state),
             active: self.active,
             owns_lifetime: false,
+            waiter: Arc::default(),
         }
     }
 
@@ -205,7 +230,10 @@ impl PipeWriter {
             return Poll::Ready(Ok(self.state.capacity - buffered));
         }
 
-        self.state.writer_waker.register(cx.waker());
+        self.waiter.waker.register(cx.waker());
+        if !self.waiter.queued.swap(true, Ordering::AcqRel) {
+            self.state.writers.push(Arc::clone(&self.waiter));
+        }
         if self.state.closed.load(Ordering::Acquire) {
             return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
         }
@@ -220,7 +248,7 @@ impl PipeWriter {
     fn close(&mut self) {
         if self.active && self.owns_lifetime && !self.state.closed.swap(true, Ordering::AcqRel) {
             let _ = self.sender.send(PipeMessage::Close);
-            self.state.writer_waker.wake();
+            self.state.wake_writers();
         }
         self.active = false;
     }
@@ -495,8 +523,8 @@ impl VirtualFile for RetainedOutput {
         Poll::Ready(Ok(8192))
     }
 
-    fn poll_write_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
-        Poll::Ready(Ok(8192))
+    fn poll_write_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write_ready(cx)
     }
 }
 
@@ -583,6 +611,51 @@ mod tests {
         assert_eq!(
             tap.write_all(b"y").await.unwrap_err().kind(),
             std::io::ErrorKind::BrokenPipe
+        );
+    }
+
+    #[tokio::test]
+    async fn draining_a_full_pipe_wakes_output_and_terminal_echo() {
+        use futures::task::{ArcWake, waker};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        use tokio::io::AsyncWrite;
+
+        #[derive(Default)]
+        struct WakeFlag(AtomicBool);
+        impl ArcWake for WakeFlag {
+            fn wake_by_ref(flag: &Arc<Self>) {
+                flag.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let (mut reader, mut output, _) = bounded_pipe(2);
+        let mut echo = output.tap();
+        output.write_all(b"xx").await.unwrap();
+        let output_flag = Arc::new(WakeFlag::default());
+        let echo_flag = Arc::new(WakeFlag::default());
+        let output_waker = waker(output_flag.clone());
+        let echo_waker = waker(echo_flag.clone());
+        assert!(
+            Pin::new(&mut output)
+                .poll_write(&mut Context::from_waker(&output_waker), b"a")
+                .is_pending()
+        );
+        assert!(
+            Pin::new(&mut echo)
+                .poll_write(&mut Context::from_waker(&echo_waker), b"b")
+                .is_pending()
+        );
+        reader.read_exact(&mut [0; 2]).await.unwrap();
+        assert!(
+            output_flag.0.load(Ordering::SeqCst),
+            "guest output lost its wake-up to terminal echo"
+        );
+        assert!(
+            echo_flag.0.load(Ordering::SeqCst),
+            "terminal echo lost its wake-up to guest output"
         );
     }
 }
