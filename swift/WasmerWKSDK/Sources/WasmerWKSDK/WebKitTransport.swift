@@ -119,7 +119,13 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
             guard let reply = value as? String else {
               throw SdkError.Failure(code: "INTERNAL_ERROR", message: "Invalid WebKit reply")
             }
-            self?.pending.removeValue(forKey: id)?.resume(returning: Data(reply.utf8))
+            if let completion = self?.pending.removeValue(forKey: id) {
+              completion.resume(returning: Data(reply.utf8))
+            } else {
+              // The control page may already have resolved before Swift task
+              // cancellation wins. Release a handle the caller never received.
+              await self?.releaseUnclaimed(method: method, reply: Data(reply.utf8))
+            }
           } catch {
             self?.pending.removeValue(forKey: id)?.resume(
               throwing: SdkError.Failure(
@@ -129,6 +135,29 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
       }
     } onCancel: {
       Task { @MainActor [weak self] in self?.cancel(id) }
+    }
+  }
+
+  private func releaseUnclaimed(method: String, reply: Data) async {
+    guard !closed,
+      let envelope = try? JSONSerialization.jsonObject(with: reply) as? [String: Any],
+      envelope["error"] == nil
+    else { return }
+    let cleanup: String
+    let arguments: [String: Int]
+    if method == "command.spawn", let value = envelope["value"] as? [String: Any],
+      let handle = value["handle"] as? Int
+    {
+      cleanup = "process.release"
+      arguments = ["process": handle]
+    } else if method == "sandbox.create", let handle = envelope["value"] as? Int {
+      cleanup = "sandbox.close"
+      arguments = ["sandbox": handle]
+    } else {
+      return
+    }
+    if let payload = try? JSONEncoder().encode(arguments) {
+      _ = try? await request(cleanup, payload: payload)
     }
   }
 

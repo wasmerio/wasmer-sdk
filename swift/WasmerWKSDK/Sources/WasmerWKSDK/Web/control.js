@@ -12,7 +12,7 @@ function stop(message = "Runtime closed") {
   stopped = true;
   void native.postMessage({ kind: "network", session, method: "close", args: [] }).catch(() => {});
   worker.terminate();
-  for (const resolve of pending.values()) resolve({ error: { code: "CLIENT_CLOSED", message } });
+  for (const entry of pending.values()) entry.resolve({ error: { code: "CLIENT_CLOSED", message } });
   pending.clear();
 }
 worker.onmessage = async ({ data }) => {
@@ -32,8 +32,16 @@ worker.onmessage = async ({ data }) => {
   }
   if (data.kind === "ready") { void native.postMessage({ ...data, pageIsolated: crossOriginIsolated }); return; }
   if (data.kind === "diagnostic" || data.kind === "progress") { void native.postMessage({ kind: "progress", message: data.message }); return; }
-  const resolve = pending.get(data.id);
-  if (resolve) { pending.delete(data.id); resolve(data); }
+  const entry = pending.get(data.id);
+  if (entry) {
+    pending.delete(data.id);
+    if (entry.cancelled && !data.error) {
+      // Cancellation can overtake a result already queued by the worker.
+      const cleanup = entry.method === "command.spawn" ? ["process.release", { process: data.value.handle }] :
+        entry.method === "sandbox.create" ? ["sandbox.close", { sandbox: data.value }] : undefined;
+      if (cleanup) worker.postMessage({ id: crypto.randomUUID(), method: cleanup[0], args: cleanup[1] });
+    } else entry.resolve(data);
+  }
 };
 worker.onerror = event => {
   stop(event.message);
@@ -42,12 +50,14 @@ worker.onerror = event => {
 globalThis.wasmerRPC = {
   request(command) {
     if (stopped) return Promise.resolve({ error: { code: "CLIENT_CLOSED", message: "Runtime closed" } });
-    return new Promise(resolve => { pending.set(command.id, resolve); worker.postMessage(command); });
+    return new Promise(resolve => { pending.set(command.id, { resolve, method: command.method, cancelled: false }); worker.postMessage(command); });
   },
   cancel(id) {
-    const resolve = pending.get(id);
-    pending.delete(id);
-    resolve?.({ error: { code: "CANCELLED", message: "Swift task cancelled" } });
+    const entry = pending.get(id);
+    if (entry) {
+      entry.cancelled = true;
+      entry.resolve({ error: { code: "CANCELLED", message: "Swift task cancelled" } });
+    }
     worker.postMessage({ kind: "cancel", id });
   },
   stop,

@@ -172,6 +172,10 @@ export class SDKDispatcher {
               process.free();
             }
           }
+          if (job.cancelled) {
+            process.free();
+            fail("CANCELLED", "Swift task cancelled");
+          }
           const handle = ++this.#next;
           this.#processes.set(handle, { process, sandbox: args.sandbox });
           return { handle, id: process.id };

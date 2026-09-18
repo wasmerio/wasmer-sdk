@@ -84,3 +84,14 @@ test('port discovery converts typed arrays and readiness observes guest ingress'
   const disabled = await request('sandbox.create', { packages: [], files: {}, env: {}, network: 'disabled' });
   await assert.rejects(request('ports.wait', { sandbox: disabled, port: 8000, timeoutMs: 100 }), { code: 'CAPABILITY_UNAVAILABLE' });
 });
+
+test('cancelled spawn releases the handle that Swift never received', async () => {
+  const { request, dispatcher, processes } = fixture();
+  await request('initialize');
+  const sandbox = await request('sandbox.create', { packages: [], files: {}, env: {}, network: 'disabled' });
+  const spawning = dispatcher.request('spawn', 'command.spawn', { sandbox, selector: { kind: 'name', name: 'main' }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+  dispatcher.cancel('spawn');
+  await assert.rejects(spawning, { code: 'CANCELLED' });
+  assert.equal(processes.length, 1);
+  assert.ok(processes[0].killed && processes[0].freed);
+});
