@@ -95,6 +95,14 @@ impl ThreadPoolWorker {
         }
     }
 
+    /// Release worker-local JS roots after the scheduler has dropped finished
+    /// process ownership. Collection before sending Idle is too early: the
+    /// scheduler still owns the process at that point.
+    #[wasm_bindgen(js_name = collectSharedObjects)]
+    pub fn collect_shared_objects(&self) {
+        wasmer::js::collect_shared_objects();
+    }
+
     #[wasm_bindgen(js_name = "handle")]
     pub async fn js_handle(&self, msg: JsValue) -> Result<(), crate::worker_utils::Error> {
         self.handle(msg).await

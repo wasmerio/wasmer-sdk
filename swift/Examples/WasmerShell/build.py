@@ -59,8 +59,8 @@ def build(platform):
     copy_resources(library, app)
     examples = app / "Examples"
     examples.mkdir(exist_ok=True)
-    # Bundle the same dependency-free examples as wasmer.sh, without drift.
-    for name in ("node", "python"):
+    # Bundle the same examples and requirements as wasmer.sh, without drift.
+    for name in ("node", "python", "python-django", "python-fastapi"):
         destination = examples / name
         if destination.exists():
             shutil.rmtree(destination)
@@ -81,7 +81,7 @@ def build(platform):
     return app
 
 
-def launch(app, selected, smoke, example=None):
+def launch(app, selected, smoke, example=None, stress=False, quick=False):
     device = selected["udid"]
     if selected["state"] != "Booted":
         run("xcrun", "simctl", "boot", device)
@@ -93,7 +93,7 @@ def launch(app, selected, smoke, example=None):
     progress = container / "Documents/terminal-progress.txt"
     progress.unlink(missing_ok=True)
     run("xcrun", "simctl", "launch", "--terminate-running-process", device, BUNDLE_ID,
-        *(["--smoke-test"] if smoke else ["--example-" + example] if example else []))
+        *(["--stress-test"] + (["--stress-quick"] if quick else []) if stress else ["--smoke-test"] if smoke else ["--example-" + example] if example else []))
     if not smoke:
         developer = Path(ENV["DEVELOPER_DIR"])
         # Xcode 27 moved the simulator UI into Device Hub.
@@ -105,7 +105,7 @@ def launch(app, selected, smoke, example=None):
         else:
             print("App launched. Open the selected simulator in Xcode.", flush=True)
         return
-    deadline = time.monotonic() + 420
+    deadline = time.monotonic() + (1200 if stress else 420)
     previous = ""
     while not result.exists() and time.monotonic() < deadline:
         if progress.exists():
@@ -118,7 +118,7 @@ def launch(app, selected, smoke, example=None):
         raise SystemExit("Terminal timed out; inspect the simulator and its logs")
     report = json.loads(result.read_text())
     report["simulator"] = {key: selected[key] for key in ("name", "udid", "runtime")}
-    (ARTIFACTS / "terminal-result.json").write_text(json.dumps(report, indent=2) + "\n")
+    (ARTIFACTS / ("terminal-stress-result.json" if stress else "terminal-result.json")).write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
     if not report["passed"]:
         raise SystemExit(1)
@@ -126,10 +126,11 @@ def launch(app, selected, smoke, example=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["build", "run", "test"])
+    parser.add_argument("action", choices=["build", "run", "test", "stress"])
     parser.add_argument("--platform", choices=["simulator", "device"], default="simulator")
     parser.add_argument("--device", help="iOS 27+ simulator UDID")
     parser.add_argument("--example", choices=["node", "python"], help="Start a server and open its preview (run only)")
+    parser.add_argument("--quick", action="store_true", help="Stress 100 child processes without package installs (stress only)")
     args = parser.parse_args()
     selected = None
     if args.action != "build":
@@ -138,7 +139,7 @@ def main():
         selected = select_simulator(json.loads(output("xcrun", "simctl", "list", "devices", "available", "--json")), args.device)
     app = build(args.platform)
     if selected:
-        launch(app, selected, args.action == "test", args.example)
+        launch(app, selected, args.action in ("test", "stress"), args.example, args.action == "stress", args.quick)
 
 
 if __name__ == "__main__":

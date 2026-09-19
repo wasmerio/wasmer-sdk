@@ -24,15 +24,17 @@ not part of this matrix.
    direct pushes. Merging a component release PR follows the publication path
    in step 3 instead. Pending JS/Python PRs get explicit CI runs because PRs created with
    `GITHUB_TOKEN` do not trigger another workflow automatically.
-2. If a Swift PR exists, **Prepare Swift release** builds a release XCFramework
-   for both architectures. It tests that archive on Apple Silicon and Intel,
-   including a real registry package, and saves it as an Actions artifact. It
-   commits the generated bindings, binary URL, checksum, and build receipt to
+2. If a Swift PR exists, **Prepare Swift release** builds the native macOS
+   XCFramework for both architectures and the WebKit runtime XCFramework from
+   the JS/Rust sources. It tests the native archive on Apple Silicon and Intel,
+   including a real registry package, and validates the WebKit archive through
+   a SwiftPM consumer. Both are saved as Actions artifacts. It
+   commits the generated bindings, binary URLs, checksums, and build receipt to
    the PR, then explicitly runs CI. Wait for preparation and CI before merging.
 3. Merge the component PR. **Release SDK** validates the component, then uses
    its scoped Release Please configuration to create a draft GitHub release
    and tag at the merge commit. JS/Python build and test from that exact commit.
-   Swift retrieves and verifies its already prepared archive before tagging.
+   Swift retrieves and verifies its already prepared archives before tagging.
 4. The workflow validates the complete platform set, uploads all artifacts,
    and publishes the completed GitHub release. It will never replace an
    existing asset with different bytes.
@@ -40,7 +42,7 @@ not part of this matrix.
    to PyPI. JavaScript dispatches **Publish JavaScript to npm**, which downloads
    and publishes the attached tarball, then opens the existing wasmer-sh update
    PR using the actual published version. SwiftPM consumes the Swift release
-   archive directly.
+   archives directly.
 
 The npm and PyPI trusted publisher workflow filenames remain `publish-npm.yml`
 and `release.yml`, with environments `npm` and `pypi`. Keep their existing OIDC
@@ -48,10 +50,10 @@ publisher configuration. The repository must allow Actions to create PRs and
 write release assets. Require the **Release metadata** check for Swift release
 PRs, in addition to the normal CI checks.
 
-Swift staging artifacts are retained for 90 days. If the Rust/Swift/build inputs
+Swift staging artifacts are retained for 90 days. If the Rust/Swift/JS/build inputs
 change or staging expires, update the PR with `main` and run **Prepare Swift
 release** again with its PR number before merging. Preparation can attach the
-tested binary after unrelated JS/Python updates to the PR, but rejects changed
+tested binaries after unrelated Python updates to the PR, but rejects changed
 Swift build inputs and concurrent pushes. The release step refuses
 to tag stale or missing Swift binaries. Published tags are never moved to add
 checksums or generated source.
@@ -92,12 +94,15 @@ See [the Swift guide](../swift/README.md) for the API and application entitlemen
 
 Use `swift/Package.swift` and `swift/scripts/build.py` for ongoing native source
 development. The root manifest exposes the same `WasmerSDK` product for
-iOS 27+, selecting the WebKit backend internally. Its JavaScript/Wasm resources are versioned under `swift/WasmerWKSDK`
-and need no native cross-compilation. The release manifest generator preserves
-the conditional backend dependencies and resource bundle. The existing 0.2.1 tag
+iOS 27+, selecting the WebKit backend internally. CI generates its JavaScript/Wasm
+resources and packages them in `WasmerWKRuntime-<version>.zip`, a dynamic XCFramework
+for iOS devices, the simulator, and macOS. SwiftPM downloads the checksummed archive
+and Xcode embeds the resources. Generated assets are not committed to git.
+The Swift preparation job tests both archives and commits their URLs/checksums;
+changes to JS inputs also invalidate that preparation. The existing 0.2.1 tag
 predates iOS support; see the
 [iOS installation guide](../swift/WasmerWKSDK/README.md#add-to-an-app) for
-the prerelease revision and resource regeneration instructions.
+local build and resource generation instructions.
 
 ## Local validation
 

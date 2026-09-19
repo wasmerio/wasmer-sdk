@@ -13,6 +13,7 @@
     "build": "tsc --noEmit && vite build && npm --prefix service-worker run build",
     "preview": "node scripts/run-servers.mjs preview",
     "test": "npm run test:compatibility && node tests/browser-smoke.mjs",
+    "test:stress": "node tests/terminal-stress.mjs",
     "test:compatibility": "node --test tests/browser-compatibility.mjs"
   },
   "dependencies": {

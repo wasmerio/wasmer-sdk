@@ -13,6 +13,7 @@ final class ShellRuntime {
   var onProgress: ((String) -> Void)?
   var onTerminalOutput: ((Data) -> Void)?
   var onTerminalExit: ((Output) -> Void)?
+  var onTerminalFailure: ((Error) -> Void)?
   var onListeningPortsChanged: (([UInt16]) -> Void)?
   private(set) var isWebViewAttached = false
 
@@ -33,6 +34,14 @@ final class ShellRuntime {
     let node = try await client.packages.load("wasmer/edgejs@=0.2.0")
     sandbox = try await client.sandboxes.create(
       packages: [.package(python), .package(cowsay), .package(node)],
+      env: [
+        "HOME": "/native",
+        "PIP_EXTRA_INDEX_URL": "https://python-registry.wasmer.app/simple/",
+        "PIP_PLATFORM": "wasix_wasm32",
+        "PIP_ONLY_BINARY": ":all:",
+        "PIP_TARGET": "/native/wasix-packages",
+        "PYTHONPATH": "/native/wasix-packages",
+      ],
       network: .host,
       mounts: [
         .init("/native", directory: directory),
@@ -65,7 +74,12 @@ final class ShellRuntime {
         try await sandbox.close()
         self?.onListeningPortsChanged?([])
         self?.onTerminalExit?(result)
-      } catch { self?.onProgress?(error.localizedDescription) }
+      } catch {
+        self?.portTask?.cancel()
+        self?.onListeningPortsChanged?([])
+        self?.onTerminalFailure?(error)
+        try? await self?.client.close()
+      }
     }
     portTask = Task { [weak self] in
       var previous: [UInt16] = []
@@ -77,7 +91,9 @@ final class ShellRuntime {
           }
           try await Task.sleep(for: .milliseconds(200))
         }
-      } catch is CancellationError {} catch { self?.onProgress?(error.localizedDescription) }
+      } catch is CancellationError {} catch {
+        if !Task.isCancelled { self?.onProgress?(error.localizedDescription) }
+      }
     }
   }
   private static func drain(_ stream: ProcessStream?) async throws {
@@ -94,7 +110,9 @@ final class ShellRuntime {
   func close() async {
     portTask?.cancel()
     process?.kill()
-    try? await sandbox?.close()
+    // The entire client belongs to this terminal. Closing its transport releases
+    // pending reads/writes even if the guest or its worker has stopped responding.
+    // Waiting for a sandbox RPC first would also hang the Restart button.
     try? await client.close()
     await outputTask?.value
     process = nil

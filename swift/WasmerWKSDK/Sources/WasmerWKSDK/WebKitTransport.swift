@@ -1,5 +1,8 @@
 import Foundation
 import WebKit
+#if canImport(WasmerWKRuntime)
+import WasmerWKRuntime
+#endif
 
 public enum WebKitRuntimeError: Error, LocalizedError {
   case failed(String)
@@ -56,7 +59,12 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
   }
 
   func start() async throws {
-    guard let assets = Bundle.module.url(forResource: "Web", withExtension: nil),
+    #if canImport(WasmerWKRuntime)
+    let runtimeAssets = WasmerWKRuntimeWebURL()
+    #else
+    let runtimeAssets = Bundle.module.url(forResource: "Web", withExtension: nil)
+    #endif
+    guard let assets = runtimeAssets,
       FileManager.default.fileExists(
         atPath: assets.appendingPathComponent("sdk/pkg/wasmer_sdk_js_bg.wasm").path)
     else {

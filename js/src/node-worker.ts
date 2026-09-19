@@ -28,6 +28,7 @@ Object.defineProperty(globalThis, "postMessage", {
 let worker:
   | {
       handle(message: unknown): Promise<void>;
+      collectSharedObjects(): void;
     }
   | undefined;
 const pendingMessages: unknown[] = [];
@@ -69,14 +70,17 @@ async function handleMessage(data: any): Promise<void> {
       memory: data.memory,
     });
     const initializedWorker = new sdk.ThreadPoolWorker(data.id);
-    while (pendingMessages.length > 0) {
-      await initializedWorker.handle(pendingMessages.shift());
-    }
     worker = initializedWorker;
+    while (pendingMessages.length > 0) {
+      await handleMessage(pendingMessages.shift());
+    }
     return;
   }
 
-  if (worker) await worker.handle(data);
+  if (worker) {
+    if (data?.type === "wasmer-collect-shared") worker.collectSharedObjects();
+    else await worker.handle(data);
+  }
   else pendingMessages.push(data);
 }
 

@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import hashlib
 import json
 import plistlib
 import subprocess
@@ -60,6 +61,38 @@ class ReleaseTests(unittest.TestCase):
             archive.writestr(prefix + 'macos-arm64_x86_64/library.a', b'archive')
             archive.writestr(prefix + 'macos-arm64_x86_64/Headers/module.modulemap', 'module WasmerSDKFFI {}')
         (self.assets / 'WasmerSDKCore.swift').write_text('// generated bindings\n')
+        self.runtime_archive()
+        return bundle
+
+    def runtime_archive(self, omit=None, corrupt=False):
+        libraries = []
+        bundle = self.assets / release.swift_runtime_archive('0.2.1')
+        with zipfile.ZipFile(bundle, 'w') as archive:
+            for platform, variant, architectures in (
+                ('ios', '', ['arm64']), ('ios', 'simulator', ['arm64', 'x86_64']),
+                ('macos', '', ['arm64', 'x86_64']),
+            ):
+                if (platform, variant) == omit:
+                    continue
+                identifier = platform + '-' + variant
+                library = dict(LibraryIdentifier=identifier, LibraryPath='WasmerWKRuntime.framework',
+                               SupportedPlatform=platform, SupportedArchitectures=architectures)
+                if variant:
+                    library['SupportedPlatformVariant'] = variant
+                libraries.append(library)
+                base = 'WasmerWKRuntime.xcframework/' + identifier + '/WasmerWKRuntime.framework/'
+                content = base + ('Versions/A/' if platform == 'macos' else '')
+                web = content + ('Resources/' if platform == 'macos' else '') + 'Web/'
+                archive.writestr(content + 'WasmerWKRuntime', b'dylib')
+                archive.writestr(content + 'Modules/module.modulemap', 'framework module WasmerWKRuntime {}')
+                archive.writestr(web + 'index.html', '<html>')
+                wasm = b'\0asm\x01\0\0\0'
+                archive.writestr(web + 'sdk/pkg/wasmer_sdk_js_bg.wasm', b'bad' if corrupt else wasm)
+                archive.writestr(web + 'sdk/manifest.json', json.dumps({
+                    'files': {'pkg/wasmer_sdk_js_bg.wasm': hashlib.sha256(wasm).hexdigest()},
+                }))
+            archive.writestr('WasmerWKRuntime.xcframework/Info.plist',
+                             plistlib.dumps({'AvailableLibraries': libraries}))
         return bundle
 
     def seal_swift(self):
@@ -108,10 +141,45 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'inputs changed'):
             release.verify(self.assets, 'swift', root=self.root)
 
-    def test_independent_js_changes_do_not_invalidate_swift(self):
+    def test_js_changes_invalidate_the_prepared_ios_runtime(self):
         self.seal_swift()
         self.write('js/package.json', {'name': '@wasmer/sdk', 'version': '0.14.0'})
-        release.verify(self.assets, 'swift', root=self.root)
+        with self.assertRaisesRegex(ValueError, 'inputs changed'):
+            release.verify(self.assets, 'swift', root=self.root)
+
+    def test_runtime_requires_device_simulator_and_macos(self):
+        self.swift_archive()
+        self.runtime_archive(omit=('ios', 'simulator'))
+        with self.assertRaisesRegex(ValueError, 'slices'):
+            release.validate_assets(self.assets, 'swift', '0.2.1')
+
+    def test_runtime_resource_corruption_is_rejected(self):
+        self.swift_archive()
+        self.runtime_archive(corrupt=True)
+        with self.assertRaisesRegex(ValueError, 'resource checksum differs'):
+            release.validate_assets(self.assets, 'swift', '0.2.1')
+
+    def test_swiftpm_pins_both_release_archives(self):
+        self.seal_swift()
+        manifest = (self.root / 'Package.swift').read_text()
+        for name in (release.swift_archive('0.2.1'), release.swift_runtime_archive('0.2.1')):
+            self.assertIn(name, manifest)
+            self.assertIn(release.digest(self.assets / name), manifest)
+
+    def test_framework_archive_preserves_symlinks_and_executable_mode(self):
+        framework = self.root / 'Example.framework'
+        content = framework / 'Versions/A'
+        content.mkdir(parents=True)
+        (content / 'Example').write_bytes(b'dylib')
+        (content / 'Example').chmod(0o755)
+        (framework / 'Versions/Current').symlink_to('A')
+        (framework / 'Example').symlink_to('Versions/Current/Example')
+        bundle = self.assets / 'example.zip'
+        release.archive_framework(framework, bundle)
+        with zipfile.ZipFile(bundle) as archive:
+            self.assertEqual(archive.getinfo('Example.framework/Example').external_attr >> 16, 0o120777)
+            self.assertEqual(archive.read('Example.framework/Example'), b'Versions/Current/Example')
+            self.assertEqual(archive.getinfo('Example.framework/Versions/A/Example').external_attr >> 16, 0o100755)
 
     def test_unprepared_swift_release_reports_the_preparation_step(self):
         with self.assertRaisesRegex(ValueError, 'Wait for Prepare Swift release'):

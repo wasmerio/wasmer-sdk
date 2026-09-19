@@ -8,12 +8,15 @@ JSPI. No remote shell or terminal webpage is involved.
 ## Run
 
 Requires an Apple Silicon Mac, Xcode 27 with an iOS 27 simulator, Zig **0.16.0**,
-and Python 3 for the build script. The [WasmerSDK](../../WasmerWKSDK/README.md)
-Swift package includes its runtime assets; Node and Rust are not required.
+and Python 3 for the build script. This source example also needs the JS/Rust
+build prerequisites from the [SDK guide](../../WasmerWKSDK/README.md#build-runtime-assets).
+Published Swift releases supply a prebuilt runtime instead.
 
 From the repository root:
 
 ```sh
+npm ci --prefix js
+python3 swift/WasmerWKSDK/scripts/prototype.py prepare --rebuild-wasm
 python3 swift/Examples/WasmerShell/build.py run
 ```
 
@@ -60,6 +63,9 @@ WKWebView**. The page and its absolute `/health` fetch are served by the running
 WASIX process. Tap **Terminal** to return to the shell while keeping the server
 running; Ctrl-C stops it and closes its preview. The globe menu runs either
 example at the Bash prompt or reopens a running server's preview.
+The browser has back/forward buttons, reload/stop, and an editable address bar.
+Enter a server path such as `/health` or `localhost:8000/docs` and tap **Go**.
+Navigation stays within the preview's server, matching the web demo.
 
 Use `PORT=3000 node /native/node/server.js` to choose another port. New listeners
 are detected automatically; up to four previews can be retained at once.
@@ -86,6 +92,19 @@ node -e "console.log(require('react').version)"
 TLS stays in the guest: Node performs its normal HTTPS and certificate
 verification over the native TCP connection. Package compatibility still
 depends on the WASIX/Edge.js runtime; native Node addons are not iOS binaries.
+
+Python uses the same WASIX wheel index and pip settings as wasmer.sh. Plain
+`pip install flask` installs into the persistent `/native/wasix-packages`
+directory, which is included in `PYTHONPATH`. The bundled framework examples
+also include their requirements:
+
+```sh
+pip install -r /native/python-django/requirements.txt
+pip install -r /native/python-fastapi/requirements.txt
+```
+
+Pip requests binary wheels for `wasix_wasm32`; packages requiring a native
+extension need a compatible WASIX wheel.
 
 ## Architecture
 
@@ -140,6 +159,8 @@ execution WKWebView remains unattached throughout.
 
 ```sh
 python3 swift/Examples/WasmerShell/build.py test
+python3 swift/Examples/WasmerShell/build.py stress
+python3 swift/Examples/WasmerShell/build.py stress --quick
 python3 swift/Examples/WasmerShell/build.py build --platform device
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path swift/WasmerWKSDK
 node --test swift/WasmerWKSDK/scripts/native-network.test.mjs
@@ -155,6 +176,15 @@ npm registry, fetches React metadata over HTTPS, runs `pnpm i react` in a fresh
 project, imports React, and checks native socket cleanup. Results are saved
 to `Artifacts/terminal-result.json`.
 The test ends its shell; run `build.py run` afterward for an interactive session.
+
+The stress test repeatedly reinstalls Flask, Django and FastAPI with the cache
+disabled, imports the installed packages, drives 150 Python launches through the
+UIKit keyboard path, types during a 2 MiB output burst, and restarts with input
+pending. `--quick` replaces the network installs with 100 Python launches,
+each creating and joining three threads.
+Each command has a deadline; results are saved to
+`Artifacts/terminal-stress-result.json`. Use a separate simulator with
+`--device <UDID>` to keep stress-test package files out of your normal workspace.
 
 The device command cross-compiles an ad-hoc-signed app; physical
 installation requires development signing. Simulator validation does not
@@ -190,4 +220,5 @@ libghostty-vt is built from [Ghostty](https://github.com/ghostty-org/ghostty) co
 require checking this wrapper. Ghostty is MIT licensed; the build copies its
 license into the app as `Ghostty-LICENSE.txt`. Source and build caches under
 `.build/`, app binaries, and test artifacts are ignored by Git. The SDK’s
-JavaScript and WebAssembly resources are versioned with its Swift package.
+JavaScript and WebAssembly resources are generated locally for this example and
+packaged by CI in the Swift release's runtime XCFramework.

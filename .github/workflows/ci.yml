@@ -92,14 +92,24 @@ jobs:
 
   swift-webkit:
     name: Swift (WebKit backend)
+    needs: javascript
     runs-on: macos-15
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - uses: actions/setup-node@v6
         with:
           node-version: "26"
-      - name: Verify bundled runtime and simulator selection
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasmer-sdk-js-${{ github.sha }}
+          path: js
+      - name: Generate the WebKit runtime from the tested JS build
+        run: python3 swift/WasmerWKSDK/scripts/bundle_sdk.py
+      - name: Verify generated runtime and simulator selection
         run: |
           python3 swift/WasmerWKSDK/scripts/bundle_sdk.py --check
           python3 -m unittest discover -s swift/WasmerWKSDK/scripts -p 'test_*.py'
@@ -107,6 +117,15 @@ jobs:
         run: swift test --package-path swift/WasmerWKSDK
       - name: Test worker transport and JSPI
         run: node --test swift/WasmerWKSDK/scripts/*.test.mjs
+      - name: Build and test the distributable runtime
+        run: |
+          python3 swift/WasmerWKSDK/scripts/build_runtime.py
+          python3 swift/WasmerWKSDK/scripts/verify_runtime.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasmer-sdk-webkit-${{ github.sha }}
+          path: swift/Artifacts/WasmerWKRuntime.zip
+          if-no-files-found: error
 
   javascript:
     name: JavaScript

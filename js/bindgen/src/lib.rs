@@ -10,6 +10,7 @@
 
 mod browser_http;
 mod host_filesystem;
+mod module_cache;
 mod node_network;
 mod package_cache;
 mod task_manager;
@@ -154,7 +155,9 @@ impl JsWasmer {
             .and_then(std::num::NonZeroUsize::new);
         let tasks = Arc::new(tasks::ThreadPool::new(parallelism));
         let mut runtime = PluggableRuntime::new(Arc::clone(&tasks) as Arc<_>);
-        runtime.set_tty(Arc::new(DefaultTty::default()));
+        runtime
+            .set_tty(Arc::new(DefaultTty::default()))
+            .set_module_cache(module_cache::SharedModuleCache::default());
         if let Some(bridge) = node_network {
             runtime.set_networking_implementation(NodeNetworking::new(bridge));
         }

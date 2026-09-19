@@ -288,8 +288,20 @@ impl SchedulerState {
             }
             SchedulerMessage::WorkerIdle { worker_id } => {
                 move_worker(worker_id, &mut self.busy, &mut self.idle);
+                let active_wasm_threads = self.wasm_workers.len();
                 self.wasm_workers
                     .retain(|_, worker| worker.worker_id != worker_id);
+                // Dropping the completed process can expire memories imported
+                // by any worker. Idle workers otherwise retain those JS roots
+                // until they happen to receive another task.
+                // Timer thunks also emit Idle; they must not broadcast a
+                // collection to the entire pool on every network poll.
+                if self.wasm_workers.len() != active_wasm_threads {
+                    wasmer::js::collect_shared_objects();
+                    for worker in &self.idle {
+                        worker.collect_shared_objects()?;
+                    }
+                }
                 tracing::trace!(
                     worker.id=worker_id,
                     idle_workers=?self.idle.iter().map(|w| w.id()).collect::<Vec<_>>(),
@@ -424,8 +436,10 @@ impl SchedulerState {
     }
 
     fn next_available_worker(&mut self, reason: &str) -> Result<WorkerHandle, Error> {
-        // First, try to send the message to an idle worker
-        if let Some(worker) = self.idle.pop_front() {
+        // Reuse the most recently available worker. Rotating through the idle
+        // pool spreads short-lived guest memories across otherwise quiet JS
+        // heaps, delaying reclamation of their shared backing reservations.
+        if let Some(worker) = self.idle.pop_back() {
             tracing::trace!(
                 worker.id = worker.id(),
                 "Sending the message to an idle worker"

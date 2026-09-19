@@ -36,6 +36,7 @@ js-napi = [
 anyhow = "1.0"
 async-trait = "0.1"
 bytes = "1.11"
+crossbeam-queue = "0.3"
 futures = "0.3"
 sha2 = "0.11"
 thiserror = "2.0"

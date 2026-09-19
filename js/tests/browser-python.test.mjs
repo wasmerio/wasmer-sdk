@@ -13,6 +13,48 @@ const STAGE_TIMEOUT_MS = 30_000;
 const PACKAGE_LOAD_TIMEOUT_MS = 90_000;
 const MAX_ATTEMPTS = 2;
 
+test("browser workers report rejected initialization, tasks, and unhandled promises", { timeout: 20_000 }, async () => {
+  const server = await startServer();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(server.url);
+    for (const failure of ["initialization", "queued task", "unhandled promise"]) {
+      const message = await page.evaluate(async failure => {
+        const source = `
+          export default async function () {
+            await new Promise(resolve => setTimeout(resolve, 20));
+            if (${JSON.stringify(failure)} === 'initialization') throw new Error('injected initialization');
+          }
+          export class ThreadPoolWorker {
+            constructor() {
+              if (${JSON.stringify(failure)} === 'unhandled promise') Promise.reject(new Error('injected unhandled promise'));
+            }
+            async handle() { throw new Error('injected queued task'); }
+          }
+        `;
+        const worker = new Worker('/dist/browser-worker.js', { type: 'module' });
+        let timer;
+        try {
+          return await new Promise((resolve, reject) => {
+            timer = setTimeout(() => reject(new Error('worker failure never reached its parent')), 3000);
+            worker.onerror = event => { event.preventDefault(); resolve(event.message); };
+            worker.postMessage({ type: 'init', id: 1, sdkUrl: 'data:text/javascript,' + encodeURIComponent(source) });
+            if (failure === 'queued task') worker.postMessage({ run: true });
+          });
+        } finally {
+          clearTimeout(timer);
+          worker.terminate();
+        }
+      }, failure);
+      assert.match(message, new RegExp(`injected ${failure}`));
+    }
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+
 test(
   "runs Python browser workers with threads, late modules, files and streams",
   { timeout: MAX_ATTEMPTS * ATTEMPT_TIMEOUT_MS + 30_000 },
@@ -26,6 +68,7 @@ test(
           output: "python:hello browser\n",
           threaded: "thread:ok\nchild-thread:ok\nrich:ok\n",
           lateModule: "late-dlopen:ok\n",
+          repeatedThreads: "repeated-threads:ok\n",
           written: "HELLO BROWSER",
           lines: ["STREAMED THROUGH BROWSER"],
           streamedReason: "exited",
@@ -194,6 +237,26 @@ async function runBrowserAttempt(signal, attempt) {
                 ])
                 .run(),
             );
+            const repeatedThreads = await stage("repeated-progress-threads", () =>
+              sandbox.command("python", ["-u", "-c", [
+                "import io, threading, time, zlib",
+                "from pip._vendor.rich.console import Console",
+                "from pip._vendor.rich.progress import Progress",
+                "for iteration in range(20):",
+                "    progress = Progress(console=Console(file=io.StringIO(), force_terminal=True))",
+                "    progress.start()",
+                "    task = progress.add_task('install', total=3)",
+                "    results = []",
+                "    threads = [threading.Thread(target=lambda: results.append(zlib.decompress(zlib.compress(b'ok')))) for _ in range(3)]",
+                "    for thread in threads: thread.start()",
+                "    for thread in threads: thread.join()",
+                "    assert results == [b'ok'] * 3, results",
+                "    progress.update(task, advance=3)",
+                "    time.sleep(0.01)",
+                "    progress.stop()",
+                "print('repeated-threads:ok', flush=True)",
+              ].join("\n")]).run(),
+            );
             const written = await stage("file-read", () =>
               sandbox.fs.readText("output.txt"),
             );
@@ -254,6 +317,7 @@ async function runBrowserAttempt(signal, attempt) {
               output: output.text(),
               threaded: threaded.text(),
               lateModule: lateModule.text(),
+              repeatedThreads: repeatedThreads.text(),
               written,
               lines,
               streamedReason: streamed.reason,
