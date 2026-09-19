@@ -70,6 +70,33 @@ async function command(name, command, { timeout = 30_000, keyboard = false, expe
   checks.push({ name, milliseconds: Date.now() - start, sdkHeapBytes: await page.evaluate(() => globalThis.__stressSDKMemory.buffer.byteLength) });
   console.log(`PASS ${name} (${Date.now() - start}ms)`);
 }
+// Exercise cancellation with real listening sockets, not only sleeping processes.
+// epoll must release its registration guards when a server exits without DEL.
+async function serverCycle(name, input, ready, verify) {
+  const id = ++sequence;
+  const before = await page.evaluate(() => globalThis.__wasmerShell.snapshot().length);
+  const start = Date.now();
+  await send(`${input}; printf '\\n__SERVER_%s_EXIT__:%s\\n' ${id} "$?"\r`);
+  await page.waitForFunction(({ before, ready }) => globalThis.__wasmerShell.snapshot().slice(before).includes(ready), { before, ready }, { timeout: 30_000 });
+  await page.waitForFunction(() => !document.querySelector('#preview-panel').hidden);
+  if (verify) {
+    let verified = false;
+    const end = Date.now() + 30_000;
+    while (Date.now() < end && !verified) {
+      for (const frame of page.frames()) {
+        verified = await frame.evaluate(() => document.querySelectorAll('#checks li').length === 3 && [...document.querySelectorAll('#checks li')].every(li => li.textContent.startsWith('PASS:'))).catch(() => false);
+        if (verified) break;
+      }
+      if (!verified) await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert(verified, `${name}: preview did not pass health and validation checks`);
+  }
+  await send("\x03");
+  await waitFor(`\n__SERVER_${id}_EXIT__:`);
+  await page.waitForFunction(() => document.querySelector('#preview-panel').hidden, undefined, { timeout: 5000 });
+  checks.push({ name, milliseconds: Date.now() - start, sdkHeapBytes: await page.evaluate(() => globalThis.__stressSDKMemory.buffer.byteLength) });
+  console.log(`PASS ${name} (${Date.now() - start}ms)`);
+}
 try {
   await new Promise((resolve, reject) => {
     proxy.once("error", reject);
@@ -117,6 +144,12 @@ try {
     } catch (error) { console.error(error.message); }
   }, 5000);
   await command("Python baseline", "python -c \"print('PYTHON_READY')\"");
+  await serverCycle("basic Python server cancellation", "python python/server.py", "Python listening on http://localhost:8000", false);
+  await command("install FastAPI after server cancellation", "pip install -r python-fastapi/requirements.txt", { timeout: 180_000 });
+  for (let round = 0; round < 3; round++) {
+    await serverCycle(`FastAPI HTTP and port cleanup ${round}`, "python python-fastapi/server.py", "Uvicorn running on", true);
+    await command(`Python after FastAPI cancellation ${round}`, "python -c \"print('AFTER_CANCEL')\"");
+  }
   for (let round = 0; round < rounds; round++) {
     for (const example of ["django", "fastapi"]) {
       await command(`pip ${example} requirements ${round}`, `pip install --force-reinstall --no-cache-dir --upgrade -r python-${example}/requirements.txt`, { timeout: 180_000 });

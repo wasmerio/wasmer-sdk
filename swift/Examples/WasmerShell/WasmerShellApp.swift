@@ -351,6 +351,7 @@ final class TerminalSession: ObservableObject {
       view.sendControl(3); await inputTask?.value
       try await waitFor("wasmer:", after: beforePythonStop, timeout: 5)
       try await waitForPreviewClosure(port: 8000)
+      try await checkFastAPIRestarts(host)
       report["visibleText"] = view.visibleText
       report["webViewAttached"] = host.isWebViewAttached
       report["nativeOperations"] = await host.nativeOperationCount
@@ -364,7 +365,7 @@ final class TerminalSession: ObservableObject {
       }
       report["nativeNetworkAfterExit"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(network))
       report["passed"] = true
-      report["checks"] = ["bash", "Python REPL", "interactive stdin", "EOF", "cowsay", "resize", "Ctrl-C", "native file", "Ghostty rendering", "keyboard input", "history arrow", "Node.js", "native DNS", "native HTTPS", "pnpm install React", "native socket cleanup", "Node WebView", "absolute fetch", "POST and query", "preview isolation", "preview cleanup", "Python WebView", "port reuse", "exit"]
+      report["checks"] = ["bash", "Python REPL", "interactive stdin", "EOF", "cowsay", "resize", "Ctrl-C", "native file", "Ghostty rendering", "keyboard input", "history arrow", "Node.js", "native DNS", "native HTTPS", "pnpm install React", "native socket cleanup", "Node WebView", "absolute fetch", "POST and query", "preview isolation", "preview cleanup", "Python WebView", "port reuse", "FastAPI install", "FastAPI HTTP validation", "FastAPI repeated Ctrl-C and restart", "Python after cancellation", "exit"]
     } catch {
       report["error"] = error.localizedDescription
       report["nativeNetworkOnError"] = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(await host.nativeNetworkStats))
@@ -381,6 +382,29 @@ final class TerminalSession: ObservableObject {
     // Output alone does not mean the foreground process has restored Bash's TTY.
     try await waitFor("wasmer: $ ", after: output.distance(from: output.startIndex, to: range.upperBound), timeout: timeout)
     try await Task.sleep(for: .milliseconds(200))
+  }
+  private func checkFastAPIRestarts(_ host: ShellRuntime) async throws {
+    try await shellCheck(host, command: "cd /native/python-fastapi; printf '\\n%s\\n' FASTAPI_DIRECTORY", marker: "\nFASTAPI_DIRECTORY\n")
+    try await shellCheck(host, command: "pip install -r requirements.txt; printf '\\nFASTAPI_INSTALL:%s\\n' \"$?\"", marker: "\nFASTAPI_INSTALL:0\n", timeout: 180)
+    for attempt in 0..<3 {
+      let before = text.count
+      try await host.writeTerminal(Data("python server.py; printf '\\nFASTAPI_\(attempt)_EXIT:%s\\n' \"$?\"\r".utf8))
+      try await waitFor("Uvicorn running on", after: before, timeout: 30)
+      let deadline = ContinuousClock.now + .seconds(30)
+      var verified = false
+      while ContinuousClock.now < deadline {
+        if let preview = previews.first(where: { $0.port == 8000 }), preview.webView.window != nil {
+          verified = (try? await preview.webView.evaluateJavaScript("document.querySelectorAll('#checks li').length === 3 && [...document.querySelectorAll('#checks li')].every(li => li.textContent.startsWith('PASS:'))") as? Bool) == true
+          if verified { break }
+        }
+        try await Task.sleep(for: .milliseconds(100))
+      }
+      guard verified else { throw DemoError.failed("FastAPI preview did not pass health and validation checks") }
+      view.sendControl(3); await inputTask?.value
+      try await waitFor("\nFASTAPI_\(attempt)_EXIT:", after: before)
+      try await waitForPreviewClosure(port: 8000)
+      try await shellCheck(host, command: "python -c \"print('AFTER_CANCEL')\"; printf '\\nPYTHON_AFTER_CANCEL:%s\\n' \"$?\"", marker: "\nPYTHON_AFTER_CANCEL:0\n")
+    }
   }
   private func runStressTest(_ host: ShellRuntime) async {
     let quick = ProcessInfo.processInfo.arguments.contains("--stress-quick")
