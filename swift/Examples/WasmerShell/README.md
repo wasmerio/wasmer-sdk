@@ -63,6 +63,9 @@ WKWebView**. The page and its absolute `/health` fetch are served by the running
 WASIX process. Tap **Terminal** to return to the shell while keeping the server
 running; Ctrl-C stops it and closes its preview. The globe menu runs either
 example at the Bash prompt or reopens a running server's preview.
+The browser has back/forward buttons, reload/stop, and an editable address bar.
+Enter a server path such as `/health` or `localhost:8000/docs` and tap **Go**.
+Navigation stays within the preview's server, matching the web demo.
 
 Use `PORT=3000 node /native/node/server.js` to choose another port. New listeners
 are detected automatically; up to four previews can be retained at once.

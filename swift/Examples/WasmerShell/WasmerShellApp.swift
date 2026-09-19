@@ -338,6 +338,7 @@ final class TerminalSession: ObservableObject {
       guard paths?.contains("POST /inspect?q=ios") == true else {
         throw DemoError.failed("Preview lost the request method or query string")
       }
+      try await checkPreviewNavigation(nodePreview)
       let beforeNodeStop = text.count
       view.sendControl(3); await inputTask?.value
       try await waitFor("wasmer:", after: beforeNodeStop, timeout: 5)
@@ -365,7 +366,7 @@ final class TerminalSession: ObservableObject {
       }
       report["nativeNetworkAfterExit"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(network))
       report["passed"] = true
-      report["checks"] = ["bash", "Python REPL", "interactive stdin", "EOF", "cowsay", "resize", "Ctrl-C", "native file", "Ghostty rendering", "keyboard input", "history arrow", "Node.js", "native DNS", "native HTTPS", "pnpm install React", "native socket cleanup", "Node WebView", "absolute fetch", "POST and query", "preview isolation", "preview cleanup", "Python WebView", "port reuse", "FastAPI install", "FastAPI HTTP validation", "FastAPI repeated Ctrl-C and restart", "Python after cancellation", "exit"]
+      report["checks"] = ["bash", "Python REPL", "interactive stdin", "EOF", "cowsay", "resize", "Ctrl-C", "native file", "Ghostty rendering", "keyboard input", "history arrow", "Node.js", "native DNS", "native HTTPS", "pnpm install React", "native socket cleanup", "Node WebView", "browser address bar", "browser back and forward", "absolute fetch", "POST and query", "preview isolation", "preview cleanup", "Python WebView", "port reuse", "FastAPI install", "FastAPI HTTP validation", "FastAPI repeated Ctrl-C and restart", "Python after cancellation", "exit"]
     } catch {
       report["error"] = error.localizedDescription
       report["nativeNetworkOnError"] = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(await host.nativeNetworkStats))
@@ -382,6 +383,39 @@ final class TerminalSession: ObservableObject {
     // Output alone does not mean the foreground process has restored Bash's TTY.
     try await waitFor("wasmer: $ ", after: output.distance(from: output.startIndex, to: range.upperBound), timeout: timeout)
     try await Task.sleep(for: .milliseconds(200))
+  }
+  private func checkPreviewNavigation(_ preview: ServerPreview) async throws {
+    let home = "localhost:8000"
+    let destination = home + "/inspect?q=hello%20ios#details"
+    guard preview.address == home, preview.navigate(to: destination) else {
+      throw DemoError.failed("Preview did not accept the guest server address")
+    }
+    try await waitForAddress(preview, destination)
+    guard preview.canGoBack, !preview.canGoForward else {
+      throw DemoError.failed("Preview did not publish its navigation history")
+    }
+    preview.goBack()
+    try await waitForAddress(preview, home)
+    guard preview.canGoForward else { throw DemoError.failed("Preview forward navigation stayed disabled") }
+    preview.goForward()
+    try await waitForAddress(preview, destination)
+    guard preview.navigate(to: "/health") else { throw DemoError.failed("Preview rejected an absolute server path") }
+    try await waitForAddress(preview, home + "/health")
+    let body = try await preview.webView.evaluateJavaScript("document.body.textContent") as? String
+    guard body?.contains("\"ok\":true") == true else { throw DemoError.failed("Address bar did not load /health") }
+    guard !preview.navigate(to: "https://example.com/"), !preview.navigate(to: "javascript:alert(1)") else {
+      throw DemoError.failed("Preview navigation escaped its server")
+    }
+    preview.goBack()
+    try await waitForAddress(preview, destination)
+  }
+  private func waitForAddress(_ preview: ServerPreview, _ address: String) async throws {
+    let deadline = ContinuousClock.now + .seconds(15)
+    while preview.address != address || preview.isLoading {
+      guard preview.error == nil else { throw DemoError.failed(preview.error!) }
+      guard ContinuousClock.now < deadline else { throw DemoError.failed("Preview did not navigate to \(address)") }
+      try await Task.sleep(for: .milliseconds(50))
+    }
   }
   private func checkFastAPIRestarts(_ host: ShellRuntime) async throws {
     try await shellCheck(host, command: "cd /native/python-fastapi; printf '\\n%s\\n' FASTAPI_DIRECTORY", marker: "\nFASTAPI_DIRECTORY\n")
