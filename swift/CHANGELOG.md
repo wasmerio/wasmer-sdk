@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-swift-v0.2.1...wasmer-sdk-swift-v0.3.0) (2026-09-19)
+
+
+### Features
+
+* **swift:** bring the shared WasmerSDK API to iOS and add WasmerShell ([#504](https://github.com/wasmerio/wasmer-sdk/issues/504)) ([e8105a8](https://github.com/wasmerio/wasmer-sdk/commit/e8105a8bd0b3a2338e458b1dad4e24ac2cb981b7))
+
+
+### Bug Fixes
+
+* stabilize terminal sessions and build iOS runtime in CI ([#507](https://github.com/wasmerio/wasmer-sdk/issues/507)) ([5f6d2bf](https://github.com/wasmerio/wasmer-sdk/commit/5f6d2bfc86c1a766f5cc8fe7bbca303d8ac75b6d))
+
 ## 0.2.1 (2026-09-17)
 
 
