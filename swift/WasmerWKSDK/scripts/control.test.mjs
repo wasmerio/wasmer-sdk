@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 test('cancellation releases process and sandbox results already queued by the worker', async () => {
-  const saved = { window: globalThis.window, Worker: globalThis.Worker, location: globalThis.location, crossOriginIsolated: globalThis.crossOriginIsolated };
+  const saved = { window: globalThis.window, Worker: globalThis.Worker, crossOriginIsolated: globalThis.crossOriginIsolated };
   let worker;
   class Worker {
     messages = [];
@@ -12,11 +12,9 @@ test('cancellation releases process and sandbox results already queued by the wo
   }
   globalThis.window = { webkit: { messageHandlers: { wasmer: { postMessage: async () => true } } } };
   globalThis.Worker = Worker;
-  globalThis.location = { search: '?guestMemoryPages=6144' };
   globalThis.crossOriginIsolated = true;
   try {
     await import('../Sources/WasmerWKSDK/Web/control.js');
-    assert.equal(worker.url.searchParams.get('guestMemoryPages'), '6144');
     const rpc = globalThis.wasmerRPC;
     for (const [method, value, cleanup, args] of [
       ['command.spawn', { handle: 7, id: 1 }, 'process.release', { process: 7 }],

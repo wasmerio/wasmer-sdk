@@ -217,9 +217,9 @@ failures. Add `--reuse-next-project` to test the existing `/workspace/node-next`
 directory and shared pnpm cache without deleting its files. The test keeps one
 runtime throughout installation and three server/page/API/Ctrl-C cycles, including
 warm reinstalls and terminal recovery. Use `--next-runs 5` for a longer run.
-It times installation, server readiness,
-and first page load independently. `--example crypto` tests large streaming hashes
-at the default guest limit without filesystem or network input.
+It times installation, server readiness, and first page load independently.
+The checks live in `Tests/IntegrationTests.swift`, which `build.py` compiles only
+for `test` and `stress`; regular builds contain the terminal and examples.
 
 ```sh
 python3 swift/Examples/WasmerShell/build.py test

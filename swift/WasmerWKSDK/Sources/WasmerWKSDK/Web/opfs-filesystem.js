@@ -1,7 +1,6 @@
 // A worker-owned OPFS volume. A small append-only namespace journal makes
 // directory rename atomic in the virtual namespace and keeps metadata lookups
 // local. File contents live in separate OPFS files and never fill the SDK heap.
-import { MemoryDirectory } from './memory-filesystem.js';
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 const MAX_BYTES = 65536;
 const encoder = new TextEncoder();
@@ -30,13 +29,9 @@ export function filesystemError(error) {
 }
 export class OPFSVolume {
   #directory; #journal; #nodes = new Map([["", {kind:"directory", size:0}]]);
-  #inodes = new Map(); #children = new Map([["", new Set()]]); #unlinked = new Set();
+  #inodes = new Map(); #children = new Map([["", new Set()]]);
   #handles = new Map(); #files = new Map(); #nextFile = 0; #nextDescriptor = 0; #position = 0;
   #closed = false; #release; #dirty = false; #timer; #syncError; #garbage;
-  static memory() {
-    const directory = new MemoryDirectory();
-    return new OPFSVolume(directory, null, async () => directory.clear());
-  }
   static async open(name, storage = navigator.storage, locks = navigator.locks) {
     if (!/^[\p{L}\p{N}_ -]{1,128}$/u.test(name)) fail("EINVAL", "Invalid OPFS volume name");
     if (!storage?.getDirectory || !locks?.request) fail("ENOTSUP", "OPFS and Web Locks are required");
@@ -139,7 +134,6 @@ export class OPFSVolume {
     } else fail("EIO", "Invalid OPFS journal record");
   }
   #commit(record) {
-    if (!this.#journal) { this.#apply(record); return; }
     const bytes = encoder.encode(JSON.stringify(record) + "\n");
     try { writeAll(this.#journal, bytes, this.#position); }
     catch (error) { this.#journal.truncate(this.#position); throw error; }
@@ -152,19 +146,6 @@ export class OPFSVolume {
     if (this.#lookup(parent).kind !== "directory") fail("ENOTDIR", parent);
   }
   #file(id) { const file = this.#files.get(integer(id)); if (!file) fail("EBADF", "File is closed"); return file; }
-  async #releaseUnlinked(node) {
-    // Persistent volumes reclaim orphaned files on reopening. Volatile volumes
-    // must release bytes now, while preserving POSIX open-after-unlink behavior.
-    if (this.#journal || !this.#unlinked.has(node) ||
-        [...this.#files.values()].some(file => file.node === node)) return;
-    this.#handles.delete(node.id); this.#inodes.delete(node.id);
-    await this.#directory.removeEntry(`data-${node.id}`);
-    this.#unlinked.delete(node);
-  }
-  async #unlink(node) {
-    if (!this.#journal && node?.id) this.#unlinked.add(node);
-    await this.#releaseUnlinked(node);
-  }
   async #handle(node, create = false) {
     let handle = this.#handles.get(node.id);
     if (!handle) {
@@ -186,7 +167,7 @@ export class OPFSVolume {
   #sync() {
     if (this.#closed || !this.#dirty) return;
     for (const handle of this.#handles.values()) handle.flush();
-    this.#journal?.flush(); this.#dirty = false;
+    this.#journal.flush(); this.#dirty = false;
   }
   async request(method, args) {
     if (this.#closed) fail("EBADF", "Volume is closed");
@@ -250,15 +231,14 @@ export class OPFSVolume {
         const size = integer(args[1]); file.handle.truncate(size); this.#commit(["size", file.node.id, size]); return null;
       }
       case "close": {
-        const id = integer(args[0]), node = this.#files.get(id)?.node;
-        this.#files.delete(id); this.#trimHandles(); await this.#releaseUnlinked(node); return null;
+        this.#files.delete(integer(args[0])); this.#trimHandles(); return null;
       }
-      case "flush": this.#file(args[0]).handle.flush(); this.#journal?.flush(); return null;
+      case "flush": this.#file(args[0]).handle.flush(); this.#journal.flush(); return null;
       case "sync": this.#sync(); return null;
       case "remove": {
-        const name = path(args[0]); this.#parent(name); const node = this.#lookup(name);
+        const name = path(args[0]); this.#parent(name); this.#lookup(name);
         if (this.#children.get(name)?.size) fail("ENOTEMPTY", name);
-        this.#commit(["remove", name]); await this.#unlink(node); return null;
+        this.#commit(["remove", name]); return null;
       }
       case "rename": {
         const from = path(args[0]), to = path(args[1]); this.#parent(from); this.#parent(to);
@@ -269,7 +249,7 @@ export class OPFSVolume {
           if (target.kind !== source.kind) fail(target.kind === "directory" ? "EISDIR" : "ENOTDIR", to);
           if (this.#children.get(to)?.size) fail("ENOTEMPTY", to);
         }
-        this.#commit(["rename", from, to]); await this.#unlink(target); return null;
+        this.#commit(["rename", from, to]); return null;
       }
       default: fail("ENOTSUP", `Unsupported filesystem operation: ${method}`);
     }
@@ -285,9 +265,8 @@ export class OPFSVolume {
       try { handle.close(); } catch (error) { failure ??= error; }
     }
     this.#handles.clear(); this.#files.clear();
-    try { this.#journal?.close(); } catch (error) { failure ??= error; }
-    if (!this.#journal) this.#directory.clear();
-    this.#nodes.clear(); this.#inodes.clear(); this.#children.clear(); this.#unlinked.clear();
+    try { this.#journal.close(); } catch (error) { failure ??= error; }
+    this.#nodes.clear(); this.#inodes.clear(); this.#children.clear();
     await this.#release();
     if (failure) throw failure;
   }

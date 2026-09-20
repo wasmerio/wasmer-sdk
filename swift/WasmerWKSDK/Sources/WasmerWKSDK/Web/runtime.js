@@ -1,13 +1,12 @@
 import "./node-compat.js";
 import { installHostFileSystemWorkerBridge } from "./sdk/dist/host-filesystem.js";
-import { createRuntimeMemory, configureGuestMemory } from "./memory-budget.js";
+import { createRuntimeMemory } from "./memory-budget.js";
 import { probeJSPI } from "./jspi.js";
 import { installDiagnostics } from "./diagnostics.js";
 import { NativeNetworkBridge, installNativeNetworkGlobals, receiveNativeNetworkReply } from "./native-network.js";
 import { OPFSStorage } from "./opfs-bridge.js";
 import { SDKDispatcher, errorValue } from "./rpc-dispatch.js";
 
-configureGuestMemory(location.href);
 // WebKit may keep shared-memory reservations until every importing realm is
 // collected. Reclaim a guest realm when its WASIX thread has fully completed.
 globalThis.__wasmerWorkerPerThread = true;
@@ -31,9 +30,7 @@ const dispatcher = new SDKDispatcher(async options => {
   const sdk = await import("./sdk/pkg/wasmer_sdk_js.js");
   await sdk.default({ memory: createRuntimeMemory() });
   sdk.setSDKUrl(new URL("./sdk/pkg/wasmer_sdk_js.js", import.meta.url).href);
-  const guestURL = new URL("./guest-worker.js", import.meta.url);
-  guestURL.search = location.search;
-  sdk.setWorkerUrl(guestURL.href);
+  sdk.setWorkerUrl(new URL("./guest-worker.js", import.meta.url).href);
   return sdk.WasmerCore.create({ parallelism: 1, cache: { mode: "memory" }, outputBytes: options.outputBytes ?? 16 * 1024 * 1024 });
 }, () => {
   const network = new NativeNetworkBridge();

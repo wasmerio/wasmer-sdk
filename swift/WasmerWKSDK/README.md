@@ -139,9 +139,7 @@ request/response forwarding, not WebSocket upgrades or streaming responses. It
 allows 35 seconds to receive a request and 180 seconds for the guest response,
 so development servers can compile their first page.
 
-Guest shared memories are capped at 192 MiB by default.
-`Wasmer(guestMemoryLimitBytes: ...)` accepts overrides of 64–512 MiB in 64 KiB
-increments for development; the native macOS backend rejects this option.
+Guest shared memories are capped at 192 MiB.
 Memory workspace files use the same shared in-memory filesystem as the browser
 SDK. Guest filesystem operations stay inside Wasm without storage-worker RPCs;
 file contents count toward the SDK heap limit. Native and OPFS store file

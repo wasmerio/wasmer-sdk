@@ -18,10 +18,10 @@ final class ShellRuntime {
   var onListeningPortsChanged: (([UInt16]) -> Void)?
   private(set) var isWebViewAttached = false
 
-  init(directory: URL, storage: ShellStorage, memory: ShellMemory) throws {
+  init(directory: URL, storage: ShellStorage) throws {
     self.storage = storage
     self.directory = directory
-    client = try Wasmer(guestMemoryLimitBytes: UInt64(memory.rawValue) * 1024 * 1024)
+    client = try Wasmer()
   }
   var nativeOperationCount: Int { get async { await client.diagnostics().nativeOperations } }
   var nativeNetworkStats: NetworkDiagnostics { get async { await client.diagnostics().network } }
@@ -181,15 +181,5 @@ enum ShellStorage: String, CaseIterable {
     if let index = arguments.firstIndex(of: "--storage"), index + 1 < arguments.count,
        let value = Self(rawValue: arguments[index + 1]) { return value }
     return Self(rawValue: UserDefaults.standard.string(forKey: "shellStorage") ?? "") ?? .native
-  }
-}
-
-enum ShellMemory: Int {
-  case standard = 192, large = 512
-  static var initial: Self {
-    let arguments = ProcessInfo.processInfo.arguments
-    if let index = arguments.firstIndex(of: "--guest-memory-mib"), index + 1 < arguments.count,
-       let mib = Int(arguments[index + 1]), let value = Self(rawValue: mib) { return value }
-    return .standard
   }
 }

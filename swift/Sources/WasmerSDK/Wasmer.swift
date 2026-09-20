@@ -30,32 +30,17 @@ public struct Wasmer: Sendable {
   private let core: WasmerCore
 
   /// The default cache is in the application's Caches directory, never its bundle.
-  /// On iOS, guestMemoryLimitBytes overrides the 192 MiB shared guest limit.
-  /// Larger limits can cause WebKit allocation failures during repeated launches.
-  /// This experimental setting is unavailable on the native macOS backend.
-  public init(cacheDirectory: URL? = nil, outputBytes: UInt64? = nil,
-              guestMemoryLimitBytes: UInt64? = nil) throws {
+  public init(cacheDirectory: URL? = nil, outputBytes: UInt64? = nil) throws {
     let cache =
       try cacheDirectory
       ?? FileManager.default.url(
         for: .cachesDirectory, in: .userDomainMask,
         appropriateFor: nil, create: true
       ).appendingPathComponent("WasmerSDK", isDirectory: true)
-    #if os(iOS)
-    core = try WasmerCore(
-      options: ClientOptions(
-        cacheRoot: localPath(cache), outputBytes: outputBytes,
-        guestMemoryLimitBytes: guestMemoryLimitBytes
-      ))
-    #else
-    guard guestMemoryLimitBytes == nil else {
-      throw SdkError.Failure(code: "CAPABILITY_UNAVAILABLE", message: "Guest memory override requires the iOS WebKit backend")
-    }
     core = try WasmerCore(
       options: ClientOptions(
         cacheRoot: localPath(cache), outputBytes: outputBytes
       ))
-    #endif
   }
 
   public var packages: Packages { Packages(core: core) }

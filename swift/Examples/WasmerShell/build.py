@@ -17,6 +17,8 @@ from bundle_sdk import check
 REVISION = "5de703a1b6ca0b91fcebe932b44be1df2de0a683"
 BUNDLE_ID = "io.wasmer.sdk.ios-terminal"
 ARTIFACTS = ROOT / "Artifacts"
+
+
 def ghostty(platform):
     zig = shutil.which("zig")
     if not zig or output(zig, "version") != "0.16.0":
@@ -35,7 +37,7 @@ def ghostty(platform):
     return prefix
 
 
-def build(platform, edgejs_webc=None):
+def build(platform, edgejs_webc=None, integration_tests=False):
     sdk = SDKS[platform]
     if int(output("xcrun", "--sdk", sdk, "--show-sdk-version").split(".")[0]) < 27:
         raise SystemExit("Xcode 27+ is required; set DEVELOPER_DIR to its Contents/Developer")
@@ -50,9 +52,14 @@ def build(platform, edgejs_webc=None):
     run("xcrun", "--sdk", sdk, "clang", "-target", target, "-isysroot", sdk_path,
         "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-I", prefix / "include",
         "-c", ROOT / "GhosttyBridge.c", "-o", obj)
-    run("xcrun", "--sdk", sdk, "swiftc", "-swift-version", "6", "-parse-as-library",
+    sources = sorted(ROOT.glob("*.swift"))
+    test_options = []
+    if integration_tests:
+        sources.extend(sorted((ROOT / "Tests").glob("*.swift")))
+        test_options = ["-D", "WASMER_SHELL_TESTS"]
+    run("xcrun", "--sdk", sdk, "swiftc", "-swift-version", "6", "-parse-as-library", *test_options,
         "-target", target, "-sdk", sdk_path, "-O", "-import-objc-header", ROOT / "GhosttyBridge.h",
-        "-I", library, "-I", library / "Modules", *sorted(ROOT.glob("*.swift")), obj, library / "libWasmerSDK.a",
+        "-I", library, "-I", library / "Modules", *sources, obj, library / "libWasmerSDK.a",
         prefix / "lib/libghostty-vt.a", "-o", app / "WasmerShell")
     copy_resources(library, app)
     # Test runtime changes before publishing a registry release. This artifact
@@ -90,7 +97,7 @@ def build(platform, edgejs_webc=None):
     return app
 
 
-def launch(app, selected, smoke, example=None, stress=False, quick=False, storage=None, guest_memory_mib=None, reuse_next_project=False, next_runs=3):
+def launch(app, selected, smoke, example=None, stress=False, quick=False, storage=None, reuse_next_project=False, next_runs=3):
     device = selected["udid"]
     if selected["state"] != "Booted":
         run("xcrun", "simctl", "boot", device)
@@ -105,8 +112,6 @@ def launch(app, selected, smoke, example=None, stress=False, quick=False, storag
                  else ["--smoke-test"] if smoke else [])
     if storage or smoke:
         arguments.extend(["--storage", storage or "native"])
-    if guest_memory_mib or smoke:
-        arguments.extend(["--guest-memory-mib", str(guest_memory_mib or 192)])
     if example:
         arguments.append("--example-" + example)
     if reuse_next_project:
@@ -149,10 +154,9 @@ def main():
     parser.add_argument("action", choices=["build", "run", "test", "stress"])
     parser.add_argument("--platform", choices=["simulator", "device"], default="simulator")
     parser.add_argument("--device", help="iOS 27+ simulator UDID")
-    parser.add_argument("--example", choices=["node", "node-next", "python", "storage", "crypto"], help="Start a server (run), or select the node-next/storage/crypto integration test (test)")
+    parser.add_argument("--example", choices=["node", "node-next", "python", "storage"], help="Start a server (run), or select the node-next/storage integration test (test)")
     parser.add_argument("--edgejs-webc", type=Path, help="Use a locally generated EdgeJS package instead of the registry release")
     parser.add_argument("--storage", choices=["native", "memory", "opfs"], help="Choose workspace storage; run preserves the app selection, tests default to native")
-    parser.add_argument("--guest-memory-mib", type=int, choices=[192, 512], help="Override the guest memory limit for development tests (default: 192 MiB)")
     parser.add_argument("--reuse-next-project", action="store_true", help="Test the existing node-next directory and pnpm cache, preserving files (test --example node-next only)")
     parser.add_argument("--next-runs", type=int, choices=range(1, 21), default=3, help="Next.js start/page/API/stop cycles in one session (default: 3)")
     parser.add_argument("--quick", action="store_true", help="Stress 100 child processes without package installs (stress only)")
@@ -164,9 +168,9 @@ def main():
         if args.platform != "simulator":
             raise SystemExit("Physical installation requires development signing; use build --platform device")
         selected = select_simulator(json.loads(output("xcrun", "simctl", "list", "devices", "available", "--json")), args.device)
-    app = build(args.platform, args.edgejs_webc)
+    app = build(args.platform, args.edgejs_webc, integration_tests=args.action in ("test", "stress"))
     if selected:
-        launch(app, selected, args.action in ("test", "stress"), args.example, args.action == "stress", args.quick, args.storage, args.guest_memory_mib, args.reuse_next_project, args.next_runs)
+        launch(app, selected, args.action in ("test", "stress"), args.example, args.action == "stress", args.quick, args.storage, args.reuse_next_project, args.next_runs)
 
 
 if __name__ == "__main__":

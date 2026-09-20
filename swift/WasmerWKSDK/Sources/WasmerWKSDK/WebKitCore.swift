@@ -85,8 +85,7 @@ private actor WebKitClient {
     } else {
       let options = self.options
       task = Task { @MainActor in
-        let host = WebKitTransport(cacheDirectory: URL(fileURLWithPath: options.cacheRoot!),
-                                   guestMemoryLimitBytes: options.guestMemoryLimitBytes)
+        let host = WebKitTransport(cacheDirectory: URL(fileURLWithPath: options.cacheRoot!))
         do {
           try await host.start()
           let data = try await host.request("initialize", payload: JSONEncoder().encode(options))
@@ -224,10 +223,6 @@ public final class WasmerCore: Sendable {
       throw SdkError.Failure(code: "INVALID_ARGUMENT", message: "Cache directory is required")
     }
     _ = try Wire.optional(options.outputBytes)
-    if let limit = options.guestMemoryLimitBytes,
-       limit < 64 * 1024 * 1024 || limit > 512 * 1024 * 1024 || limit % 65536 != 0 {
-      throw SdkError.Failure(code: "INVALID_ARGUMENT", message: "Guest memory limit must be 64–512 MiB in multiples of 64 KiB")
-    }
     try FileManager.default.createDirectory(atPath: cache, withIntermediateDirectories: true)
     client = WebKitClient(options: options)
   }

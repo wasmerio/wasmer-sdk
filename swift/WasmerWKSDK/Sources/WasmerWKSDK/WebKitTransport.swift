@@ -25,16 +25,14 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
   private var mounts: [Int: (NativeFileSystem, Bool)] = [:]
   private var nextMount = 0
   private let cacheDirectory: URL
-  private let guestMemoryLimitBytes: UInt64?
   private var origin: URL?
   private var ready: CheckedContinuation<Void, Error>?
   private var readyTimeout: Task<Void, Never>?
   private var closed = false
   private var pending: [String: CheckedContinuation<Data, Error>] = [:]
 
-  init(cacheDirectory: URL, guestMemoryLimitBytes: UInt64? = nil) {
+  init(cacheDirectory: URL) {
     self.cacheDirectory = cacheDirectory
-    self.guestMemoryLimitBytes = guestMemoryLimitBytes
     super.init()
   }
   var isWebViewAttached: Bool { webView?.superview != nil || webView?.window != nil }
@@ -76,11 +74,7 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
     }
     let sharedAssets = try await RuntimeAssets.acquire(directory: assets, cache: cacheDirectory)
     self.assets = sharedAssets
-    var components = URLComponents(url: sharedAssets.url, resolvingAgainstBaseURL: false)!
-    if let limit = guestMemoryLimitBytes {
-      components.queryItems = [URLQueryItem(name: "guestMemoryPages", value: String(limit / 65536))]
-    }
-    let url = components.url!
+    let url = sharedAssets.url
     origin = url
     let configuration = WKWebViewConfiguration()
     configuration.preferences.inactiveSchedulingPolicy = .none

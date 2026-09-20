@@ -61,10 +61,8 @@ across launches, and allow one open sandbox per volume. Use different volume nam
 for concurrent sandboxes. OPFS is managed by WebKit, subject to its storage quota;
 use native storage when files must be accessible directly through Foundation.
 
-Next.js installation and execution use the default 192 MiB guest memory limit
-in the same runtime. For development, `Wasmer(guestMemoryLimitBytes: ...)`
-accepts overrides of 64–512 MiB in multiples of 64 KiB on iOS. Larger limits
-can exhaust WebKit memory; native macOS rejects overrides.
+On iOS, Next.js installation and execution use the same runtime and its
+192 MiB guest memory limit.
 
 ## Install a binary release
 

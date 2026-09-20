@@ -127,27 +127,3 @@ test('OPFS recovers an incomplete final journal record and collects orphan data'
   v = await OPFSVolume.open('recovery', f.storage, f.locks);
   try { assert.equal(await read(v, await open(v, 'next')), 'complete'); } finally { await v.close(); }
 });
-
-test('worker memory storage preserves sparse writes, truncation, rename and open unlink', async () => {
-  const v = OPFSVolume.memory();
-  try {
-    const fd = await open(v, 'data');
-    const bytes = Uint8Array.from({length: 65536}, (_, i) => i % 251);
-    await v.request('write', [fd, 4093, bytes]);
-    assert.deepEqual(await v.request('read', [fd, 4093, 65536]), bytes);
-    assert.deepEqual(await v.request('read', [fd, 0, 4093]), new Uint8Array(4093));
-    await v.request('setLen', [fd, 4098]);
-    await v.request('setLen', [fd, 1000000]);
-    assert.deepEqual(await v.request('read', [fd, 4098, 65536]), new Uint8Array(65536));
-    await v.request('rename', ['data', 'renamed']);
-    await v.request('remove', ['renamed']);
-    assert.deepEqual(await v.request('read', [fd, 4093, 5]), bytes.subarray(0, 5));
-    await v.request('close', [fd]);
-    assert.deepEqual(await v.request('readDir', ['']), []);
-    await assert.rejects(v.request('read', [fd, 0, 1]), {code:'EBADF'});
-  } finally { await v.close(); }
-  await assert.rejects(v.request('readDir', ['']), {code:'EBADF'});
-  const fresh = OPFSVolume.memory();
-  try { assert.deepEqual(await fresh.request('readDir', ['']), []); }
-  finally { await fresh.close(); }
-});

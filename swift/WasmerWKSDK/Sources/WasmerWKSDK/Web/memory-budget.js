@@ -6,20 +6,8 @@
 // maximum. Never lower the initial size, and surface growth failures normally.
 // Production integration should expose this policy in Wasmer's JS backend so
 // its MemoryType metadata also records the effective resource limit.
-let maximumPages = 3072; // 192 MiB per shared guest memory by default.
+const maximumPages = 3072; // 192 MiB per shared guest memory.
 const NativeMemory = WebAssembly.Memory;
-
-// Propagated to every worker via its URL, before any guest allocations.
-// Larger maxima reserve more address space in WebKit, even before the guest
-// uses those bytes. Keep the default independent of workspace storage.
-export function configureGuestMemory(url) {
-  const value = new URL(url).searchParams.get("guestMemoryPages");
-  const pages = value === null ? 3072 : Number(value);
-  if (!Number.isInteger(pages) || pages < 1024 || pages > 8192) {
-    throw new RangeError("Guest memory limit must be 64–512 MiB in multiples of 64 KiB");
-  }
-  maximumPages = pages;
-}
 
 // The SDK heap also holds decoded packages and dynamically linked modules.
 // Keep room for the Node/Next.js compiler as well as Python's linked modules.

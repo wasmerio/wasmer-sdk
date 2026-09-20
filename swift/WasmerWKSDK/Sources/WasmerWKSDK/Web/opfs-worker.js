@@ -13,7 +13,7 @@ onmessage = ({data}) => {
       return;
     }
     try {
-      if (data.method === 'open') volumes.set(data.mount, data.volume == null ? OPFSVolume.memory() : await OPFSVolume.open(data.volume));
+      if (data.method === 'open') volumes.set(data.mount, await OPFSVolume.open(data.volume));
       else if (data.method === 'close') { await volumes.get(data.mount)?.close(); volumes.delete(data.mount); }
       else throw new Error('Invalid OPFS worker message');
       postMessage({id:data.id, value:true});
