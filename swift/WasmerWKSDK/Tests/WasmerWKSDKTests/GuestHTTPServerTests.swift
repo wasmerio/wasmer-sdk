@@ -8,6 +8,46 @@ private actor Requests {
 }
 
 struct GuestHTTPServerTests {
+  @Test func slowGuestResponseOutlivesRequestFramingDeadline() async throws {
+    let server = GuestHTTPServer(receiveTimeout: 0.1, responseTimeout: 2) { _ in
+      try await Task.sleep(for: .milliseconds(250))
+      return GuestHTTPResponse(status: 200, headers: [["Content-Type", "text/plain"]], body: Data("compiled".utf8))
+    }
+    let bootstrap = try await server.start()
+    defer { server.stop() }
+    let session = URLSession(configuration: .ephemeral)
+    defer { session.invalidateAndCancel() }
+    let (body, response) = try await session.data(from: bootstrap)
+    #expect((response as? HTTPURLResponse)?.statusCode == 200)
+    #expect(body == Data("compiled".utf8))
+  }
+
+  @Test func responseDeadlineCancelsHandlerAndAllowsLaterRequests() async throws {
+    let cancelled = Requests()
+    let server = GuestHTTPServer(receiveTimeout: 2, responseTimeout: 0.1) { request in
+      if request.path == "/slow" {
+        do { try await Task.sleep(for: .seconds(10)) }
+        catch {
+          await cancelled.append(request)
+          throw error
+        }
+      }
+      return GuestHTTPResponse(status: 200, headers: [["Content-Type", "text/plain"]], body: Data("ready".utf8))
+    }
+    let bootstrap = try await server.start()
+    defer { server.stop() }
+    let session = URLSession(configuration: .ephemeral)
+    defer { session.invalidateAndCancel() }
+    _ = try await session.data(from: bootstrap)
+    let (body, response) = try await session.data(from: URL(string: "/slow", relativeTo: bootstrap)!)
+    #expect((response as? HTTPURLResponse)?.statusCode == 504)
+    #expect((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") == "text/plain; charset=utf-8")
+    #expect(String(decoding: body, as: UTF8.self).contains("Reload"))
+    #expect(await cancelled.values.count == 1)
+    let (_, retry) = try await session.data(from: URL(string: "/", relativeTo: bootstrap)!)
+    #expect((retry as? HTTPURLResponse)?.statusCode == 200)
+  }
+
   @Test func forwardsAuthenticatedBinaryRequestsAndPreservesHTTP() async throws {
     let requests = Requests()
     let server = GuestHTTPServer { request in

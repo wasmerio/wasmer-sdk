@@ -95,3 +95,40 @@ test('cancelled spawn releases the handle that Swift never received', async () =
   assert.equal(processes.length, 1);
   assert.ok(processes[0].killed && processes[0].freed);
 });
+
+test('workspace storage selects host provider and closes OPFS on success and creation failure', async () => {
+  const selected = [], opened = [], closed = [];
+  let fail = false;
+  const storage = { async open(name) { opened.push(name); return 0x80000001; }, async close(id) { closed.push(id); } };
+  const core = { sandbox() { return {
+    network() {}, storageHost(id) { selected.push(id); }, mountHost() { assert.fail('workspace must not be an ordinary mount'); },
+    async start() { if (fail) throw new Error('start failed'); return { async close() {}, free() {} }; },
+  }; } };
+  const dispatcher = new SDKDispatcher(async () => core, undefined, storage);
+  const call = (method,args) => dispatcher.request(crypto.randomUUID(),method,args);
+  await call('initialize',{});
+  const base = {packages:[],files:{},env:{},network:'disabled'};
+  const sandbox = await call('sandbox.create',{...base,storage:{kind:'opfs',volume:'trial'}});
+  assert.deepEqual(opened,['trial']); assert.deepEqual(selected,[0x80000001]);
+  await call('sandbox.close',{sandbox}); assert.deepEqual(closed,[0x80000001]);
+  fail = true;
+  await assert.rejects(call('sandbox.create',{...base,storage:{kind:'opfs',volume:'trial'}}), /start failed/);
+  assert.equal(closed.length,2);
+  fail = false;
+  const memory = await call('sandbox.create',{...base,storage:{kind:'memory'}});
+  assert.deepEqual(opened,['trial','trial']);
+  assert.deepEqual(selected,[0x80000001,0x80000001]);
+  await call('sandbox.close',{sandbox:memory});
+  assert.equal(closed.length,2);
+  await call('sandbox.create',{...base,storage:{kind:'native'},mounts:[{path:'/workspace',id:42,readOnly:false}]});
+  assert.equal(selected.at(-1),42);
+});
+
+test('memory workspace works without an external storage worker', async () => {
+  const { request } = fixture();
+  await request('initialize');
+  const sandbox = await request('sandbox.create', {
+    packages: [], files: {}, env: {}, network: 'disabled', storage: {kind:'memory'},
+  });
+  await request('sandbox.close', {sandbox});
+});

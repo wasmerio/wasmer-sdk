@@ -20,19 +20,21 @@ public enum WebKitRuntimeError: Error, LocalizedError {
 final class WebKitTransport: NSObject, WKNavigationDelegate {
   private var webView: WKWebView?
   private var bridge: MessageBridge?
-  private var server: LoopbackServer?
+  private var assets: RuntimeAssets?
   private let networking = NativeNetwork()
   private var mounts: [Int: (NativeFileSystem, Bool)] = [:]
   private var nextMount = 0
   private let cacheDirectory: URL
+  private let guestMemoryLimitBytes: UInt64?
   private var origin: URL?
   private var ready: CheckedContinuation<Void, Error>?
   private var readyTimeout: Task<Void, Never>?
   private var closed = false
   private var pending: [String: CheckedContinuation<Data, Error>] = [:]
 
-  init(cacheDirectory: URL) {
+  init(cacheDirectory: URL, guestMemoryLimitBytes: UInt64? = nil) {
     self.cacheDirectory = cacheDirectory
+    self.guestMemoryLimitBytes = guestMemoryLimitBytes
     super.init()
   }
   var isWebViewAttached: Bool { webView?.superview != nil || webView?.window != nil }
@@ -72,13 +74,17 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
         code: "INITIALIZATION_ERROR",
         message: "WasmerSDK runtime resources are missing from the app bundle")
     }
-    let server = LoopbackServer(directory: assets, cacheDirectory: cacheDirectory)
-    self.server = server
-    let url = try await server.start()
+    let sharedAssets = try await RuntimeAssets.acquire(directory: assets, cache: cacheDirectory)
+    self.assets = sharedAssets
+    var components = URLComponents(url: sharedAssets.url, resolvingAgainstBaseURL: false)!
+    if let limit = guestMemoryLimitBytes {
+      components.queryItems = [URLQueryItem(name: "guestMemoryPages", value: String(limit / 65536))]
+    }
+    let url = components.url!
     origin = url
     let configuration = WKWebViewConfiguration()
     configuration.preferences.inactiveSchedulingPolicy = .none
-    configuration.websiteDataStore = .nonPersistent()
+    configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: sharedAssets.identifier)
     let bridge = MessageBridge(owner: self)
     self.bridge = bridge
     configuration.userContentController.addScriptMessageHandler(
@@ -189,17 +195,28 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
     let completions = Array(pending.values)
     pending.removeAll()
     for completion in completions { completion.resume(throwing: error) }
-    // Native cleanup must not wait for an unresponsive WebContent process.
+    // Flush OPFS on normal shutdown, but still recover from an unresponsive
+    // WebContent process. The native deadline also bounds JavaScript evaluation.
     if let view = webView {
-      Task { @MainActor in _ = try? await view.evaluateJavaScript("globalThis.wasmerRPC?.stop()") }
+      await withCheckedContinuation { continuation in
+        var finish: CheckedContinuation<Void, Never>? = continuation
+        let timeout = Task { @MainActor in
+          try? await Task.sleep(for: .milliseconds(1500))
+          finish?.resume(); finish = nil
+        }
+        Task { @MainActor in
+          _ = try? await view.callAsyncJavaScript("await globalThis.wasmerRPC?.stop()", arguments: [:], in: nil, contentWorld: .page)
+          finish?.resume(); finish = nil; timeout.cancel()
+        }
+      }
     }
     webView?.stopLoading()
     webView?.configuration.userContentController.removeScriptMessageHandler(forName: "wasmer")
     webView?.navigationDelegate = nil
     webView = nil
     bridge = nil
-    server?.stop()
-    server = nil
+    await assets?.release()
+    assets = nil
     await removeMounts(Array(mounts.keys))
     await networking.shutdown()
   }
@@ -211,7 +228,7 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
       message.frameInfo.securityOrigin.protocol == origin?.scheme,
       message.frameInfo.securityOrigin.host == origin?.host,
       message.frameInfo.securityOrigin.port == origin?.port,
-      var body = message.body as? [String: Any], let kind = body["kind"] as? String
+      let body = message.body as? [String: Any], let kind = body["kind"] as? String
     else {
       reply(nil, "Invalid runtime message")
       return
@@ -233,25 +250,25 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
       ready?.resume()
       ready = nil
       reply(true, nil)
-    case "network", "filesystem":
+    case "filesystem":
+      guard let mount = body["mount"] as? Int, let (filesystem, readOnly) = mounts[mount] else {
+        reply(nil, "Mount is closed")
+        return
+      }
       do {
-        let filesystem: NativeFileSystem?
-        if kind == "filesystem" {
-          guard let mount = body["mount"] as? Int, let (fs, readOnly) = mounts[mount] else {
-            reply(nil, "Mount is closed")
-            return
-          }
-          filesystem = fs
-          body["mount"] = readOnly ? 2 : 1
-        } else {
-          filesystem = nil
+        let request = try NativeFileSystemRequest(body)
+        Task {
+          let response = await filesystem.dispatch(request, readOnly: readOnly)
+          reply(response.object, nil)
         }
+      } catch {
+        reply(NativeFileSystemResponse.error(error as? NativeIOError ?? NativeIOError(EIO)).object, nil)
+      }
+    case "network":
+      do {
         let data = try JSONSerialization.data(withJSONObject: body)
         Task {
-          let response =
-            if let filesystem { await filesystem.dispatch(data) } else {
-              await networking.dispatch(data)
-            }
+          let response = await networking.dispatch(data)
           reply(try? JSONSerialization.jsonObject(with: response), nil)
         }
       } catch { reply(nil, error.localizedDescription) }

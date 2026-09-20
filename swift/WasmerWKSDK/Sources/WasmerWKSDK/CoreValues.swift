@@ -21,10 +21,12 @@ public enum FileKind: String, Sendable, Codable { case file, directory }
 public struct ClientOptions: Sendable, Codable, Equatable, Hashable {
   public let cacheRoot: String?
   public let outputBytes: UInt64?
+  public let guestMemoryLimitBytes: UInt64?
 
-  public init(cacheRoot: String?, outputBytes: UInt64?) {
+  public init(cacheRoot: String?, outputBytes: UInt64?, guestMemoryLimitBytes: UInt64? = nil) {
     self.cacheRoot = cacheRoot
     self.outputBytes = outputBytes
+    self.guestMemoryLimitBytes = guestMemoryLimitBytes
   }
 
 }

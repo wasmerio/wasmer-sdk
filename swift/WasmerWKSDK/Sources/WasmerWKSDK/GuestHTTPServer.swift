@@ -33,13 +33,25 @@ public final class GuestHTTPServer: @unchecked Sendable {
   private var listener: NWListener?
   private var connections: [UUID: NWConnection] = [:]
   private var requests: [UUID: Task<Void, Never>] = [:]
+  private var deadlines: [UUID: DispatchWorkItem] = [:]
+  private let receiveTimeout: TimeInterval
+  private let responseTimeout: TimeInterval
   private var authority = ""
   private var stopped = false
   private var startupCompleted = false
   static let maximumBody = 1024 * 1024
   static let maximumHeaders = 32 * 1024
 
-  public init(handler: @escaping @Sendable (GuestHTTPRequest) async throws -> GuestHTTPResponse) {
+  public convenience init(handler: @escaping @Sendable (GuestHTTPRequest) async throws -> GuestHTTPResponse) {
+    // Development servers may download a compiler and compile their first page
+    // after opening the listening port. Keep that separate from request framing.
+    self.init(receiveTimeout: 35, responseTimeout: 180, handler: handler)
+  }
+
+  init(receiveTimeout: TimeInterval, responseTimeout: TimeInterval,
+       handler: @escaping @Sendable (GuestHTTPRequest) async throws -> GuestHTTPResponse) {
+    self.receiveTimeout = receiveTimeout
+    self.responseTimeout = responseTimeout
     self.handler = handler
   }
 
@@ -76,9 +88,7 @@ public final class GuestHTTPServer: @unchecked Sendable {
             let id = UUID()
             self.connections[id] = connection
             connection.start(queue: self.queue)
-            self.queue.asyncAfter(deadline: .now() + 35) {
-              if self.connections[id] != nil { self.send(id, response: .init(status: 504)) }
-            }
+            self.scheduleTimeout(id, after: self.receiveTimeout)
             self.receive(id, buffer: Data())
           }
           listener.start(queue: self.queue)
@@ -95,7 +105,20 @@ public final class GuestHTTPServer: @unchecked Sendable {
       self.connections.removeAll()
       for request in self.requests.values { request.cancel() }
       self.requests.removeAll()
+      for deadline in self.deadlines.values { deadline.cancel() }
+      self.deadlines.removeAll()
     }
+  }
+
+  private func scheduleTimeout(_ id: UUID, after interval: TimeInterval) {
+    deadlines.removeValue(forKey: id)?.cancel()
+    let deadline = DispatchWorkItem { [weak self] in
+      self?.send(id, response: .init(status: 504,
+        headers: [["Content-Type", "text/plain; charset=utf-8"]],
+        body: Data("The guest server took too long to respond. Reload to try again.".utf8)))
+    }
+    deadlines[id] = deadline
+    queue.asyncAfter(deadline: .now() + interval, execute: deadline)
   }
 
   struct RequestHead {
@@ -157,6 +180,7 @@ public final class GuestHTTPServer: @unchecked Sendable {
   private func receive(_ id: UUID, buffer: Data) {
     guard let connection = connections[id] else { return }
     connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { bytes, _, done, error in
+      guard self.connections[id] != nil, self.deadlines[id] != nil else { return }
       var buffer = buffer; buffer.append(bytes ?? Data())
       do {
         if let head = try Self.parseHead(buffer), buffer.count >= head.bodyOffset + head.bodyLength {
@@ -189,17 +213,23 @@ public final class GuestHTTPServer: @unchecked Sendable {
     if !guestCookies.isEmpty { headers.append(["cookie", guestCookies.joined(separator: "; ")]) }
     headers.append(["accept-encoding", "identity"])
     let request = GuestHTTPRequest(method: head.method, path: head.path, headers: headers, body: body)
+    scheduleTimeout(id, after: responseTimeout)
     requests[id] = Task { [handler] in
       let response: GuestHTTPResponse
       do { response = try await handler(request) }
       catch { response = .init(status: 502, headers: [["Content-Type", "text/plain; charset=utf-8"]],
         body: Data("The guest server is unavailable. Return to the terminal to start it again.".utf8)) }
-      self.queue.async { self.send(id, response: response, headOnly: head.method == "HEAD") }
+      self.queue.async {
+        guard self.requests[id] != nil else { return }
+        self.send(id, response: response, headOnly: head.method == "HEAD")
+      }
     }
   }
 
   private func send(_ id: UUID, response: GuestHTTPResponse, headOnly: Bool = false, bootstrap: Bool = false) {
     guard let connection = connections[id] else { return }
+    deadlines.removeValue(forKey: id)?.cancel()
+    requests.removeValue(forKey: id)?.cancel()
     guard response.body.count <= 4 * 1024 * 1024, (200...599).contains(response.status) else {
       send(id, response: .init(status: 502)); return
     }
@@ -219,6 +249,7 @@ public final class GuestHTTPServer: @unchecked Sendable {
   }
 
   private func finish(_ id: UUID) {
+    deadlines.removeValue(forKey: id)?.cancel()
     connections.removeValue(forKey: id)?.cancel()
     requests.removeValue(forKey: id)?.cancel()
   }

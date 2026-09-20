@@ -17,8 +17,6 @@ from bundle_sdk import check
 REVISION = "5de703a1b6ca0b91fcebe932b44be1df2de0a683"
 BUNDLE_ID = "io.wasmer.sdk.ios-terminal"
 ARTIFACTS = ROOT / "Artifacts"
-
-
 def ghostty(platform):
     zig = shutil.which("zig")
     if not zig or output(zig, "version") != "0.16.0":
@@ -37,7 +35,7 @@ def ghostty(platform):
     return prefix
 
 
-def build(platform):
+def build(platform, edgejs_webc=None):
     sdk = SDKS[platform]
     if int(output("xcrun", "--sdk", sdk, "--show-sdk-version").split(".")[0]) < 27:
         raise SystemExit("Xcode 27+ is required; set DEVELOPER_DIR to its Contents/Developer")
@@ -57,16 +55,27 @@ def build(platform):
         "-I", library, "-I", library / "Modules", *sorted(ROOT.glob("*.swift")), obj, library / "libWasmerSDK.a",
         prefix / "lib/libghostty-vt.a", "-o", app / "WasmerShell")
     copy_resources(library, app)
+    # Test runtime changes before publishing a registry release. This artifact
+    # is generated externally and never checked into the source tree.
+    local_edgejs = app / "edgejs.webc"
+    if edgejs_webc:
+        shutil.copyfile(edgejs_webc, local_edgejs)
+    else:
+        local_edgejs.unlink(missing_ok=True)
     examples = app / "Examples"
     examples.mkdir(exist_ok=True)
     # Bundle the same examples and requirements as wasmer.sh, without drift.
-    for name in ("node", "python", "python-django", "python-fastapi"):
+    for source_name, name in (("node", "node"), ("next", "node-next"),
+                              ("python", "python"), ("python-django", "python-django"),
+                              ("python-fastapi", "python-fastapi")):
         destination = examples / name
         if destination.exists():
             shutil.rmtree(destination)
-        shutil.copytree(ROOT.parents[2] / "wasmer-sh/workspace" / name, destination)
+        shutil.copytree(ROOT.parents[2] / "wasmer-sh/workspace" / source_name, destination,
+                        ignore=shutil.ignore_patterns("node_modules", ".next"))
         readme = destination / "README.md"
-        readme.write_text(readme.read_text().replace("/workspace/", "/native/"))
+        instructions = readme.read_text().replace(f"/workspace/{source_name}", f"/workspace/{name}")
+        readme.write_text(instructions)
     shutil.copyfile(ROOT / ".build/ghostty/LICENSE", app / "Ghostty-LICENSE.txt")
     info = dict(CFBundleIdentifier=BUNDLE_ID, CFBundleExecutable="WasmerShell",
                 CFBundleName="WasmerShell", CFBundleDisplayName="WasmerShell",
@@ -81,7 +90,7 @@ def build(platform):
     return app
 
 
-def launch(app, selected, smoke, example=None, stress=False, quick=False):
+def launch(app, selected, smoke, example=None, stress=False, quick=False, storage=None, guest_memory_mib=None, reuse_next_project=False, next_runs=3):
     device = selected["udid"]
     if selected["state"] != "Booted":
         run("xcrun", "simctl", "boot", device)
@@ -92,8 +101,19 @@ def launch(app, selected, smoke, example=None, stress=False, quick=False):
     result.unlink(missing_ok=True)
     progress = container / "Documents/terminal-progress.txt"
     progress.unlink(missing_ok=True)
-    run("xcrun", "simctl", "launch", "--terminate-running-process", device, BUNDLE_ID,
-        *(["--stress-test"] + (["--stress-quick"] if quick else []) if stress else ["--smoke-test"] if smoke else ["--example-" + example] if example else []))
+    arguments = (["--stress-test"] + (["--stress-quick"] if quick else []) if stress
+                 else ["--smoke-test"] if smoke else [])
+    if storage or smoke:
+        arguments.extend(["--storage", storage or "native"])
+    if guest_memory_mib or smoke:
+        arguments.extend(["--guest-memory-mib", str(guest_memory_mib or 192)])
+    if example:
+        arguments.append("--example-" + example)
+    if reuse_next_project:
+        arguments.append("--reuse-next-project")
+    if example == "node-next":
+        arguments.extend(["--next-runs", str(next_runs)])
+    run("xcrun", "simctl", "launch", "--terminate-running-process", device, BUNDLE_ID, *arguments)
     if not smoke:
         developer = Path(ENV["DEVELOPER_DIR"])
         # Xcode 27 moved the simulator UI into Device Hub.
@@ -105,7 +125,7 @@ def launch(app, selected, smoke, example=None, stress=False, quick=False):
         else:
             print("App launched. Open the selected simulator in Xcode.", flush=True)
         return
-    deadline = time.monotonic() + (1200 if stress else 420)
+    deadline = time.monotonic() + (1200 if stress else 600 + 180 * next_runs if example == "node-next" else 420)
     previous = ""
     while not result.exists() and time.monotonic() < deadline:
         if progress.exists():
@@ -129,17 +149,24 @@ def main():
     parser.add_argument("action", choices=["build", "run", "test", "stress"])
     parser.add_argument("--platform", choices=["simulator", "device"], default="simulator")
     parser.add_argument("--device", help="iOS 27+ simulator UDID")
-    parser.add_argument("--example", choices=["node", "python"], help="Start a server and open its preview (run only)")
+    parser.add_argument("--example", choices=["node", "node-next", "python", "storage", "crypto"], help="Start a server (run), or select the node-next/storage/crypto integration test (test)")
+    parser.add_argument("--edgejs-webc", type=Path, help="Use a locally generated EdgeJS package instead of the registry release")
+    parser.add_argument("--storage", choices=["native", "memory", "opfs"], help="Choose workspace storage; run preserves the app selection, tests default to native")
+    parser.add_argument("--guest-memory-mib", type=int, choices=[192, 512], help="Override the guest memory limit for development tests (default: 192 MiB)")
+    parser.add_argument("--reuse-next-project", action="store_true", help="Test the existing node-next directory and pnpm cache, preserving files (test --example node-next only)")
+    parser.add_argument("--next-runs", type=int, choices=range(1, 21), default=3, help="Next.js start/page/API/stop cycles in one session (default: 3)")
     parser.add_argument("--quick", action="store_true", help="Stress 100 child processes without package installs (stress only)")
     args = parser.parse_args()
+    if args.reuse_next_project and (args.action != "test" or args.example != "node-next"):
+        parser.error("--reuse-next-project requires test --example node-next")
     selected = None
     if args.action != "build":
         if args.platform != "simulator":
             raise SystemExit("Physical installation requires development signing; use build --platform device")
         selected = select_simulator(json.loads(output("xcrun", "simctl", "list", "devices", "available", "--json")), args.device)
-    app = build(args.platform)
+    app = build(args.platform, args.edgejs_webc)
     if selected:
-        launch(app, selected, args.action in ("test", "stress"), args.example, args.action == "stress", args.quick)
+        launch(app, selected, args.action in ("test", "stress"), args.example, args.action == "stress", args.quick, args.storage, args.guest_memory_mib, args.reuse_next_project, args.next_runs)
 
 
 if __name__ == "__main__":

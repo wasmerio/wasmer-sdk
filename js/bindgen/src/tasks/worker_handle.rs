@@ -25,7 +25,11 @@ pub(crate) struct WorkerHandle {
 }
 
 impl WorkerHandle {
-    pub(crate) fn spawn(worker_id: u32, sender: Scheduler) -> Result<Self, Error> {
+    pub(crate) fn spawn(
+        worker_id: u32,
+        sender: Scheduler,
+        retire_after_task: bool,
+    ) -> Result<Self, Error> {
         let name = format!("worker-{worker_id}");
 
         let worker_url = worker_url();
@@ -55,7 +59,7 @@ impl WorkerHandle {
         // The worker has technically been started, but it's kinda useless
         // because it hasn't been initialized with the same WebAssembly module
         // and linear memory as the scheduler. We need to initialize explicitly.
-        init_message(worker_id)
+        init_message(worker_id, retire_after_task)
             .and_then(|msg| worker.post_message(&msg))
             .map_err(crate::worker_utils::js_error)?;
 
@@ -278,6 +282,7 @@ fn on_message(msg: web_sys::MessageEvent, sender: &Scheduler, worker_id: u32) {
             }
 
             let msg = match base_msg {
+                WorkerMessage::Retired => SchedulerMessage::WorkerRetired { worker_id },
                 WorkerMessage::MarkBusy => SchedulerMessage::WorkerBusy { worker_id },
                 WorkerMessage::MarkIdle => SchedulerMessage::WorkerIdle { worker_id },
                 WorkerMessage::Scheduler(msg) => SchedulerMessage::FromWorker {
@@ -399,12 +404,17 @@ impl Drop for WorkerHandle {
 }
 
 /// Craft the special `"init"` message.
-fn init_message(id: u32) -> Result<JsValue, JsValue> {
+fn init_message(id: u32, retire_after_task: bool) -> Result<JsValue, JsValue> {
     let msg = js_sys::Object::new();
 
     js_sys::Reflect::set(&msg, &JsString::from("type"), &JsString::from("init"))?;
     js_sys::Reflect::set(&msg, &JsString::from("memory"), &wasm_bindgen::memory())?;
     js_sys::Reflect::set(&msg, &JsString::from("id"), &JsValue::from(id))?;
+    js_sys::Reflect::set(
+        &msg,
+        &JsString::from("retireAfterTask"),
+        &JsValue::from(retire_after_task),
+    )?;
     js_sys::Reflect::set(&msg, &JsString::from("sdkUrl"), &JsValue::from(sdk_url()))?;
     js_sys::Reflect::set(
         &msg,

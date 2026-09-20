@@ -53,6 +53,10 @@ impl ThreadPoolWorker {
         tracing::trace!(?msg, "Handling a message");
 
         match msg {
+            PostMessagePayload::Timer(timer) => {
+                timer.run().await;
+                Ok(())
+            }
             PostMessagePayload::Async(async_job) => self.execute_async(async_job).await,
             PostMessagePayload::Blocking(blocking) => self.execute_blocking(blocking).await,
         }

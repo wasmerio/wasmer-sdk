@@ -16,8 +16,20 @@ struct WasmerShellApp: App {
           }
           Spacer()
           Menu {
+            ForEach(ShellStorage.allCases, id: \.self) { value in
+              Button { Task { await session.selectStorage(value) } } label: {
+                if value == session.storage { Label(value.label, systemImage: "checkmark") }
+                else { Text(value.label) }
+              }
+            }
+            Text("Changing storage restarts the shell. Memory is cleared on restart.")
+          } label: { Image(systemName: "externaldrive") }
+            .accessibilityLabel("Storage: " + session.storage.label).disabled(session.starting)
+
+          Menu {
             Section("Run at the Bash prompt") {
               Button("Node.js server") { session.runExample("node") }
+              Button("Next.js app (after pnpm i)") { session.runExample("node-next") }
               Button("Python server") { session.runExample("python") }
             }
             if !session.previews.isEmpty {
@@ -61,7 +73,15 @@ struct WasmerShellApp: App {
 @MainActor
 final class TerminalSession: ObservableObject {
   let view = TerminalView(frame: .zero)
-  @Published var status = "Starting…"
+  @Published var storage = ShellStorage.initial
+  let memory = ShellMemory.initial
+  @Published var status = "Starting…" {
+    didSet {
+      if smoke || stress {
+        try? Data(status.utf8).write(to: URL.documentsDirectory.appendingPathComponent("terminal-progress.txt"), options: .atomic)
+      }
+    }
+  }
   @Published var ready = false
   @Published var starting = false
   @Published var previews: [ServerPreview] = []
@@ -77,6 +97,7 @@ final class TerminalSession: ObservableObject {
   private let smoke = ProcessInfo.processInfo.arguments.contains("--smoke-test")
   private let stress = ProcessInfo.processInfo.arguments.contains("--stress-test")
   private var stressHasRun = false
+  private var storageHasRun = false
   private let directory = URL.documentsDirectory.appendingPathComponent("WasmerTerminal")
 
   func start() async {
@@ -85,25 +106,11 @@ final class TerminalSession: ObservableObject {
     defer { starting = false }
     do {
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      try seedExamples()
-      let demo = directory.appendingPathComponent("demo.py")
-      if !FileManager.default.fileExists(atPath: demo.path) {
-        try Data("""
-        from pathlib import Path
-        name = input("What is your name? ")
-        print(f"Hello, {name}! Python is running on your iPhone.")
-        Path("hello.txt").write_text(f"Hello, {name}!\\n")
-        print("Saved hello.txt in the native Documents directory.")
-        """.utf8).write(to: demo)
-      }
-      let host = try ShellRuntime(directory: directory)
+      let host = try ShellRuntime(directory: directory, storage: storage, memory: memory)
       runtime = host
       transcript.removeAll(); exit = nil
       host.onProgress = { [weak self] message in
         self?.status = message
-        if self?.smoke == true || self?.stress == true {
-          try? Data(message.utf8).write(to: URL.documentsDirectory.appendingPathComponent("terminal-progress.txt"), options: .atomic)
-        }
       }
       host.onTerminalOutput = { [weak self] bytes in
         guard let self else { return }
@@ -141,16 +148,20 @@ final class TerminalSession: ObservableObject {
         }
       }
       try await host.start()
+      try await host.seedExamples()
+      if !(try await host.fs.readDir()).contains(where: { $0.name == "demo.py" }) {
+        try await host.fs.writeText("demo.py", "name = input('What is your name? '); print(f'Hello, {name}!')\n")
+      }
       guard !host.isWebViewAttached else { throw DemoError.failed("Runtime WebView was attached") }
-      view.feed(Data("\u{1b}[2J\u{1b}[H\u{1b}[1;32mLocal programs. Native terminal.\u{1b}[0m\r\nTry python, node, or cowsay hello.\r\nRun node node/server.js to open a browser.\r\nExamples are in /native/node and /native/python.\r\n\r\n".utf8))
+      view.feed(Data("\u{1b}[2J\u{1b}[H\u{1b}[1;32mLocal programs. Native terminal.\u{1b}[0m\r\nTry python, node, or cowsay hello.\r\nRun node node/server.js to open a browser.\r\nStorage: \(storage.label). Examples are in /workspace.\r\nNext.js: cd node-next. Install with pnpm i, start with pnpm dev.\r\n\r\n".utf8))
       try await host.startTerminal(columns: view.columns, rows: view.rows)
-      ready = true; status = "Bash · Node.js · Python"
+      ready = true; status = "\(storage.label) · Bash · Node.js · Python"
       if stress, !stressHasRun {
         stressHasRun = true
         Task { await runStressTest(host) }
       }
       else if smoke { Task { await runSmokeTest(host) } }
-      else if let name = ["node", "python"].first(where: { ProcessInfo.processInfo.arguments.contains("--example-" + $0) }) {
+      else if let name = ["node", "node-next", "python"].first(where: { ProcessInfo.processInfo.arguments.contains("--example-" + $0) }) {
         Task {
           do { try await waitFor("wasmer:"); runExample(name) }
           catch { status = error.localizedDescription }
@@ -164,20 +175,11 @@ final class TerminalSession: ObservableObject {
     }
   }
 
-  private func seedExamples() throws {
-    // Seed only missing files so scripts edited in the terminal survive restarts.
-    let examples = Bundle.main.resourceURL!.appendingPathComponent("Examples")
-    if let files = FileManager.default.enumerator(at: examples, includingPropertiesForKeys: [.isRegularFileKey]) {
-      for case let source as URL in files {
-        guard try source.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
-        let relative = String(source.path.dropFirst(examples.path.count + 1))
-        let destination = directory.appendingPathComponent(relative)
-        if !FileManager.default.fileExists(atPath: destination.path) {
-          try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-          try FileManager.default.copyItem(at: source, to: destination)
-        }
-      }
-    }
+  func selectStorage(_ value: ShellStorage) async {
+    guard value != storage, !starting else { return }
+    storage = value
+    UserDefaults.standard.set(value.rawValue, forKey: "shellStorage")
+    await restart()
   }
 
   func send(_ bytes: Data) {
@@ -192,6 +194,8 @@ final class TerminalSession: ObservableObject {
     }
   }
   func restart() async {
+    guard !starting else { return }
+    starting = true
     closePreviews()
     ready = false; resizeGeneration += 1
     runtime?.onTerminalExit = nil
@@ -200,12 +204,18 @@ final class TerminalSession: ObservableObject {
     runtime?.onProgress = nil
     await runtime?.close(); runtime = nil
     await inputTask?.value; inputTask = nil
+    starting = false
     await start()
   }
 
   func runExample(_ name: String) {
     view.resignFirstResponder()
-    let command = name == "node" ? "node /native/node/server.js" : "python /native/python/server.py"
+    let command: String
+    switch name {
+    case "node": command = "node /workspace/node/server.js"
+    case "node-next": command = "cd /workspace/node-next && pnpm dev"
+    default: command = "python /workspace/python/server.py"
+    }
     send(Data((command + "\r").utf8))
   }
 
@@ -253,9 +263,12 @@ final class TerminalSession: ObservableObject {
       .replacingOccurrences(of: "\r", with: "")
       .replacingOccurrences(of: "\u{1b}(?:\\[[0-?]*[ -/]*[@-~]|[=>])", with: "", options: .regularExpression)
   }
-  private func waitFor(_ marker: String, after offset: Int = 0, timeout: Int = 45) async throws {
+  private func waitFor(_ marker: String, after offset: Int = 0, timeout: Int = 45, failureMarker: String? = nil) async throws {
     let deadline = ContinuousClock.now + .seconds(timeout)
     while !String(text.dropFirst(offset)).contains(marker) {
+      if let failureMarker, String(text.dropFirst(offset)).contains(failureMarker) {
+        throw DemoError.failed("Command exited before \(marker)")
+      }
       if let exit { throw DemoError.failed("Session exited early: \(exit.exitCode)") }
       guard ready else { throw DemoError.failed("Session unavailable: \(status)") }
       guard ContinuousClock.now < deadline else { throw DemoError.failed("Timed out waiting for \(marker)") }
@@ -263,6 +276,18 @@ final class TerminalSession: ObservableObject {
     }
   }
   private func runSmokeTest(_ host: ShellRuntime) async {
+    if ProcessInfo.processInfo.arguments.contains("--example-crypto") {
+      await runCryptoSmokeTest(host)
+      return
+    }
+    if ProcessInfo.processInfo.arguments.contains("--example-storage") {
+      if !storageHasRun { storageHasRun = true; await runStorageSmokeTest(host) }
+      return
+    }
+    if ProcessInfo.processInfo.arguments.contains("--example-node-next") {
+      await runNextSmokeTest(host)
+      return
+    }
     var report: [String: Any] = ["passed": false, "renderer": "libghostty-vt", "osVersion": ProcessInfo.processInfo.operatingSystemVersionString]
     do {
       try? FileManager.default.removeItem(at: directory.appendingPathComponent("terminal-test.txt"))
@@ -328,7 +353,7 @@ final class TerminalSession: ObservableObject {
       try await shellCheck(host, command: "node -e \"console.log('REACT_OK:' + require('react').version)\"; printf '\\nREACT_EXIT:%s\\n' \"$?\"", marker: "\nREACT_OK:")
       try await shellCheck(host, command: "cd /native && printf '\\nPROJECT_DONE\\n'", marker: "\nPROJECT_DONE\n")
       report["nativeNetwork"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(await host.nativeNetworkStats))
-      try await host.writeTerminal(Data("node /native/node/server.js; printf '\\nSERVER_EXIT:%s\\n' \"$?\"\r".utf8))
+      try await host.writeTerminal(Data("node /workspace/node/server.js; printf '\\nSERVER_EXIT:%s\\n' \"$?\"\r".utf8))
       try await waitFor("Node.js listening on http://localhost:8000")
       let nodePreview = try await waitForPreview(port: 8000, heading: "node-preview", health: "node-health")
       report["nodePreviewTitle"] = try await nodePreview.webView.evaluateJavaScript("document.title")
@@ -344,7 +369,7 @@ final class TerminalSession: ObservableObject {
       try await waitFor("wasmer:", after: beforeNodeStop, timeout: 5)
       try await waitForPreviewClosure(port: 8000)
       // Reuse the same guest port for another runtime and ensure preview cleanup.
-      try await host.writeTerminal(Data("python /native/python/server.py\r".utf8))
+      try await host.writeTerminal(Data("python /workspace/python/server.py\r".utf8))
       try await waitFor("Python listening on http://localhost:8000")
       let pythonPreview = try await waitForPreview(port: 8000, heading: "python-preview", health: "python-health")
       report["pythonPreviewTitle"] = try await pythonPreview.webView.evaluateJavaScript("document.title")
@@ -374,7 +399,180 @@ final class TerminalSession: ObservableObject {
     report["transcript"] = text
     writeReport(report)
   }
-  private func shellCheck(_ host: ShellRuntime, command: String, marker: String, timeout: Int = 60) async throws {
+  private func runStorageSmokeTest(_ host: ShellRuntime) async {
+    var report: [String: Any] = ["passed": false, "storage": storage.rawValue]
+    let name = ".storage-test-" + UUID().uuidString
+    do {
+      try await waitFor("wasmer:")
+      try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
+      try await host.fs.writeText("/workspace/" + name + "/from-swift.txt", "shared storage")
+      try await host.fs.writeText(name + "/test.cjs", """
+        const fs = require('fs');
+        if (fs.readFileSync('from-swift.txt', 'utf8') !== 'shared storage') throw Error('Swift write missing');
+        const times = {}, start = Date.now(), bytes = Buffer.alloc(4 * 1024 * 1024, 37);
+        fs.writeFileSync('binary', bytes); times.write4MiB = Date.now() - start;
+        let t = Date.now(); for (let i=0; i<500; i++) fs.statSync('binary'); times.stat500 = Date.now()-t;
+        t = Date.now(); for (let i=0; i<4; i++) { const b = fs.readFileSync('binary'); if (b.length !== bytes.length || b[123] !== 37) throw Error('Invalid binary'); }
+        times.read16MiB = Date.now()-t;
+        fs.mkdirSync('before'); fs.writeFileSync('before/value', 'from guest'); fs.renameSync('before','after');
+        fs.writeFileSync('result.json', JSON.stringify(times));
+        console.log('STORAGE_READY');
+        """)
+      let operations = await host.nativeOperationCount
+      try await shellCheck(host, command: "cd /workspace/\(name) && node test.cjs; printf '\\nSTORAGE_EXIT:%s\\n' \"$?\"", marker: "\nSTORAGE_EXIT:0\n")
+      report["nativeOperations"] = await host.nativeOperationCount - operations
+      report["timingsMs"] = try JSONSerialization.jsonObject(with: try await host.fs.read(name + "/result.json"))
+      guard try await host.fs.readText(name + "/after/value") == "from guest" else { throw DemoError.failed("Guest write missing from Swift") }
+      try await host.fs.remove(name + "/binary")
+      await restart()
+      try await waitFor("wasmer:")
+      guard let reopened = runtime else { throw DemoError.failed("Restart failed") }
+      let found = try await reopened.fs.readDir().contains { $0.name == name }
+      guard found == (storage != .memory) else { throw DemoError.failed("Unexpected storage persistence") }
+      if found {
+        guard try await reopened.fs.readText(name + "/after/value") == "from guest" else { throw DemoError.failed("Stored contents lost after restart") }
+        try await reopened.fs.remove(name, recursive: true)
+      }
+      report["checks"] = ["Swift write visible to guest", "guest write visible to Swift", "binary IO", "directory rename", "restart persistence", "recursive removal"]
+      report["passed"] = true
+    } catch { report["error"] = error.localizedDescription }
+    report["transcript"] = text
+    writeReport(report)
+  }
+
+  private func runCryptoSmokeTest(_ host: ShellRuntime) async {
+    let name = ".crypto-smoke-" + UUID().uuidString + ".cjs"
+    var report: [String: Any] = ["passed": false, "example": "crypto", "guestMemoryMiB": memory.rawValue]
+    do {
+      try await host.fs.writeText(name, """
+        const assert = require('node:assert/strict');
+        const crypto = require('node:crypto');
+        const chunk = Buffer.alloc(1024 * 1024, 97);
+        const expected = '44cfe18a0cfa63981fb50097d86c656b7947a7db0c39750d01d1255e5ae6d45b368a39ccdf512403b0181b9445421e8bdd6d3cbce3414ac10c089706879873c6';
+        for (let round = 0; round < 3; round++) {
+          const hash = crypto.createHash('sha512');
+          for (let i = 0; i < 192; i++) hash.update(chunk);
+          const copy = hash.copy();
+          assert.equal(hash.digest('hex'), expected);
+          assert.equal(copy.digest('hex'), expected);
+          console.log('HASH_ROUND:' + round);
+        }
+        console.log('HASH_STREAM_OK');
+        """)
+      try await waitFor("wasmer:")
+      try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
+      try await shellCheck(host, command: "node /workspace/\(name); printf '\\nHASH_EXIT:%s\\n' \"$?\"", marker: "\nHASH_EXIT:", timeout: 120)
+      guard text.contains("\nHASH_EXIT:0\n"), text.contains("\nHASH_STREAM_OK\n") else {
+        throw DemoError.failed("Streaming hash exceeded the memory limit or produced an incorrect digest")
+      }
+      try await host.fs.remove(name)
+      report["passed"] = true
+    } catch { report["error"] = error.localizedDescription }
+    report["transcript"] = text
+    writeReport(report)
+  }
+
+  private func runNextSmokeTest(_ host: ShellRuntime) async {
+    var report: [String: Any] = ["passed": false, "example": "node-next"]
+    do {
+      // Start from source only and install all dependencies inside the guest.
+      let existing = ProcessInfo.processInfo.arguments.contains("--reuse-next-project")
+      let name = existing ? "node-next" : ".node-next-smoke-" + UUID().uuidString
+      let workspace = "/workspace/" + name
+      try await host.seedExamples("node-next", at: workspace)
+      report["workspace"] = workspace
+      report["storage"] = storage.rawValue
+      report["guestMemoryMiB"] = memory.rawValue
+      report["freshPackageCache"] = !existing
+      let compiler = workspace + "/node_modules/next/wasm/@next/swc-wasm-nodejs/wasm_bg.wasm"
+      let entries = try await host.fs.readDir(workspace)
+      guard existing || !entries.contains(where: { $0.name == "node_modules" })
+      else { throw DemoError.failed("Cold-start test must not bundle dependencies") }
+      try await waitFor("wasmer:")
+      try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
+      // A fresh project can still reuse the global pnpm store. Keep both
+      // caches in this unique directory so archive download/hash/extraction
+      // are exercised on every backend, including persistent OPFS volumes.
+      let cacheConfig = existing ? "" : "export npm_config_store_dir=\(workspace)/.pnpm-store npm_config_cache_dir=\(workspace)/.pnpm-cache && "
+      try await shellCheck(host, command: "cd \(workspace) && \(cacheConfig)printf '\\n%s\\n' NEXT_DIRECTORY", marker: "\nNEXT_DIRECTORY\n")
+      status = "Installing Next.js · " + storage.label
+      let installStarted = ProcessInfo.processInfo.systemUptime
+      try await shellCheck(host, command: "pnpm i; printf '\\nNEXT_INSTALL:%s\\n' \"$?\"", marker: "\nNEXT_INSTALL:", timeout: 480)
+      guard text.contains("\nNEXT_INSTALL:0\n") else { throw DemoError.failed("pnpm install failed") }
+      report["installMs"] = Int((ProcessInfo.processInfo.systemUptime - installStarted) * 1000)
+      report["restartedAfterInstall"] = false
+      report["serverGuestMemoryMiB"] = memory.rawValue
+      var serverRuns: [[String: Any]] = []
+      let arguments = ProcessInfo.processInfo.arguments
+      let countIndex = arguments.firstIndex(of: "--next-runs")
+      let repetitions = countIndex.flatMap { $0 + 1 < arguments.count ? Int(arguments[$0 + 1]) : nil } ?? 3
+      guard (1...20).contains(repetitions) else { throw DemoError.failed("Next.js test requires 1–20 runs") }
+      report["requestedRuns"] = repetitions
+      for attempt in 0..<repetitions {
+        var cycle: [String: Any] = ["attempt": attempt + 1]
+        if attempt > 0 {
+          let output = try await shellCheck(host, command: "cd \(workspace) && pnpm i; printf '\\nNEXT_REINSTALL:%s\\n' \"$?\"", marker: "\nNEXT_REINSTALL:", timeout: 120)
+          guard output.contains("\nNEXT_REINSTALL:0\n") else { throw DemoError.failed("pnpm reinstall failed") }
+        }
+        status = "Next.js \(attempt + 1)/\(repetitions) · " + storage.label
+        try await shellCheck(host, command: "node -e \"console.log('NEXT_VERSION:' + require('next/package.json').version)\"", marker: "\nNEXT_VERSION:16.3.3\n")
+        let before = text.count
+        let operationsBefore = await host.nativeOperationCount
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        try await host.writeTerminal(Data("cd \(workspace) && pnpm dev; printf '\\nNEXT_EXIT:%s\\n' \"$?\"\r".utf8))
+        try await waitFor("Ready in", after: before, timeout: 180, failureMarker: "\nNEXT_EXIT:")
+        cycle["startupMs"] = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
+        let deadline = ContinuousClock.now + .seconds(180)
+        var loaded: ServerPreview?
+        var previewBody = ""
+        while ContinuousClock.now < deadline {
+          let output = String(text.dropFirst(before))
+          guard ready, !output.contains("\nNEXT_EXIT:") else {
+            throw DemoError.failed("Next.js stopped before the browser page loaded: \(status)")
+          }
+          if output.contains("⨯") || output.contains("uncaughtException:") {
+            throw DemoError.failed("Next.js compilation failed; see the terminal transcript")
+          }
+          if let preview = previews.first(where: { $0.port == 3000 }), preview.webView.window != nil {
+            if let error = preview.error { throw DemoError.failed("Next.js preview: \(error)") }
+            if !preview.isLoading {
+              previewBody = (try? await preview.webView.evaluateJavaScript("document.body?.textContent ?? ''") as? String) ?? ""
+              if previewBody.contains("Welcome to Next.js on Wasmer.") {
+                loaded = preview
+                break
+              }
+            }
+          }
+          try await Task.sleep(for: .milliseconds(200))
+        }
+        guard let preview = loaded else { throw DemoError.failed("Next.js page did not load in the browser preview: \(previewBody.prefix(1000))") }
+        cycle["firstPageMs"] = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
+        cycle["firstPageNativeOperations"] = await host.nativeOperationCount - operationsBefore
+        guard (try await host.fs.stat(compiler)).size > 0 else {
+          throw DemoError.failed("Next.js did not download the WebAssembly compiler")
+        }
+        let hello = try await preview.webView.callAsyncJavaScript(
+          "return (await (await fetch('/api/hello', {signal: AbortSignal.timeout(30000)})).json()).hello;", arguments: [:], in: nil, contentWorld: .page) as? String
+        guard hello == "from Next.js on Wasmer" else { throw DemoError.failed("Next.js API route failed") }
+        report["address"] = preview.address
+        report["apiResponse"] = hello
+        view.sendControl(3); await inputTask?.value
+        try await waitFor("\nNEXT_EXIT:", after: before)
+        try await waitForPreviewClosure(port: 3000)
+        try await shellCheck(host, command: "cd /workspace && node -e \"console.log('NEXT_STOPPED')\"; printf '\\nNEXT_RECOVERY:%s\\n' \"$?\"", marker: "\nNEXT_RECOVERY:0\n")
+        serverRuns.append(cycle)
+        report["serverRuns"] = serverRuns
+      }
+      for (key, value) in serverRuns[0] where key != "attempt" { report[key] = value }
+      report["checks"] = [existing ? "cached pnpm install" : "cold pnpm install", "Next.js downloads its WebAssembly compiler", "same runtime after install", "\(repetitions) server/page/API cycles", "warm pnpm install", "Ctrl-C", "port cleanup", "terminal recovery"]
+      if !existing { try await host.fs.remove(workspace, recursive: true) }
+      report["passed"] = true
+    } catch { report["error"] = error.localizedDescription }
+    report["transcript"] = text
+    writeReport(report)
+  }
+  @discardableResult
+  private func shellCheck(_ host: ShellRuntime, command: String, marker: String, timeout: Int = 60) async throws -> String {
     let before = text.count
     try await host.writeTerminal(Data((command + "\r").utf8))
     try await waitFor(marker, after: before, timeout: timeout)
@@ -383,6 +581,7 @@ final class TerminalSession: ObservableObject {
     // Output alone does not mean the foreground process has restored Bash's TTY.
     try await waitFor("wasmer: $ ", after: output.distance(from: output.startIndex, to: range.upperBound), timeout: timeout)
     try await Task.sleep(for: .milliseconds(200))
+    return String(text.dropFirst(before))
   }
   private func checkPreviewNavigation(_ preview: ServerPreview) async throws {
     let home = "localhost:8000"
@@ -418,7 +617,7 @@ final class TerminalSession: ObservableObject {
     }
   }
   private func checkFastAPIRestarts(_ host: ShellRuntime) async throws {
-    try await shellCheck(host, command: "cd /native/python-fastapi; printf '\\n%s\\n' FASTAPI_DIRECTORY", marker: "\nFASTAPI_DIRECTORY\n")
+    try await shellCheck(host, command: "cd /workspace/python-fastapi; printf '\\n%s\\n' FASTAPI_DIRECTORY", marker: "\nFASTAPI_DIRECTORY\n")
     try await shellCheck(host, command: "pip install -r requirements.txt; printf '\\nFASTAPI_INSTALL:%s\\n' \"$?\"", marker: "\nFASTAPI_INSTALL:0\n", timeout: 180)
     for attempt in 0..<3 {
       let before = text.count
@@ -451,12 +650,12 @@ final class TerminalSession: ObservableObject {
         ("Python baseline", "python -c \"print('PYTHON_READY')\""),
       ]
       for round in 0..<(quick ? 0 : 5) {
-        commands.append(("pip Flask \(round)", "pip install --force-reinstall --no-cache-dir --upgrade -t /native/stress-python flask"))
-        commands.append(("input after pip \(round)", "PYTHONPATH=/native/stress-python python -c \"import flask; print('FLASK_READY')\""))
+        commands.append(("pip Flask \(round)", "pip install --force-reinstall --no-cache-dir --upgrade -t /workspace/stress-python flask"))
+        commands.append(("input after pip \(round)", "PYTHONPATH=/workspace/stress-python python -c \"import flask; print('FLASK_READY')\""))
       }
       for round in 0..<(quick ? 0 : 3) {
         for example in ["django", "fastapi"] {
-          commands.append(("pip requirements \(example) \(round)", "pip install --force-reinstall --no-cache-dir --upgrade -r /native/python-\(example)/requirements.txt"))
+          commands.append(("pip requirements \(example) \(round)", "pip install --force-reinstall --no-cache-dir --upgrade -r /workspace/python-\(example)/requirements.txt"))
           commands.append(("import \(example) \(round)", "python -c 'import \(example); print(\(example).__version__)'"))
         }
       }

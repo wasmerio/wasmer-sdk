@@ -7,6 +7,7 @@ use crate::tasks::{AsyncTask, BlockingTask, interop::Serializer, task_wasm::Spaw
 /// `postMessage()`.
 #[derive(Debug)]
 pub(crate) enum PostMessagePayload {
+    Timer(super::timer::Timer),
     Async(AsyncJob),
     Blocking(BlockingJob),
 }
@@ -166,6 +167,7 @@ mod consts {
 impl PostMessagePayload {
     pub(crate) fn into_js(self) -> Result<JsValue, crate::worker_utils::Error> {
         match self {
+            Self::Timer(timer) => timer.into_js(),
             PostMessagePayload::Async(AsyncJob::Thunk(task)) => {
                 Serializer::new(consts::TYPE_SPAWN_ASYNC)
                     .boxed(consts::PTR, task)
@@ -195,6 +197,7 @@ impl PostMessagePayload {
 
         // Safety: Keep this in sync with PostMessagePayload::to_js()
         match de.ty()?.as_str() {
+            "timer" => Ok(Self::Timer(unsafe { de.boxed("ptr")? })),
             consts::TYPE_SPAWN_ASYNC => {
                 let task = unsafe { de.boxed(consts::PTR)? };
                 Ok(PostMessagePayload::Async(AsyncJob::Thunk(task)))

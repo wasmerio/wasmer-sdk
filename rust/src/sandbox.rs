@@ -38,6 +38,7 @@ pub struct SandboxBuilder {
     files: Vec<(PathBuf, Vec<u8>)>,
     env: BTreeMap<String, String>,
     mounts: Vec<MountSpec>,
+    workspace_provider: Option<Arc<dyn FileSystem>>,
     network: NetworkPolicy,
     network_provider: Option<DynVirtualNetworking>,
 }
@@ -73,6 +74,7 @@ impl SandboxBuilder {
             files: Vec::new(),
             env: BTreeMap::new(),
             mounts: Vec::new(),
+            workspace_provider: None,
             network: NetworkPolicy::Disabled,
             network_provider: None,
         }
@@ -134,6 +136,14 @@ impl SandboxBuilder {
         self
     }
 
+    /// Select the storage provider for `/workspace` and the sandbox filesystem API.
+    /// The default is an in-memory filesystem shared by all sandbox processes.
+    #[must_use]
+    pub fn storage(mut self, filesystem: impl IntoFileSystem) -> Self {
+        self.workspace_provider = Some(filesystem.into_filesystem());
+        self
+    }
+
     /// Configure guest networking.
     ///
     /// Networking is disabled by default. [`NetworkPolicy::Host`] selects the
@@ -183,7 +193,20 @@ impl SandboxBuilder {
             }
         }
 
-        let workspace = virtual_fs::mem_fs::FileSystem::default();
+        let workspace: Arc<dyn virtual_fs::FileSystem + Send + Sync> =
+            if let Some(provider) = self.workspace_provider {
+                #[cfg(feature = "sys")]
+                let runtime = self.client.inner.tasks.runtime_handle();
+                #[cfg(not(feature = "sys"))]
+                let runtime = crate::provider_fs::ProviderRuntime;
+                Arc::new(crate::provider_fs::ProviderAdapter::new(
+                    provider,
+                    MountMode::ReadWrite,
+                    runtime,
+                ))
+            } else {
+                Arc::new(virtual_fs::mem_fs::FileSystem::default())
+            };
         let fs = SandboxFileSystem::new(workspace.clone());
         for (path, bytes) in self.files {
             fs.write(path, bytes).await?;
@@ -247,7 +270,7 @@ pub struct Sandbox {
 pub(crate) struct SandboxInner {
     pub(crate) client: Wasmer,
     pub(crate) packages: RwLock<Vec<Package>>,
-    pub(crate) workspace: virtual_fs::mem_fs::FileSystem,
+    pub(crate) workspace: Arc<dyn virtual_fs::FileSystem + Send + Sync>,
     pub(crate) fs: SandboxFileSystem,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) mounts: Vec<MountSpec>,

@@ -25,6 +25,7 @@ when unsupported by the selected backend:
 | Capability | macOS native binding | iOS WebKit binding |
 | --- | --- | --- |
 | Local package directories | Yes | Use a package definition or WEBC instead |
+| Workspace storage | Memory | Memory, Native, OPFS |
 | App directory mounts | Not yet exposed | `DirectoryMount` |
 | Terminal / resize | Not yet exposed | `TerminalOptions`, `resizeTerminal` |
 | HTTP discovery / exposure | Not yet exposed | `ports.listening()`, `ports.expose()` |
@@ -38,6 +39,32 @@ and platform restrictions are not identical.
 libghostty-vt terminal, Bash, Node.js via Edge.js, Python, cowsay, and `pnpm i react`.
 Guest HTTP servers open in a separate browser view. The iOS implementation has been
 tested in the simulator and cross-compiled for devices; physical-device testing remains.
+
+## Workspace storage
+
+On iOS, choose the storage backend when creating a sandbox:
+
+```swift
+let sandbox = try await wasmer.sandboxes.create(
+    packages: [.package(python)],
+    storage: .opfs("MyWorkspace") // or .native(directoryURL), or .memory
+)
+try await sandbox.fs.writeText("hello.txt", "Hello")
+// Guest commands see the same file at /workspace/hello.txt.
+```
+
+`.memory` is the default on both platforms and lasts for the sandbox's lifetime.
+Native and OPFS workspace selection are currently iOS capabilities; macOS rejects
+these options with `CAPABILITY_UNAVAILABLE`. All use the same `sandbox.fs` API.
+Native storage uses an app-accessible directory. OPFS volumes are named, persist
+across launches, and allow one open sandbox per volume. Use different volume names
+for concurrent sandboxes. OPFS is managed by WebKit, subject to its storage quota;
+use native storage when files must be accessible directly through Foundation.
+
+Next.js installation and execution use the default 192 MiB guest memory limit
+in the same runtime. For development, `Wasmer(guestMemoryLimitBytes: ...)`
+accepts overrides of 64–512 MiB in multiples of 64 KiB on iOS. Larger limits
+can exhaust WebKit memory; native macOS rejects overrides.
 
 ## Install a binary release
 
