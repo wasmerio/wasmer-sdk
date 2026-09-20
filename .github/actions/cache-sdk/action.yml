@@ -15,6 +15,9 @@ runs:
   steps:
     - name: Restore Cargo build cache
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      env:
+        # Treat a stalled download as a cache miss instead of waiting ten minutes.
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
       with:
         prefix-key: cargo-v2
         shared-key: ${{ inputs.cargo-profile }}
@@ -26,6 +29,8 @@ runs:
 
     - name: Restore Wasmer registry and package cache
       uses: actions/cache@v6
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
       with:
         path: |
           .wasmer/cache-v1/registry
@@ -38,6 +43,8 @@ runs:
     - name: Restore native Wasmer compiled artifacts
       if: inputs.cache-compiled-artifacts == 'true'
       uses: actions/cache@v6
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
       with:
         path: .wasmer/cache-v1/compiled
         key: wasmer-compiled-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
