@@ -22,13 +22,15 @@ final class ShellRuntime {
   init(directory: URL, storage: ShellStorage, example: ShellExample? = nil) throws {
     self.example = example
     self.storage = storage
-    self.directory = directory
+    // Reuse each example's existing native directory as its workspace root.
+    self.directory = example.map { directory.appendingPathComponent($0.id) } ?? directory
     client = try Wasmer()
   }
   var nativeOperationCount: Int { get async { await client.diagnostics().nativeOperations } }
   var nativeNetworkStats: NetworkDiagnostics { get async { await client.diagnostics().network } }
 
   func start() async throws {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     // Startup is lazy. Package loading performs the runtime's JSPI check.
     var names = ["wasmer/bash"]
     let required = example?.packages ?? (ShellExample.all.flatMap(\.packages) + ["syrusakbary/cowsay@=0.3.0"])
@@ -42,7 +44,7 @@ final class ShellRuntime {
         packages.append(try await client.packages.load(name))
       }
     }
-    let pythonPath = example.map { "/workspace/\($0.id)/.python-packages" } ?? "/workspace/wasix-packages"
+    let pythonPath = example == nil ? "/workspace/wasix-packages" : "/workspace/.python-packages"
     sandbox = try await client.sandboxes.create(
       packages: packages.map { .package($0) },
       env: [
@@ -61,7 +63,7 @@ final class ShellRuntime {
       mounts: [
         .init("/native", directory: directory),
         .init("/readonly", directory: directory, readOnly: true),
-      ], storage: storage.backend(directory: directory))
+      ], storage: storage.backend(directory: directory, exampleID: example?.id))
     shell = try packages[0].command("bash")
     isWebViewAttached = await client.diagnostics().webViewAttached
   }
@@ -95,8 +97,9 @@ final class ShellRuntime {
     guard let sandbox, let shell else { throw DemoError.failed("Shell is not initialized") }
     let process = try await sandbox.command(
       shell,
-      ["--noprofile", "--norc", "-c", "exec bash --noprofile --norc -i 2>&1"], cwd: example.map { "/workspace/\($0.id)" } ?? "/workspace",
-      env: ["TERM": "xterm-256color", "PS1": "\\[\\e[38;5;42m\\]wasmer\\[\\e[0m\\]:\\w $ "]
+      ["--noprofile", "--norc", "-c", "exec bash --noprofile --norc -i 2>&1"], cwd: "/workspace",
+      // Keep the prompt identical to wasmer.sh's .bashrc.
+      env: ["TERM": "xterm-256color", "PS1": "\\[\\033[1;38;5;141m\\]➜\\[\\033[0m\\] \\[\\033[1;38;5;117m\\]\\W\\[\\033[0m\\] \\[\\033[1m\\]$\\[\\033[0m\\] "]
     )
     .spawn(stdin: .pipe, terminal: TerminalOptions(columns: UInt32(columns), rows: UInt32(rows)))
     self.process = process
@@ -173,11 +176,11 @@ enum ShellStorage: String, CaseIterable {
   var label: String {
     switch self { case .native: "Native"; case .memory: "Memory"; case .opfs: "OPFS" }
   }
-  func backend(directory: URL) -> SandboxStorage {
+  func backend(directory: URL, exampleID: String? = nil) -> SandboxStorage {
     switch self {
     case .native: .native(directory)
     case .memory: .memory
-    case .opfs: .opfs("WasmerShell")
+    case .opfs: .opfs(exampleID.map { "WasmerShell-example-" + $0 } ?? "WasmerShell")
     }
   }
   static var initial: Self {

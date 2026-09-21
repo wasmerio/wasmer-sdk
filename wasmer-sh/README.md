@@ -4,10 +4,11 @@ A fast, browser-native command shell powered by Wasmer, WASIX, and the new
 [`@wasmer/sdk`](https://www.npmjs.com/package/@wasmer/sdk) sandbox API.
 
 The opening screen offers Node.js, Express, Next.js, Python HTTP, Flask, Django,
-FastAPI, and yt-dlp templates. Selecting a template opens Bash in that example's
-directory, with its source files and only its required runtime packages. The
-terminal shows the install and run commands; nothing is installed automatically.
-Python dependencies are isolated in each template's `.python-packages` directory.
+FastAPI, FFmpeg, and yt-dlp templates. Selecting a template opens Bash at
+`/workspace`, with that example's source files directly in the root and only its
+required runtime packages. The terminal shows the install and run commands;
+nothing is installed automatically. Python dependencies are isolated in each
+template's `/workspace/.python-packages` directory.
 The picker itself does not initialize the Wasmer runtime or fetch guest packages.
 
 Use **Examples** to browse templates and **Resume terminal** to return without
@@ -15,9 +16,15 @@ interrupting the current session. Selecting another template opens a fresh
 workspace. A template can also be linked directly, for example `?example=node-next`.
 The catalog in `examples.json` is shared with the native Swift WasmerShell app.
 
+The Django template is a standard `manage.py` / `mysite` starter based on
+[Wasmer's Django example](https://github.com/wasmerio/examples/tree/main/python-django).
+It opens Django's default welcome page and includes SQLite, migrations, and the
+admin. See its [README](workspace/python-django/README.md) for the commands.
+
 **Open full shell** (`?example=shell`) keeps all runtimes and workspace examples
-available together. It loads `wasmer/bash`, creates one persistent sandbox, and
-connects xterm to one long-lived interactive Bash process. Bash owns the
+available together in named subdirectories under `/workspace`. It loads
+`wasmer/bash`, creates one persistent sandbox, and connects xterm to one
+long-lived interactive Bash process. Bash owns the
 prompt, quoting, expansion, working directory, redirection, pipes, built-ins,
 and child processes; the browser only transports terminal input and output.
 Commands therefore have normal shell semantics instead of being parsed or
@@ -218,7 +225,9 @@ outputs on ports 4173 and 4174.
 
 `npm run test:examples` checks the picker on desktop and mobile, keyboard selection,
 minimal runtime composition, each template's installation and server preview,
-Ctrl-C recovery, and yt-dlp's QuickJS/FFmpeg tools and CLI help.
+Ctrl-C recovery, FFmpeg's MP4-to-GIF conversion, and yt-dlp's QuickJS/FFmpeg tools
+and CLI help. The FFmpeg check reads `https://cdn.wasmer.io/media/wordpress.mp4`
+and verifies the resulting GIF's format, dimensions, and multiple frames.
 Set `WASMER_EXAMPLE=yt-dlp` and `WASMER_YTDLP_TEST_URL=<video-url>` to also
 download a video and check the resulting MP4. This optional check depends on
 the remote site's availability.

@@ -64,12 +64,12 @@
     "source": "python-django",
     "title": "Django",
     "group": "Python",
-    "description": "Templates and routes in a single Python file.",
+    "description": "Django’s default starter project, ready to build on.",
     "icon": "django.svg",
     "dependencies": "django",
     "packages": ["python/python@=3.13.20"],
     "install": "pip install -r requirements.txt",
-    "run": "python server.py"
+    "run": "python manage.py runserver 0.0.0.0:8000 --noreload --nothreading"
   },
   {
     "id": "python-fastapi",
@@ -82,6 +82,18 @@
     "packages": ["python/python@=3.13.20"],
     "install": "pip install -r requirements.txt",
     "run": "python server.py"
+  },
+  {
+    "id": "ffmpeg",
+    "source": "ffmpeg",
+    "title": "FFmpeg",
+    "group": "Tools",
+    "description": "Turn a video URL into an animated GIF.",
+    "icon": "ffmpeg.svg",
+    "dependencies": "No installation needed",
+    "packages": ["wasmer/ffmpeg@=1.0.5"],
+    "install": null,
+    "run": "ffmpeg -n -multiple_requests 1 -i https://cdn.wasmer.io/media/wordpress.mp4 -vf 'fps=10,scale=320:-1' /workspace/wordpress.gif"
   },
   {
     "id": "yt-dlp",
@@ -97,6 +109,6 @@
       "wasmer/ffmpeg@=1.0.5"
     ],
     "install": "pip install -r requirements.txt",
-    "run": "python download.py --help"
+    "run": "/workspace/.python-packages/bin/yt-dlp --help"
   }
 ]

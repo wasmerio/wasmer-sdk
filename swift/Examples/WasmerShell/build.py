@@ -80,6 +80,15 @@ def build(platform, edgejs_webc=None, integration_tests=False):
         shutil.rmtree(assets)
     assets.mkdir()
     (assets / "Contents.json").write_text(json.dumps({"info": {"author": "xcode", "version": 1}}))
+    # Reuse the web wordmark rather than maintaining a separate native asset.
+    brand = assets / "wasmer-logo.imageset"
+    brand.mkdir()
+    shutil.copyfile(catalog.parent / "public/wasmer-logo.svg", brand / "wasmer-logo.svg")
+    (brand / "Contents.json").write_text(json.dumps({
+        "images": [{"filename": "wasmer-logo.svg", "idiom": "universal"}],
+        "info": {"author": "xcode", "version": 1},
+        "properties": {"preserves-vector-representation": True},
+    }))
     for example in json.loads(catalog.read_text()):
         image_set = assets / f"example-{example['id']}.imageset"
         image_set.mkdir()
@@ -95,9 +104,6 @@ def build(platform, edgejs_webc=None, integration_tests=False):
             shutil.rmtree(destination)
         shutil.copytree(ROOT.parents[2] / "wasmer-sh/workspace" / source_name, destination,
                         ignore=shutil.ignore_patterns("node_modules", ".next", "__pycache__", ".python-packages"))
-        readme = destination / "README.md"
-        instructions = readme.read_text().replace(f"/workspace/{source_name}", f"/workspace/{name}")
-        readme.write_text(instructions)
     run("xcrun", "actool", assets, "--compile", app, "--platform", sdk,
         "--minimum-deployment-target", "27.0", "--target-device", "iphone", "--target-device", "ipad")
     for license in icons.glob("*-LICENSE.txt"):
@@ -106,7 +112,7 @@ def build(platform, edgejs_webc=None, integration_tests=False):
     info = dict(CFBundleIdentifier=BUNDLE_ID, CFBundleExecutable="WasmerShell",
                 CFBundleName="WasmerShell", CFBundleDisplayName="WasmerShell",
                 CFBundlePackageType="APPL", CFBundleShortVersionString="0.1.0", CFBundleVersion="1",
-                MinimumOSVersion="27.0", UIDeviceFamily=[1, 2], UILaunchScreen={},
+                MinimumOSVersion="27.0", UIDeviceFamily=[1, 2], UILaunchScreen={}, UIUserInterfaceStyle="Dark",
                 UIApplicationSceneManifest={"UIApplicationSupportsMultipleScenes": False},
                 NSAppTransportSecurity={"NSAllowsLocalNetworking": True})
     with (app / "Info.plist").open("wb") as stream:
