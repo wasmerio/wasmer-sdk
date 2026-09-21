@@ -10,6 +10,8 @@ These examples run entirely inside your browser with Wasmer and WASIX.
 | Next.js             | `cd next && pnpm i && pnpm dev`               |
 | Vinext              | `cd vinext && pnpm i && pnpm dev`             |
 | FastAPI             | `cd python-fastapi && pip install -r requirements.txt && python server.py` |
+| Flask              | `cd python-flask && pip install -r requirements.txt && python server.py` |
+| yt-dlp              | `cd yt-dlp && pip install -r requirements.txt && python download.py --help` |
 | Django              | `cd python-django && pip install -r requirements.txt && python server.py` |
 | Python HTTP server  | `cd python && python server.py`               |
 | PHP site            | `cd php && php -S 0.0.0.0:8000 -t .`          |

@@ -26,11 +26,12 @@ installs it, and opens Xcode’s simulator UI (Device Hub in Xcode 27). `DEVELOP
 `/Applications/Xcode.app/Contents/Developer`; set it to use another Xcode.
 Select a particular iOS 27+ simulator with `--device <UDID>`.
 
+Choose an example to open its terminal, or **Open full shell** for all runtimes.
 Tap the terminal or keyboard button to type. The toolbar provides Escape, Tab,
 Ctrl-C, Ctrl-D, and arrow keys; hardware keyboards also work. Drag vertically to
 scroll through history. The restart button creates a fresh shell.
 
-Try:
+In the full shell, try:
 
 ```sh
 cowsay 'Hello from iOS'
@@ -58,8 +59,9 @@ Removing the app removes its data.
 ## Run a server and open its browser
 
 The app bundles the same dependency-free Node and Python HTTP examples as
-[wasmer.sh](../../../wasmer-sh/workspace). They are copied into `/workspace/node/`
-and `/workspace/python/` on first launch. Existing files are preserved.
+[wasmer.sh](../../../wasmer-sh/workspace). Selecting an example copies its source
+into `/workspace/node/` or `/workspace/python/` and opens that directory.
+The full shell includes both. Existing files are preserved.
 
 ```sh
 cd /workspace/node && node server.js
@@ -70,8 +72,8 @@ python /workspace/python/server.py
 The server listens on guest port 8000 and **automatically opens a visible
 WKWebView**. The page and its absolute `/health` fetch are served by the running
 WASIX process. Tap **Terminal** to return to the shell while keeping the server
-running; Ctrl-C stops it and closes its preview. The globe menu runs either
-example at the Bash prompt or reopens a running server's preview.
+running; Ctrl-C stops it and closes its preview. The globe menu reopens a running
+server's preview, and the grid button returns to the example picker.
 The browser has back/forward buttons, reload/stop, and an editable address bar.
 Enter a server path such as `/health` or `localhost:8000/docs` and tap **Go**.
 Navigation stays within the preview's server, matching the web demo.
@@ -87,8 +89,8 @@ python3 swift/Examples/WasmerShell/build.py run --example node
 
 ### Next.js
 
-After installing dependencies, the **Next.js app** entry in the globe menu starts the
-shared wasmer.sh Next.js example from `/workspace/node-next`. Its page and
+Choose **Next.js** in the picker to open the shared wasmer.sh example in
+`/workspace/node-next`. After `pnpm i` and `pnpm dev`, its page and
 `/api/hello` route open automatically at `localhost:3000` in the browser preview.
 You can also run it from the terminal:
 
@@ -106,8 +108,8 @@ changes before publishing them.
 
 This uses the Pages Router and Webpack with the matching SWC WebAssembly
 fallback. The app bundles only source files and the lockfile. Run `pnpm i`
-inside the terminal to download and install dependencies. The globe shortcut runs
-`pnpm dev`; it does not install packages. No Node dependencies or SWC binaries are bundled.
+inside the terminal to download and install dependencies. No Node dependencies
+or SWC binaries are bundled.
 On the first `pnpm dev`, Next.js downloads its matching `@next/swc-wasm-nodejs`
 compiler automatically. That first start needs network access. The package
 manifest and scripts are shared with the browser example.
@@ -144,10 +146,10 @@ TLS stays in the guest: Node performs its normal HTTPS and certificate
 verification over the native TCP connection. Package compatibility still
 depends on the WASIX/Edge.js runtime; native Node addons are not iOS binaries.
 
-Python uses the same WASIX wheel index and pip settings as wasmer.sh. Plain
-`pip install flask` installs into the persistent `/workspace/wasix-packages`
-directory, which is included in `PYTHONPATH`. The bundled framework examples
-also include their requirements:
+Python uses the same WASIX wheel index and pip settings as wasmer.sh. A selected
+example installs dependencies into its own `.python-packages` directory, which
+is included in `PYTHONPATH`. The full shell uses `/workspace/wasix-packages` and
+includes every framework's requirements:
 
 ```sh
 pip install -r /workspace/python-django/requirements.txt
@@ -287,3 +289,31 @@ license into the app as `Ghostty-LICENSE.txt`. Source and build caches under
 `.build/`, app binaries, and test artifacts are ignored by Git. The SDK’s
 JavaScript and WebAssembly resources are generated locally for this example and
 packaged by CI in the Swift release's runtime XCFramework.
+
+## Example picker
+
+WasmerShell opens with a grid of Node.js, Express, Next.js, Python HTTP, Flask,
+Django, FastAPI, and yt-dlp templates. The catalog and sources are shared with
+`wasmer-sh/examples.json` and `wasmer-sh/workspace`.
+
+Selecting an example starts a shell with only that example's runtime packages,
+copies missing source files, and opens its directory. The terminal shows the
+install and run commands. Dependencies remain user-installed; each Python
+example installs into its own `.python-packages` directory. yt-dlp loads Python,
+QuickJS-NG, and FFmpeg. Run `python download.py --help` for usage, then pass a video
+URL as an argument to download it.
+
+Use the grid button to return to the picker and **Resume terminal** to keep the
+current session. **Open full shell** loads all catalog runtimes plus cowsay in one shell.
+Changing templates starts a new shell; Native and OPFS retain workspace files,
+while Memory starts fresh. Existing files are never overwritten by templates.
+
+Run the template isolation, Flask install/server, and yt-dlp tool/CLI checks:
+
+```sh
+python3 swift/Examples/WasmerShell/build.py test --example picker --storage memory
+```
+
+Set `SIMCTL_CHILD_WASMER_YTDLP_TEST_URL=<video-url>` when running that test to
+also check a video download and FFmpeg merge. Remote site availability affects
+this optional check.

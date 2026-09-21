@@ -7,6 +7,7 @@ final class ShellRuntime {
   private let client: Wasmer
   private let directory: URL
   private let storage: ShellStorage
+  private let example: ShellExample?
   private var sandbox: Sandbox?
   private var process: WasmerSDK.Process?
   private var outputTask: Task<Void, Never>?
@@ -18,7 +19,8 @@ final class ShellRuntime {
   var onListeningPortsChanged: (([UInt16]) -> Void)?
   private(set) var isWebViewAttached = false
 
-  init(directory: URL, storage: ShellStorage) throws {
+  init(directory: URL, storage: ShellStorage, example: ShellExample? = nil) throws {
+    self.example = example
     self.storage = storage
     self.directory = directory
     client = try Wasmer()
@@ -28,19 +30,21 @@ final class ShellRuntime {
 
   func start() async throws {
     // Startup is lazy. Package loading performs the runtime's JSPI check.
-    onProgress?("Loading Python…")
-    let python = try await client.packages.load("python/python@=3.13.20")
-    onProgress?("Loading cowsay…")
-    let cowsay = try await client.packages.load("syrusakbary/cowsay@=0.3.0")
-    onProgress?("Loading Node.js…")
-    let node: Package
-    if let package = Bundle.main.url(forResource: "edgejs", withExtension: "webc") {
-      node = try await client.packages.load(.file(package))
-    } else {
-      node = try await client.packages.load("wasmer/edge@=0.2.1")
+    var names = ["wasmer/bash"]
+    let required = example?.packages ?? (ShellExample.all.flatMap(\.packages) + ["syrusakbary/cowsay@=0.3.0"])
+    for name in required where !names.contains(name) { names.append(name) }
+    var packages: [Package] = []
+    for name in names {
+      onProgress?("Loading \(name)…")
+      if name == "wasmer/edge@=0.2.1", let url = Bundle.main.url(forResource: "edgejs", withExtension: "webc") {
+        packages.append(try await client.packages.load(.file(url)))
+      } else {
+        packages.append(try await client.packages.load(name))
+      }
     }
+    let pythonPath = example.map { "/workspace/\($0.id)/.python-packages" } ?? "/workspace/wasix-packages"
     sandbox = try await client.sandboxes.create(
-      packages: [.package(python), .package(cowsay), .package(node)],
+      packages: packages.map { .package($0) },
       env: [
         "HOME": "/workspace",
         "npm_config_store_dir": "/workspace/.pnpm-store",
@@ -50,15 +54,15 @@ final class ShellRuntime {
         "PIP_EXTRA_INDEX_URL": "https://python-registry.wasmer.app/simple/",
         "PIP_PLATFORM": "wasix_wasm32",
         "PIP_ONLY_BINARY": ":all:",
-        "PIP_TARGET": "/workspace/wasix-packages",
-        "PYTHONPATH": "/workspace/wasix-packages",
+        "PIP_TARGET": pythonPath,
+        "PYTHONPATH": pythonPath,
       ],
       network: .host,
       mounts: [
         .init("/native", directory: directory),
         .init("/readonly", directory: directory, readOnly: true),
       ], storage: storage.backend(directory: directory))
-    shell = try python.command("bash")
+    shell = try packages[0].command("bash")
     isWebViewAttached = await client.diagnostics().webViewAttached
   }
   var fs: SandboxFileSystem {
@@ -91,7 +95,7 @@ final class ShellRuntime {
     guard let sandbox, let shell else { throw DemoError.failed("Shell is not initialized") }
     let process = try await sandbox.command(
       shell,
-      ["--noprofile", "--norc", "-c", "exec bash --noprofile --norc -i 2>&1"], cwd: "/workspace",
+      ["--noprofile", "--norc", "-c", "exec bash --noprofile --norc -i 2>&1"], cwd: example.map { "/workspace/\($0.id)" } ?? "/workspace",
       env: ["TERM": "xterm-256color", "PS1": "\\[\\e[38;5;42m\\]wasmer\\[\\e[0m\\]:\\w $ "]
     )
     .spawn(stdin: .pipe, terminal: TerminalOptions(columns: UInt32(columns), rows: UInt32(rows)))

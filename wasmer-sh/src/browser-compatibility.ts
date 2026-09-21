@@ -7,7 +7,7 @@ export interface BrowserCompatibilityWarning {
 const FIREFOX_USER_AGENT = /\b(?:Firefox|FxiOS)\/\d/i;
 const SAFARI_USER_AGENT = /\bSafari\/\d/i;
 const CHROMIUM_USER_AGENT =
-  /\b(?:Chrome|Chromium|CriOS|Edg|EdgA|EdgiOS|OPR)\/\d/i;
+  /\b(?:Chrome|HeadlessChrome|Chromium|CriOS|Edg|EdgA|EdgiOS|OPR)\/\d/i;
 
 export function detectBrowserCompatibilityWarning(
   userAgent: string,
