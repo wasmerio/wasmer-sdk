@@ -71,18 +71,37 @@ def build(platform, edgejs_webc=None, integration_tests=False):
         local_edgejs.unlink(missing_ok=True)
     examples = app / "Examples"
     examples.mkdir(exist_ok=True)
-    # Bundle the same examples and requirements as wasmer.sh, without drift.
-    for source_name, name in (("node", "node"), ("next", "node-next"),
-                              ("python", "python"), ("python-django", "python-django"),
-                              ("python-fastapi", "python-fastapi")):
+    # One catalog defines the templates and runtime packages for both shells.
+    catalog = ROOT.parents[2] / "wasmer-sh/examples.json"
+    shutil.copyfile(catalog, app / "examples.json")
+    icons = catalog.parent / "public/example-icons"
+    assets = ROOT / ".build/ExampleIcons.xcassets"
+    if assets.exists():
+        shutil.rmtree(assets)
+    assets.mkdir()
+    (assets / "Contents.json").write_text(json.dumps({"info": {"author": "xcode", "version": 1}}))
+    for example in json.loads(catalog.read_text()):
+        image_set = assets / f"example-{example['id']}.imageset"
+        image_set.mkdir()
+        shutil.copyfile(icons / example["icon"], image_set / example["icon"])
+        (image_set / "Contents.json").write_text(json.dumps({
+            "images": [{"filename": example["icon"], "idiom": "universal"}],
+            "info": {"author": "xcode", "version": 1},
+            "properties": {"preserves-vector-representation": True},
+        }))
+        source_name, name = example["source"], example["id"]
         destination = examples / name
         if destination.exists():
             shutil.rmtree(destination)
         shutil.copytree(ROOT.parents[2] / "wasmer-sh/workspace" / source_name, destination,
-                        ignore=shutil.ignore_patterns("node_modules", ".next"))
+                        ignore=shutil.ignore_patterns("node_modules", ".next", "__pycache__", ".python-packages"))
         readme = destination / "README.md"
         instructions = readme.read_text().replace(f"/workspace/{source_name}", f"/workspace/{name}")
         readme.write_text(instructions)
+    run("xcrun", "actool", assets, "--compile", app, "--platform", sdk,
+        "--minimum-deployment-target", "27.0", "--target-device", "iphone", "--target-device", "ipad")
+    for license in icons.glob("*-LICENSE.txt"):
+        shutil.copyfile(license, app / license.name)
     shutil.copyfile(ROOT / ".build/ghostty/LICENSE", app / "Ghostty-LICENSE.txt")
     info = dict(CFBundleIdentifier=BUNDLE_ID, CFBundleExecutable="WasmerShell",
                 CFBundleName="WasmerShell", CFBundleDisplayName="WasmerShell",
@@ -130,7 +149,7 @@ def launch(app, selected, smoke, example=None, stress=False, quick=False, storag
         else:
             print("App launched. Open the selected simulator in Xcode.", flush=True)
         return
-    deadline = time.monotonic() + (1200 if stress else 600 + 180 * next_runs if example == "node-next" else 420)
+    deadline = time.monotonic() + (1200 if stress or example == "picker" else 600 + 180 * next_runs if example == "node-next" else 420)
     previous = ""
     while not result.exists() and time.monotonic() < deadline:
         if progress.exists():
@@ -154,7 +173,7 @@ def main():
     parser.add_argument("action", choices=["build", "run", "test", "stress"])
     parser.add_argument("--platform", choices=["simulator", "device"], default="simulator")
     parser.add_argument("--device", help="iOS 27+ simulator UDID")
-    parser.add_argument("--example", choices=["node", "node-next", "python", "storage"], help="Start a server (run), or select the node-next/storage integration test (test)")
+    parser.add_argument("--example", choices=["node", "node-next", "python", "storage", "picker"], help="Start a server (run), or select the node-next/storage/picker integration test (test)")
     parser.add_argument("--edgejs-webc", type=Path, help="Use a locally generated EdgeJS package instead of the registry release")
     parser.add_argument("--storage", choices=["native", "memory", "opfs"], help="Choose workspace storage; run preserves the app selection, tests default to native")
     parser.add_argument("--reuse-next-project", action="store_true", help="Test the existing node-next directory and pnpm cache, preserving files (test --example node-next only)")

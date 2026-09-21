@@ -3,7 +3,20 @@
 A fast, browser-native command shell powered by Wasmer, WASIX, and the new
 [`@wasmer/sdk`](https://www.npmjs.com/package/@wasmer/sdk) sandbox API.
 
-The application loads `wasmer/bash`, creates one persistent sandbox, and
+The opening screen offers Node.js, Express, Next.js, Python HTTP, Flask, Django,
+FastAPI, and yt-dlp templates. Selecting a template opens Bash in that example's
+directory, with its source files and only its required runtime packages. The
+terminal shows the install and run commands; nothing is installed automatically.
+Python dependencies are isolated in each template's `.python-packages` directory.
+The picker itself does not initialize the Wasmer runtime or fetch guest packages.
+
+Use **Examples** to browse templates and **Resume terminal** to return without
+interrupting the current session. Selecting another template opens a fresh
+workspace. A template can also be linked directly, for example `?example=node-next`.
+The catalog in `examples.json` is shared with the native Swift WasmerShell app.
+
+**Open full shell** (`?example=shell`) keeps all runtimes and workspace examples
+available together. It loads `wasmer/bash`, creates one persistent sandbox, and
 connects xterm to one long-lived interactive Bash process. Bash owns the
 prompt, quoting, expansion, working directory, redirection, pipes, built-ins,
 and child processes; the browser only transports terminal input and output.
@@ -18,7 +31,9 @@ const sandbox = await wasmer.sandboxes.create({
     bashPackage,
     "wasmer/neatvi",
     "python/python@=3.13.20",
-    "wasmer/edgejs@0.2.0",
+    "wasmer/edge@=0.2.1",
+    "wasmer/quickjs@=0.15.1",
+    "wasmer/ffmpeg@=1.0.5",
     "php/php-32",
   ],
   files: { ".bashrc": "PS1='wasmer@web:\\w$ '" },
@@ -52,7 +67,7 @@ live preview beside the terminal. The preview stays attached to the guest, so
 absolute URLs and subresources are routed back to the same WASIX server.
 The `node/`, `node-express/`, `next/`, `python/`, and `php/` directories are independent
 examples with their own README files. `node/server.js` is backed by
-`wasmer/edgejs@0.2.0`; `python/server.py` uses Python's standard-library
+`wasmer/edge@=0.2.1`; `python/server.py` uses Python's standard-library
 `HTTPServer`. Closing a listener closes its preview automatically.
 
 For an Express application, install the dependency inside the browser sandbox
@@ -89,7 +104,8 @@ tabs show an unsaved marker, and `Cmd+S` or `Ctrl+S` writes the active file
 back to the sandbox. Monaco and its language grammars are not downloaded until
 the panel is opened.
 
-Python installs use these sandbox environment variables:
+The full shell uses these Python environment variables (selected examples instead
+set `PIP_TARGET` and `PYTHONPATH` to their own `.python-packages` directory):
 
 ```sh
 PIP_EXTRA_INDEX_URL=https://python-registry.wasmer.app/simple/
@@ -200,6 +216,13 @@ outputs on ports 4173 and 4174.
 
 ## Browser smoke test
 
+`npm run test:examples` checks the picker on desktop and mobile, keyboard selection,
+minimal runtime composition, each template's installation and server preview,
+Ctrl-C recovery, and yt-dlp's QuickJS/FFmpeg tools and CLI help.
+Set `WASMER_EXAMPLE=yt-dlp` and `WASMER_YTDLP_TEST_URL=<video-url>` to also
+download a video and check the resulting MP4. This optional check depends on
+the remote site's availability.
+
 For repeated Python installs and terminal input stress, run `npm run test:stress`.
 This starts its own Vite server, WISP proxy and headless Chromium. It reinstalls
 the Django and FastAPI requirements three times with the cache disabled, imports
@@ -259,7 +282,7 @@ node tests/next-browser.mjs
 
 ## URL parameters
 
-By default, wasmer.sh opens its command prompt. It can also launch another
+By default, wasmer.sh opens the example picker. It can also launch another
 package entrypoint directly without rebuilding the site:
 
 | Parameter | Meaning |

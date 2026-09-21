@@ -1,0 +1,155 @@
+/* Project templates share the shell's palette and remain ordinary keyboard links. */
+.example-picker {
+  grid-row: 3;
+  min-block-size: 0;
+  overflow: auto;
+  padding: clamp(24px, 5vw, 64px) clamp(18px, 5vw, 72px);
+  scrollbar-gutter: stable;
+}
+.example-picker[hidden],
+.shell-stage[hidden] {
+  display: none;
+}
+.example-container {
+  max-inline-size: 1180px;
+  margin-inline: auto;
+}
+.example-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-block-end: 36px;
+}
+.example-heading > div {
+  flex: 1;
+  min-inline-size: min(100%, 260px);
+}
+.example-heading h1 {
+  margin: 10px 0;
+  font-size: clamp(26px, 3vw, 34px);
+  letter-spacing: -0.035em;
+  font-weight: 600;
+}
+.example-heading p:not(.eyebrow) {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 14px;
+}
+#example-groups > section {
+  margin-block-end: 30px;
+}
+#example-groups h2 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.example-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 252px), 1fr));
+  gap: 12px;
+}
+.example-card {
+  display: flex;
+  gap: 16px;
+  align-items: start;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--panel);
+}
+.example-card:hover {
+  background: var(--panel-raised);
+  border-color: var(--line-strong);
+}
+.example-card:focus-visible,
+.example-footer a:focus-visible {
+  outline: 2px solid var(--violet);
+  outline-offset: 3px;
+}
+.example-icon {
+  display: block;
+  flex: 0 0 42px;
+  inline-size: 42px;
+  block-size: 42px;
+  object-fit: contain;
+}
+.example-copy {
+  display: grid;
+  gap: 8px;
+  min-inline-size: 0;
+}
+.example-copy strong {
+  font-size: 16px;
+  font-weight: 550;
+}
+.example-copy > span {
+  color: #b2adbf;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.example-copy small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.example-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  border-block-start: 1px solid var(--line);
+  margin-block-start: 36px;
+  padding-block-start: 24px;
+}
+.example-footer > div {
+  flex: 1;
+  min-inline-size: min(100%, 260px);
+}
+.example-footer strong {
+  font-size: 14px;
+  font-weight: 550;
+}
+.example-footer p,
+.example-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.example-footer p {
+  margin: 7px 0 0;
+}
+.example-footer a {
+  text-decoration: none;
+  white-space: nowrap;
+}
+.example-note {
+  margin-block-start: 26px;
+}
+.show-examples .session-summary,
+.show-examples #editor-button,
+.show-examples #network-button,
+.show-examples #clear-button,
+.show-examples #restart-button,
+.show-examples #examples-button {
+  display: none;
+}
+.show-examples .app-actions {
+  grid-column: 3;
+}
+#resume-button[hidden] {
+  display: none;
+}
+#examples-title {
+  outline: none;
+}
+.example-footer a {
+  display: inline-flex;
+  gap: 8px;
+}

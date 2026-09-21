@@ -26,42 +26,43 @@ struct WasmerShellApp: App {
           } label: { Image(systemName: "externaldrive") }
             .accessibilityLabel("Storage: " + session.storage.label).disabled(session.starting)
 
-          Menu {
-            Section("Run at the Bash prompt") {
-              Button("Node.js server") { session.runExample("node") }
-              Button("Next.js app (after pnpm i)") { session.runExample("node-next") }
-              Button("Python server") { session.runExample("python") }
-            }
-            if !session.previews.isEmpty {
-              Section("Open server") {
-                ForEach(session.previews) { preview in
-                  Button("localhost:\(String(preview.port))") { session.present(preview) }
-                }
+          Button {
+            session.view.resignFirstResponder()
+            session.showingExamples = true
+          } label: { Image(systemName: "square.grid.2x2") }
+            .accessibilityLabel("Examples").disabled(session.starting)
+          if !session.previews.isEmpty {
+            Menu {
+              ForEach(session.previews) { preview in
+                Button("localhost:\(String(preview.port))") { session.present(preview) }
               }
-            }
-          } label: { Image(systemName: "globe") }
-            .accessibilityLabel("Examples and servers").disabled(!session.ready)
+            } label: { Image(systemName: "globe") }.accessibilityLabel("Open server")
+          }
           Button { _ = session.view.isFirstResponder ? session.view.resignFirstResponder() : session.view.becomeFirstResponder() } label: {
             Image(systemName: "keyboard")
-          }.accessibilityLabel("Toggle keyboard")
+          }.accessibilityLabel("Toggle keyboard").disabled(session.showingExamples || !session.ready)
           Button { Task { await session.restart() } } label: { Image(systemName: "arrow.clockwise") }
-            .accessibilityLabel("Restart terminal").disabled(session.starting)
+            .accessibilityLabel("Restart terminal").disabled(session.starting || session.showingExamples)
         }.padding(16)
         Divider()
-        NativeTerminal(view: session.view).frame(maxWidth: .infinity, maxHeight: .infinity)
-        Divider()
-        ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: 8) {
-            key("Esc", 7); key("Tab", 6)
-            Button("Ctrl-C") { session.view.sendControl(3) }
-            Button("Ctrl-D") { session.view.sendControl(4) }
-            key("↑", 0); key("↓", 1); key("←", 2); key("→", 3)
-          }.font(.system(.callout, design: .monospaced)).buttonStyle(.bordered).tint(.mint).padding(10)
-        }.disabled(!session.ready)
+        if session.showingExamples {
+          ExamplePicker(session: session)
+        } else {
+          NativeTerminal(view: session.view).frame(maxWidth: .infinity, maxHeight: .infinity)
+          Divider()
+          ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+              key("Esc", 7); key("Tab", 6)
+              Button("Ctrl-C") { session.view.sendControl(3) }
+              Button("Ctrl-D") { session.view.sendControl(4) }
+              key("↑", 0); key("↓", 1); key("←", 2); key("→", 3)
+            }.font(.system(.callout, design: .monospaced)).buttonStyle(.bordered).tint(.mint).padding(10)
+          }.disabled(!session.ready)
+        }
       }
       .background(Color(red: 0.051, green: 0.078, blue: 0.071))
       .preferredColorScheme(.dark)
-      .task { await session.start() }
+      .task { await session.startIfRequested() }
       .sheet(item: $session.presentedPreview) { preview in ServerPreviewSheet(preview: preview).id(preview.id) }
     }
   }
@@ -74,7 +75,9 @@ struct WasmerShellApp: App {
 final class TerminalSession: ObservableObject {
   let view = TerminalView(frame: .zero)
   @Published var storage = ShellStorage.initial
-  @Published var status = "Starting…" {
+  @Published var showingExamples = true
+  @Published var selectedExample: ShellExample?
+  @Published var status = "Choose an example" {
     didSet {
       #if WASMER_SHELL_TESTS
       reportTestProgress()
@@ -98,13 +101,36 @@ final class TerminalSession: ObservableObject {
   #endif
   let directory = URL.documentsDirectory.appendingPathComponent("WasmerTerminal")
 
+  func startIfRequested() async {
+    let arguments = ProcessInfo.processInfo.arguments
+    // CLI and integration entry points keep opening directly into the terminal.
+    guard arguments.contains("--smoke-test") || arguments.contains("--stress-test") ||
+          arguments.contains(where: { $0.hasPrefix("--example-") }) else { return }
+    showingExamples = false
+    if !arguments.contains("--smoke-test"), !arguments.contains("--stress-test") {
+      selectedExample = ShellExample.all.first { arguments.contains("--example-" + $0.id) }
+    }
+    await start()
+  }
+
+  func chooseExample(_ example: ShellExample?) async {
+    guard !starting else { return }
+    if ready, selectedExample?.id == example?.id {
+      showingExamples = false
+      return
+    }
+    selectedExample = example
+    showingExamples = false
+    await restart()
+  }
+
   func start() async {
     guard runtime == nil, !starting else { return }
     starting = true
     defer { starting = false }
     do {
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let host = try ShellRuntime(directory: directory, storage: storage)
+      let host = try ShellRuntime(directory: directory, storage: storage, example: selectedExample)
       runtime = host
       transcript.removeAll(); exit = nil
       host.onProgress = { [weak self] message in
@@ -146,14 +172,26 @@ final class TerminalSession: ObservableObject {
         }
       }
       try await host.start()
-      try await host.seedExamples()
-      if !(try await host.fs.readDir()).contains(where: { $0.name == "demo.py" }) {
+      if let example = selectedExample {
+        try await host.seedExamples(example.id, at: "/workspace/" + example.id)
+      } else {
+        try await host.seedExamples()
+      }
+      if selectedExample == nil, !(try await host.fs.readDir()).contains(where: { $0.name == "demo.py" }) {
         try await host.fs.writeText("demo.py", "name = input('What is your name? '); print(f'Hello, {name}!')\n")
       }
       guard !host.isWebViewAttached else { throw DemoError.failed("Runtime WebView was attached") }
-      view.feed(Data("\u{1b}[2J\u{1b}[H\u{1b}[1;32mLocal programs. Native terminal.\u{1b}[0m\r\nTry python, node, or cowsay hello.\r\nRun node node/server.js to open a browser.\r\nStorage: \(storage.label). Examples are in /workspace.\r\nNext.js: cd node-next. Install with pnpm i, start with pnpm dev.\r\n\r\n".utf8))
+      var welcome = "\u{1b}[2J\u{1b}[H\u{1b}[1;32mLocal programs. Native terminal.\u{1b}[0m\r\n"
+      if let example = selectedExample {
+        welcome += "\(example.title) · \(example.description)\r\n"
+        if let install = example.install { welcome += "Install:  \(install)\r\n" }
+        welcome += "Run:      \(example.run)\r\n"
+      } else {
+        welcome += "Try python, node, or cowsay hello.\r\nExamples are in /workspace.\r\n"
+      }
+      view.feed(Data((welcome + "\r\n").utf8))
       try await host.startTerminal(columns: view.columns, rows: view.rows)
-      ready = true; status = "\(storage.label) · Bash · Node.js · Python"
+      ready = true; status = "\(storage.label) · \(selectedExample?.title ?? "Bash · Node.js · Python")"
       #if WASMER_SHELL_TESTS
       if startIntegrationTests(host) { return }
       #endif
@@ -177,7 +215,7 @@ final class TerminalSession: ObservableObject {
     guard value != storage, !starting else { return }
     storage = value
     UserDefaults.standard.set(value.rawValue, forKey: "shellStorage")
-    await restart()
+    if runtime != nil { await restart() }
   }
 
   func send(_ bytes: Data) {
@@ -207,14 +245,9 @@ final class TerminalSession: ObservableObject {
   }
 
   func runExample(_ name: String) {
+    guard let example = ShellExample.all.first(where: { $0.id == name }) else { return }
     view.resignFirstResponder()
-    let command: String
-    switch name {
-    case "node": command = "node /workspace/node/server.js"
-    case "node-next": command = "cd /workspace/node-next && pnpm dev"
-    default: command = "python /workspace/python/server.py"
-    }
-    send(Data((command + "\r").utf8))
+    send(Data(("cd /workspace/" + example.id + " && " + example.run + "\r").utf8))
   }
 
   func present(_ preview: ServerPreview) {

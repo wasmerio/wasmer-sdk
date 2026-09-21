@@ -135,6 +135,7 @@ try {
   await page.goto(`http://127.0.0.1:${address.port}/`, {
     waitUntil: "load",
   });
+  await page.locator("#full-shell-link").click();
   await page.waitForFunction(
     () => document.documentElement.dataset.state === "running",
     undefined,
