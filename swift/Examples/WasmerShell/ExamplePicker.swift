@@ -49,8 +49,7 @@ struct ExamplePicker: View {
                 Button { Task { await session.chooseExample(example) } } label: {
                   VStack(alignment: .leading, spacing: 10) {
                     Image("example-" + example.id).resizable().renderingMode(.original).scaledToFit()
-                      .frame(width: 32, height: 32).padding(5)
-                      .background(.white, in: RoundedRectangle(cornerRadius: 9))
+                      .frame(width: 42, height: 42)
                       .accessibilityHidden(true)
                     Text(example.title).font(.headline).foregroundStyle(.primary)
                     Text(example.description).font(.caption).foregroundStyle(.secondary)

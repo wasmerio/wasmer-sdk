@@ -74,15 +74,11 @@
   outline-offset: 3px;
 }
 .example-icon {
-  box-sizing: border-box;
   display: block;
   flex: 0 0 42px;
   inline-size: 42px;
   block-size: 42px;
   object-fit: contain;
-  padding: 5px;
-  border-radius: 9px;
-  background: white;
 }
 .example-copy {
   display: grid;
