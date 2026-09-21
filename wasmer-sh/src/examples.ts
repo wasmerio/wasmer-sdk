@@ -8,7 +8,6 @@ export interface ShellExample {
   group: string;
   description: string;
   icon: string;
-  color: string;
   dependencies: string;
   packages: string[];
   install: string | null;
@@ -51,11 +50,12 @@ export function renderExamples(container: HTMLElement): void {
       card.className = "example-card";
       card.dataset.example = example.id;
       card.href = exampleUrl(example.id);
-      const icon = document.createElement("span");
+      const icon = document.createElement("img");
       icon.className = "example-icon";
-      icon.style.setProperty("--example-color", `#${example.color}`);
-      icon.textContent = example.icon;
-      icon.setAttribute("aria-hidden", "true");
+      icon.src = `${import.meta.env.BASE_URL}example-icons/${example.icon}`;
+      icon.alt = "";
+      icon.width = 42;
+      icon.height = 42;
       const content = document.createElement("span");
       content.className = "example-copy";
       const title = document.createElement("strong");

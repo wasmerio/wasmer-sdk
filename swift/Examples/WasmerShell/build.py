@@ -74,7 +74,21 @@ def build(platform, edgejs_webc=None, integration_tests=False):
     # One catalog defines the templates and runtime packages for both shells.
     catalog = ROOT.parents[2] / "wasmer-sh/examples.json"
     shutil.copyfile(catalog, app / "examples.json")
+    icons = catalog.parent / "public/example-icons"
+    assets = ROOT / ".build/ExampleIcons.xcassets"
+    if assets.exists():
+        shutil.rmtree(assets)
+    assets.mkdir()
+    (assets / "Contents.json").write_text(json.dumps({"info": {"author": "xcode", "version": 1}}))
     for example in json.loads(catalog.read_text()):
+        image_set = assets / f"example-{example['id']}.imageset"
+        image_set.mkdir()
+        shutil.copyfile(icons / example["icon"], image_set / example["icon"])
+        (image_set / "Contents.json").write_text(json.dumps({
+            "images": [{"filename": example["icon"], "idiom": "universal"}],
+            "info": {"author": "xcode", "version": 1},
+            "properties": {"preserves-vector-representation": True},
+        }))
         source_name, name = example["source"], example["id"]
         destination = examples / name
         if destination.exists():
@@ -84,6 +98,10 @@ def build(platform, edgejs_webc=None, integration_tests=False):
         readme = destination / "README.md"
         instructions = readme.read_text().replace(f"/workspace/{source_name}", f"/workspace/{name}")
         readme.write_text(instructions)
+    run("xcrun", "actool", assets, "--compile", app, "--platform", sdk,
+        "--minimum-deployment-target", "27.0", "--target-device", "iphone", "--target-device", "ipad")
+    for license in icons.glob("*-LICENSE.txt"):
+        shutil.copyfile(license, app / license.name)
     shutil.copyfile(ROOT / ".build/ghostty/LICENSE", app / "Ghostty-LICENSE.txt")
     info = dict(CFBundleIdentifier=BUNDLE_ID, CFBundleExecutable="WasmerShell",
                 CFBundleName="WasmerShell", CFBundleDisplayName="WasmerShell",

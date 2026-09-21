@@ -9,7 +9,6 @@ struct ShellExample: Decodable, Identifiable, Sendable {
   let group: String
   let description: String
   let icon: String
-  let color: String
   let dependencies: String
   let packages: [String]
   let install: String?
@@ -23,13 +22,6 @@ struct ShellExample: Decodable, Identifiable, Sendable {
       return try JSONDecoder().decode([ShellExample].self, from: Data(contentsOf: url))
     } catch { preconditionFailure("Invalid bundled example catalog: \(error)") }
   }()
-
-  var tint: Color {
-    let rgb = UInt32(color, radix: 16) ?? 0xFFFFFF
-    return Color(red: Double((rgb >> 16) & 255) / 255,
-                 green: Double((rgb >> 8) & 255) / 255,
-                 blue: Double(rgb & 255) / 255)
-  }
 }
 
 struct ExamplePicker: View {
@@ -56,9 +48,9 @@ struct ExamplePicker: View {
               ForEach(ShellExample.all.filter { $0.group == group }) { example in
                 Button { Task { await session.chooseExample(example) } } label: {
                   VStack(alignment: .leading, spacing: 10) {
-                    Text(example.icon).font(.system(size: 25, weight: .semibold, design: .monospaced))
-                      .foregroundStyle(example.tint).frame(width: 42, height: 42)
-                      .background(example.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                    Image("example-" + example.id).resizable().renderingMode(.original).scaledToFit()
+                      .frame(width: 32, height: 32).padding(5)
+                      .background(.white, in: RoundedRectangle(cornerRadius: 9))
                       .accessibilityHidden(true)
                     Text(example.title).font(.headline).foregroundStyle(.primary)
                     Text(example.description).font(.caption).foregroundStyle(.secondary)
