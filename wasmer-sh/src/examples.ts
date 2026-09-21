@@ -28,11 +28,11 @@ const sources = import.meta.glob<string>(
 );
 
 export function exampleFiles(example?: ShellExample): Record<string, string> {
-  const prefix = "../workspace/";
+  const prefix = example ? `../workspace/${example.source}/` : "../workspace/";
   return Object.fromEntries(
     Object.entries(sources)
-      .map(([path, contents]) => [path.slice(prefix.length), contents])
-      .filter(([path]) => !example || path.startsWith(`${example.source}/`)),
+      .filter(([path]) => path.startsWith(prefix))
+      .map(([path, contents]) => [path.slice(prefix.length), contents]),
   );
 }
 

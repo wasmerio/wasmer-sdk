@@ -41,7 +41,7 @@ extension TerminalSession {
     var report: [String: Any] = ["passed": false, "renderer": "libghostty-vt", "osVersion": ProcessInfo.processInfo.operatingSystemVersionString]
     do {
       try? FileManager.default.removeItem(at: directory.appendingPathComponent("terminal-test.txt"))
-      try await waitFor("wasmer:")
+      try await waitFor("➜ ~ $ ")
       // Keep the test prompt visible even inside a long temporary project path.
       // Readline can otherwise horizontally scroll its prefix out of the stream.
       try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
@@ -153,7 +153,7 @@ extension TerminalSession {
     var report: [String: Any] = ["passed": false, "storage": storage.rawValue]
     let name = ".storage-test-" + UUID().uuidString
     do {
-      try await waitFor("wasmer:")
+      try await waitFor("➜ ~ $ ")
       try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
       try await host.fs.writeText("/workspace/" + name + "/from-swift.txt", "shared storage")
       try await host.fs.writeText(name + "/test.cjs", """
@@ -175,7 +175,7 @@ extension TerminalSession {
       guard try await host.fs.readText(name + "/after/value") == "from guest" else { throw DemoError.failed("Guest write missing from Swift") }
       try await host.fs.remove(name + "/binary")
       await restart()
-      try await waitFor("wasmer:")
+      try await waitFor("➜ ~ $ ")
       guard let reopened = runtime else { throw DemoError.failed("Restart failed") }
       let found = try await reopened.fs.readDir().contains { $0.name == name }
       guard found == (storage != .memory) else { throw DemoError.failed("Unexpected storage persistence") }
@@ -205,7 +205,7 @@ extension TerminalSession {
       let entries = try await host.fs.readDir(workspace)
       guard existing || !entries.contains(where: { $0.name == "node_modules" })
       else { throw DemoError.failed("Cold-start test must not bundle dependencies") }
-      try await waitFor("wasmer:")
+      try await waitFor("➜ ~ $ ")
       try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
       // A fresh project can still reuse the global pnpm store. Keep both
       // caches in this unique directory so archive download/hash/extraction
@@ -289,17 +289,27 @@ extension TerminalSession {
   }
   private func runPickerSmokeTest() async {
     var checks: [String] = []
+    let examples = ["node", "node-express", "python-flask", "python-django", "ffmpeg", "yt-dlp"]
+    let markerFile = ".picker-isolation-" + UUID().uuidString
     do {
-      for id in ["node", "node-express", "python-flask", "yt-dlp"] {
+      for id in examples {
         guard let example = ShellExample.all.first(where: { $0.id == id }) else {
           throw DemoError.failed("Missing example \(id)")
         }
         await chooseExample(example)
         guard let host = runtime else { throw DemoError.failed(status) }
-        try await waitFor("wasmer:")
+        try await waitFor("➜ ~ $ ")
         try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
-        let isolation = example.group == "Node.js" ? "command -v node && ! command -v python && ! command -v ffmpeg" : "command -v python && ! command -v node"
-        try await shellCheck(host, command: "test \"$PWD\" = /workspace/\(id) && \(isolation); printf '\\nPICKER_ISOLATION:%s\\n' \"$?\"", marker: "\nPICKER_ISOLATION:0\n")
+        let isolation: String
+        if example.group == "Node.js" {
+          isolation = "command -v node && ! command -v python && ! command -v ffmpeg"
+        } else if id == "ffmpeg" {
+          isolation = "command -v ffmpeg && command -v ffprobe && ! command -v python && ! command -v node"
+        } else {
+          isolation = "command -v python && ! command -v node"
+        }
+        try await shellCheck(host, command: "test \"$PWD\" = /workspace && test -f README.md && test ! -d /workspace/\(id) && test ! -e \(markerFile) && test \"$PIP_TARGET\" = /workspace/.python-packages && test \"$PYTHONPATH\" = /workspace/.python-packages && \(isolation); printf '\\nPICKER_ISOLATION:%s\\n' \"$?\"", marker: "\nPICKER_ISOLATION:0\n")
+        try await host.fs.writeText(markerFile, id)
         checks.append(id + " runtime isolation and working directory")
         if let install = example.install {
           status = "Testing \(example.title) install…"
@@ -307,18 +317,34 @@ extension TerminalSession {
           guard installed.contains("\nPICKER_INSTALL:0\n") else { throw DemoError.failed("Dependency installation failed for \(id): \(installed.suffix(2000))") }
           checks.append(id + " install")
         }
+        if id == "python-django" {
+          try await shellCheck(host, command: "test -f manage.py && test -f mysite/urls.py && python manage.py check && python manage.py migrate --noinput && python manage.py migrate --check; printf '\\nPICKER_DJANGO:%s\\n' \"$?\"", marker: "\nPICKER_DJANGO:0\n", timeout: 180)
+          checks.append("Django starter project and SQLite migrations")
+        }
         if id == "yt-dlp" {
-          try await shellCheck(host, command: "qjs --version && ffmpeg -version && python -m yt_dlp --version && python -c 'import yt_dlp_ejs'; printf '\\nPICKER_TOOLS:%s\\n' \"$?\"", marker: "\nPICKER_TOOLS:0\n")
+          try await shellCheck(host, command: "qjs --version && ffmpeg -version && /workspace/.python-packages/bin/yt-dlp --version && python -c 'import yt_dlp_ejs'; printf '\\nPICKER_TOOLS:%s\\n' \"$?\"", marker: "\nPICKER_TOOLS:0\n")
           let usage = try await shellCheck(host, command: "\(example.run); printf '\\nPICKER_HELP:%s\\n' \"$?\"", marker: "\nPICKER_HELP:0\n")
-          guard usage.contains("Video URL") else { throw DemoError.failed("Missing yt-dlp usage instructions") }
+          guard usage.contains("Usage: yt-dlp [OPTIONS] URL") else { throw DemoError.failed("Missing yt-dlp usage instructions") }
           checks.append("yt-dlp tools and CLI help")
           if let url = ProcessInfo.processInfo.environment["WASMER_YTDLP_TEST_URL"] {
             let quotedURL = "'" + url.replacingOccurrences(of: "'", with: "'\\''") + "'"
-            let download = try await shellCheck(host, command: "python download.py \(quotedURL); printf '\\nPICKER_DOWNLOAD:%s\\n' \"$?\"", marker: "\nPICKER_DOWNLOAD:", timeout: 300)
+            let download = try await shellCheck(host, command: "/workspace/.python-packages/bin/yt-dlp \(quotedURL); printf '\\nPICKER_DOWNLOAD:%s\\n' \"$?\"", marker: "\nPICKER_DOWNLOAD:", timeout: 300)
             guard download.contains("\nPICKER_DOWNLOAD:0\n") else { throw DemoError.failed("Video download failed: \(download.suffix(2000))") }
             try await shellCheck(host, command: "python -c \"from pathlib import Path; files = list(Path('downloads').glob('*.mp4')); assert files and all(p.stat().st_size > 0 for p in files)\"; printf '\\nPICKER_VIDEO:%s\\n' \"$?\"", marker: "\nPICKER_VIDEO:0\n")
             checks.append("yt-dlp video download and FFmpeg merge")
           }
+        } else if id == "ffmpeg" {
+          let outputPath = "/workspace/" + markerFile + ".gif"
+          let conversion = example.run.replacingOccurrences(of: "/workspace/wordpress.gif", with: outputPath)
+          try await shellCheck(host, command: "\(conversion); printf '\\nPICKER_CONVERT:%s\\n' \"$?\"", marker: "\nPICKER_CONVERT:0\n", timeout: 180)
+          let metadata = try await shellCheck(host, command: "test -s \(outputPath) && ffprobe -v error -count_frames -show_entries stream=codec_name,width,height,nb_read_frames:format=format_name,duration -of json \(outputPath); printf '\\nPICKER_MEDIA:%s\\n' \"$?\"", marker: "\nPICKER_MEDIA:0\n")
+          guard metadata.contains("\"format_name\": \"gif\""), metadata.contains("\"codec_name\": \"gif\""), metadata.contains("\"width\": 320"), metadata.contains("\"height\": 180") else {
+            throw DemoError.failed("FFmpeg did not create a GIF at the expected dimensions")
+          }
+          try await shellCheck(host, command: "test \"$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 \(outputPath))\" -gt 1; printf '\\nPICKER_ANIMATION:%s\\n' \"$?\"", marker: "\nPICKER_ANIMATION:0\n")
+          try await host.fs.remove(outputPath)
+          guard previews.isEmpty else { throw DemoError.failed("FFmpeg unexpectedly opened a server preview") }
+          checks.append("FFmpeg URL conversion to a 320×180 animated GIF")
         } else {
           try await host.writeTerminal(Data((example.run + "\r").utf8))
           let deadline = ContinuousClock.now + .seconds(60)
@@ -327,19 +353,47 @@ extension TerminalSession {
             try await Task.sleep(for: .milliseconds(100))
           }
           let preview = previews[0]
+          let path = id == "python-django" ? "/" : "/health"
+          let expected = id == "python-django" ? "The install worked successfully! Congratulations!" : "true"
           var response: String?
           while ContinuousClock.now < deadline {
-            response = try? await preview.webView.callAsyncJavaScript("return await (await fetch('/health')).text()", arguments: [:], in: nil, contentWorld: .page) as? String
-            if response?.contains("true") == true { break }
+            response = try? await preview.webView.callAsyncJavaScript("const response = await fetch(path); return response.ok ? await response.text() : null", arguments: ["path": path], in: nil, contentWorld: .page) as? String
+            if response?.contains(expected) == true { break }
             try await Task.sleep(for: .milliseconds(100))
           }
-          guard response?.contains("true") == true else { throw DemoError.failed("Preview health failed for \(id)") }
+          guard response?.contains(expected) == true else { throw DemoError.failed("Preview response failed for \(id)") }
+          if id == "python-django" {
+            let admin = try await preview.webView.callAsyncJavaScript("""
+              const login = await fetch('/admin/login/?next=/admin/');
+              const html = await login.text();
+              const css = await fetch('/static/admin/css/base.css');
+              return login.ok && html.includes('name="username"') && html.includes('name="csrfmiddlewaretoken"') && css.ok && (await css.text()).includes('body');
+              """, arguments: [:], in: nil, contentWorld: .page) as? Bool
+            guard admin == true else { throw DemoError.failed("Django admin login or static assets failed") }
+            checks.append("Django default welcome page, admin login, and static assets")
+          }
           view.sendControl(3); await inputTask?.value
           try await waitForPreviewClosure(port: 8000)
           checks.append(id + " HTTP preview and Ctrl-C")
         }
         try await shellCheck(host, command: "printf '\\n%s\\n' PICKER_RECOVERED", marker: "\nPICKER_RECOVERED\n")
       }
+      for id in examples {
+        await chooseExample(ShellExample.all.first { $0.id == id }!)
+        guard let host = runtime else { throw DemoError.failed(status) }
+        try await waitFor("➜ ~ $ ")
+        if storage == .memory {
+          guard !(try await host.fs.readDir()).contains(where: { $0.name == markerFile }) else {
+            throw DemoError.failed("Memory workspace unexpectedly retained another session's files")
+          }
+        } else {
+          guard try await host.fs.readText(markerFile) == id else {
+            throw DemoError.failed("Persistent workspace was not isolated for \(id)")
+          }
+          try await host.fs.remove(markerFile)
+        }
+      }
+      checks.append("workspace files remain isolated when reopening examples")
       writeReport(["passed": true, "checks": checks, "storage": storage.rawValue])
       status = "Example picker tests passed"
     } catch {

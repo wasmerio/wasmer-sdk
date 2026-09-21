@@ -5,6 +5,10 @@ parses terminal output and encodes keys; a small UIKit view draws its cells.
 The Wasmer SDK runs WASIX programs in an invisible, unattached WKWebView using
 JSPI. No remote shell or terminal webpage is involved.
 
+The header reuses wasmer.sh's Wasmer wordmark with an `.iOS` suffix. Controls,
+terminal colors, and the Bash prompt follow the web shell's theme; the welcome
+message uses the same format with iOS and Swift wording.
+
 ## Run
 
 Requires an Apple Silicon Mac, Xcode 27 with an iOS 27 simulator, Zig **0.16.0**,
@@ -46,11 +50,15 @@ this example does not include a full Unix distribution.
 Use the drive menu to choose **Native**, **Memory**, or **OPFS** storage. Changing
 storage restarts the shell. All backends expose the same `/workspace` directory:
 
-- Native (default) stores files in `Documents/WasmerTerminal`.
+- Native (default) mounts `Documents/WasmerTerminal/<example-id>` at `/workspace`
+  for a selected example, reusing its existing files. The full shell mounts
+  `Documents/WasmerTerminal` and keeps all examples in named folders.
 - Memory uses the SDK's shared in-memory filesystem, as in the browser, and
   clears files on restart. Guest file operations do not cross a storage bridge.
 - OPFS stores file contents in WebKit's private filesystem, with metadata in a
-  dedicated worker. Native and OPFS retain files between app launches.
+  dedicated worker. Each selected example has its own OPFS volume; the full shell
+  retains the original shared volume, including previously saved examples.
+  Native and OPFS retain files between app launches.
 
 Each backend has a separate workspace. Switching does not copy files between them.
 `/native` and `/readonly` remain native directory mounts for the IO examples.
@@ -147,7 +155,7 @@ verification over the native TCP connection. Package compatibility still
 depends on the WASIX/Edge.js runtime; native Node addons are not iOS binaries.
 
 Python uses the same WASIX wheel index and pip settings as wasmer.sh. A selected
-example installs dependencies into its own `.python-packages` directory, which
+example installs dependencies into its own `/workspace/.python-packages` directory, which
 is included in `PYTHONPATH`. The full shell uses `/workspace/wasix-packages` and
 includes every framework's requirements:
 
@@ -293,22 +301,37 @@ packaged by CI in the Swift release's runtime XCFramework.
 ## Example picker
 
 WasmerShell opens with a grid of Node.js, Express, Next.js, Python HTTP, Flask,
-Django, FastAPI, and yt-dlp templates. The catalog and sources are shared with
+Django, FastAPI, FFmpeg, and yt-dlp templates. The catalog and sources are shared with
 `wasmer-sh/examples.json` and `wasmer-sh/workspace`.
 
 Selecting an example starts a shell with only that example's runtime packages,
-copies missing source files, and opens its directory. The terminal shows the
-install and run commands. Dependencies remain user-installed; each Python
-example installs into its own `.python-packages` directory. yt-dlp loads Python,
-QuickJS-NG, and FFmpeg. Run `python download.py --help` for usage, then pass a video
-URL as an argument to download it.
+copies missing source files directly into `/workspace`, and opens Bash there.
+The terminal shows the install and run commands. Dependencies remain
+user-installed; each Python example installs into its own
+`/workspace/.python-packages` directory. yt-dlp loads Python, QuickJS-NG, and
+FFmpeg. Run `/workspace/.python-packages/bin/yt-dlp --help`
+for usage, then pass a video URL as an argument to download it. Run from
+`/workspace` to load `yt-dlp.conf`, which enables QuickJS and configures
+MP4 output in the example's `downloads` directory.
+
+The FFmpeg example needs no installation. Its run command converts
+`https://cdn.wasmer.io/media/wordpress.mp4` to `/workspace/wordpress.gif`,
+creating a looping animation at 10 fps and 320 pixels wide. Its README also
+shows how to inspect the GIF with FFprobe and convert a shorter clip.
+
+The Django example uses the shared `manage.py` / `mysite` starter project and
+Django's default welcome page. After installing requirements, run
+`python manage.py runserver 0.0.0.0:8000 --noreload --nothreading`.
+Run `python manage.py migrate` to initialize SQLite before using the admin.
 
 Use the grid button to return to the picker and **Resume terminal** to keep the
 current session. **Open full shell** loads all catalog runtimes plus cowsay in one shell.
-Changing templates starts a new shell; Native and OPFS retain workspace files,
-while Memory starts fresh. Existing files are never overwritten by templates.
+Changing templates starts a new shell with a separate workspace; Native and
+OPFS retain workspace files, while Memory starts fresh. Existing files are
+never overwritten by templates.
 
-Run the template isolation, Flask install/server, and yt-dlp tool/CLI checks:
+Run the template isolation, Flask server, Django migrations/admin, FFmpeg
+conversion, and yt-dlp tool/CLI checks:
 
 ```sh
 python3 swift/Examples/WasmerShell/build.py test --example picker --storage memory

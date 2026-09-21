@@ -44,9 +44,20 @@ WTTerminal *wt_new(uint16_t columns, uint16_t rows) {
       ghostty_key_event_new(NULL, &t->event) != GHOSTTY_SUCCESS) {
     wt_free(t); return NULL;
   }
-  GhosttyColorRgb fg = {220, 231, 224}, bg = {13, 20, 18};
+  // Match the xterm theme in wasmer-sh/src/main.ts, including ANSI colors.
+  GhosttyColorRgb fg = {0xe8, 0xe5, 0xed}, bg = {0x0c, 0x0c, 0x12};
   ghostty_terminal_set(t->terminal, GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND, &fg);
   ghostty_terminal_set(t->terminal, GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND, &bg);
+  GhosttyColorRgb palette[256];
+  ghostty_terminal_get(t->terminal, GHOSTTY_TERMINAL_DATA_COLOR_PALETTE, &palette);
+  const GhosttyColorRgb ansi[] = {
+    {0x17, 0x17, 0x1f}, {0xfb, 0x71, 0x85}, {0x5e, 0xe6, 0xa8}, {0xfa, 0xcc, 0x6b},
+    {0x81, 0xae, 0xfc}, {0xc4, 0xa7, 0xff}, {0x67, 0xe8, 0xf9}, {0xe8, 0xe5, 0xed},
+    {0x69, 0x65, 0x75}, {0xfd, 0xa4, 0xaf}, {0x86, 0xef, 0xc0}, {0xfd, 0xe6, 0x8a},
+    {0xa9, 0xc7, 0xff}, {0xdd, 0xd0, 0xff}, {0xa5, 0xf3, 0xfc}, {0xff, 0xff, 0xff},
+  };
+  memcpy(palette, ansi, sizeof(ansi));
+  ghostty_terminal_set(t->terminal, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, &palette);
   size_t scrollback = 4 * 1024 * 1024;
   ghostty_terminal_set(t->terminal, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &scrollback);
   ghostty_terminal_set(t->terminal, GHOSTTY_TERMINAL_OPT_USERDATA, t);

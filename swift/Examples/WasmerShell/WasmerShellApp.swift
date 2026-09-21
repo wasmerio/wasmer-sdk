@@ -8,13 +8,17 @@ struct WasmerShellApp: App {
   var body: some Scene {
     WindowGroup {
       VStack(spacing: 0) {
-        HStack(spacing: 12) {
-          Image(systemName: "terminal.fill").font(.title2).foregroundStyle(.mint)
+        HStack(spacing: 2) {
           VStack(alignment: .leading, spacing: 3) {
-            Text("WasmerShell").font(.headline)
-            Text(session.status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-          }
-          Spacer()
+            HStack(spacing: 3) {
+              Image("wasmer-logo").resizable().renderingMode(.original).scaledToFit()
+                .frame(width: 100, height: 20)
+              Text(".iOS").font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .tracking(-1).foregroundStyle(ShellTheme.muted)
+            }.fixedSize().accessibilityElement(children: .ignore).accessibilityLabel("Wasmer.iOS")
+            Text(session.status).font(.caption).foregroundStyle(ShellTheme.muted).lineLimit(1)
+          }.frame(minWidth: 134, alignment: .leading)
+          Spacer(minLength: 4)
           Menu {
             ForEach(ShellStorage.allCases, id: \.self) { value in
               Button { Task { await session.selectStorage(value) } } label: {
@@ -30,6 +34,7 @@ struct WasmerShellApp: App {
             session.view.resignFirstResponder()
             session.showingExamples = true
           } label: { Image(systemName: "square.grid.2x2") }
+            .buttonStyle(ShellButtonStyle(isSelected: session.showingExamples))
             .accessibilityLabel("Examples").disabled(session.starting)
           if !session.previews.isEmpty {
             Menu {
@@ -43,7 +48,7 @@ struct WasmerShellApp: App {
           }.accessibilityLabel("Toggle keyboard").disabled(session.showingExamples || !session.ready)
           Button { Task { await session.restart() } } label: { Image(systemName: "arrow.clockwise") }
             .accessibilityLabel("Restart terminal").disabled(session.starting || session.showingExamples)
-        }.padding(16)
+        }.buttonStyle(ShellButtonStyle()).padding(.horizontal, 12).padding(.vertical, 12)
         Divider()
         if session.showingExamples {
           ExamplePicker(session: session)
@@ -56,11 +61,14 @@ struct WasmerShellApp: App {
               Button("Ctrl-C") { session.view.sendControl(3) }
               Button("Ctrl-D") { session.view.sendControl(4) }
               key("↑", 0); key("↓", 1); key("←", 2); key("→", 3)
-            }.font(.system(.callout, design: .monospaced)).buttonStyle(.bordered).tint(.mint).padding(10)
+            }.font(.system(.callout, design: .monospaced))
+              .buttonStyle(ShellButtonStyle(isSelected: true)).padding(10)
           }.disabled(!session.ready)
         }
       }
-      .background(Color(red: 0.051, green: 0.078, blue: 0.071))
+      .foregroundStyle(ShellTheme.text)
+      .tint(ShellTheme.muted)
+      .background(ShellTheme.page)
       .preferredColorScheme(.dark)
       .task { await session.startIfRequested() }
       .sheet(item: $session.presentedPreview) { preview in ServerPreviewSheet(preview: preview).id(preview.id) }
@@ -173,7 +181,7 @@ final class TerminalSession: ObservableObject {
       }
       try await host.start()
       if let example = selectedExample {
-        try await host.seedExamples(example.id, at: "/workspace/" + example.id)
+        try await host.seedExamples(example.id, at: "/workspace")
       } else {
         try await host.seedExamples()
       }
@@ -181,13 +189,14 @@ final class TerminalSession: ObservableObject {
         try await host.fs.writeText("demo.py", "name = input('What is your name? '); print(f'Hello, {name}!')\n")
       }
       guard !host.isWebViewAttached else { throw DemoError.failed("Runtime WebView was attached") }
-      var welcome = "\u{1b}[2J\u{1b}[H\u{1b}[1;32mLocal programs. Native terminal.\u{1b}[0m\r\n"
+      var welcome = "\u{1b}[2J\u{1b}[H\u{1b}[38;5;245mWelcome to wasmer.iOS\u{1b}[0m\r\n"
+      welcome += "Run any Wasmer package on iOS with the Wasmer SDK for Swift.\r\n"
       if let example = selectedExample {
         welcome += "\(example.title) · \(example.description)\r\n"
         if let install = example.install { welcome += "Install:  \(install)\r\n" }
         welcome += "Run:      \(example.run)\r\n"
       } else {
-        welcome += "Try python, node, or cowsay hello.\r\nExamples are in /workspace.\r\n"
+        welcome += "Type \u{1b}[38;5;81mls\u{1b}[0m to explore the workspace.\r\n"
       }
       view.feed(Data((welcome + "\r\n").utf8))
       try await host.startTerminal(columns: view.columns, rows: view.rows)
@@ -197,7 +206,7 @@ final class TerminalSession: ObservableObject {
       #endif
       if let name = ["node", "node-next", "python"].first(where: { ProcessInfo.processInfo.arguments.contains("--example-" + $0) }) {
         Task {
-          do { try await waitFor("wasmer:"); runExample(name) }
+          do { try await waitFor("➜ ~ $ "); runExample(name) }
           catch { status = error.localizedDescription }
         }
       }
@@ -247,7 +256,8 @@ final class TerminalSession: ObservableObject {
   func runExample(_ name: String) {
     guard let example = ShellExample.all.first(where: { $0.id == name }) else { return }
     view.resignFirstResponder()
-    send(Data(("cd /workspace/" + example.id + " && " + example.run + "\r").utf8))
+    let workingDirectory = selectedExample == nil ? "/workspace/" + example.id : "/workspace"
+    send(Data(("cd " + workingDirectory + " && " + example.run + "\r").utf8))
   }
 
   func present(_ preview: ServerPreview) {

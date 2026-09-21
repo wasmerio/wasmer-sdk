@@ -3,7 +3,7 @@
 Install the dependencies and start the development server:
 
 ```sh
-cd /workspace/next && pnpm i && pnpm dev
+pnpm i && pnpm dev
 ```
 
 Next.js listens on port 3000 and opens in the browser preview automatically.

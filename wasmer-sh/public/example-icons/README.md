@@ -15,5 +15,9 @@ runtime download is required.
 - `yt-dlp.png` is the 256-pixel image from yt-dlp's official
   [`devscripts/logo.ico`](https://github.com/yt-dlp/yt-dlp/blob/c7fb478d21e9e59524befbe23f7801bb267fb880/devscripts/logo.ico),
   converted to PNG with macOS `sips`. See `YT-DLP-LICENSE.txt` (Unlicense).
+- `ffmpeg.svg` is from [Simple Icons](https://github.com/simple-icons/simple-icons/blob/b86d5c9a0bdd4f3f5c30898a63654dd32f39fd76/icons/ffmpeg.svg),
+  revision `b86d5c9a0bdd4f3f5c30898a63654dd32f39fd76`, with a green `#44B78B`
+  fill for contrast on the dark picker. The logo path is unchanged.
+  See `SIMPLE-ICONS-LICENSE.txt` (CC0 1.0).
 
 Project names and logos belong to their respective owners.

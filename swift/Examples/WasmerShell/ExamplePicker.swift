@@ -31,19 +31,19 @@ struct ExamplePicker: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 26) {
         VStack(alignment: .leading, spacing: 10) {
-          Text("START SOMETHING NEW").font(.caption).tracking(1.5).foregroundStyle(.mint)
           Text("Choose an example").font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
           Text("A terminal, your code, and everything you need to get started.")
-            .font(.subheadline).foregroundStyle(.secondary)
+            .font(.subheadline).foregroundStyle(ShellTheme.muted)
           if session.ready {
             Button("Resume terminal →") { session.showingExamples = false }
+              .buttonStyle(ShellButtonStyle())
               .padding(.top, 6)
           }
         }
         ForEach(["Node.js", "Python", "Tools"], id: \.self) { group in
           VStack(alignment: .leading, spacing: 12) {
             Text(group.uppercased()).font(.caption.weight(.semibold)).tracking(1)
-              .foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
+              .foregroundStyle(ShellTheme.muted).accessibilityAddTraits(.isHeader)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 12)], spacing: 12) {
               ForEach(ShellExample.all.filter { $0.group == group }) { example in
                 Button { Task { await session.chooseExample(example) } } label: {
@@ -51,15 +51,15 @@ struct ExamplePicker: View {
                     Image("example-" + example.id).resizable().renderingMode(.original).scaledToFit()
                       .frame(width: 42, height: 42)
                       .accessibilityHidden(true)
-                    Text(example.title).font(.headline).foregroundStyle(.primary)
-                    Text(example.description).font(.caption).foregroundStyle(.secondary)
+                    Text(example.title).font(.headline).foregroundStyle(ShellTheme.text)
+                    Text(example.description).font(.caption).foregroundStyle(ShellTheme.muted)
                       .fixedSize(horizontal: false, vertical: true)
-                    Text(example.dependencies).font(.caption2).foregroundStyle(.secondary)
+                    Text(example.dependencies).font(.caption2).foregroundStyle(ShellTheme.muted)
                       .fixedSize(horizontal: false, vertical: true)
                   }
                   .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                   .padding(16)
-                  .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+                  .background(ShellTheme.panel, in: RoundedRectangle(cornerRadius: 12))
                   .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.09)))
                 }.buttonStyle(.plain).accessibilityIdentifier("example-" + example.id)
               }
@@ -70,11 +70,12 @@ struct ExamplePicker: View {
         VStack(alignment: .leading, spacing: 12) {
           Text("Just need a terminal?").font(.headline)
           Text("Open Bash with Node.js, Python, and command-line tools.")
-            .font(.subheadline).foregroundStyle(.secondary)
+            .font(.subheadline).foregroundStyle(ShellTheme.muted)
           Button("Open full shell →") { Task { await session.chooseExample(nil) } }
+            .buttonStyle(ShellButtonStyle(isSelected: true))
             .accessibilityIdentifier("example-shell")
           Text("Each example loads only its required runtimes. Install dependencies in the terminal when you’re ready.")
-            .font(.caption).foregroundStyle(.secondary).padding(.top, 8)
+            .font(.caption).foregroundStyle(ShellTheme.muted).padding(.top, 8)
         }
       }.padding(20).frame(maxWidth: 900)
         .frame(maxWidth: .infinity)

@@ -88,6 +88,15 @@ try {
   assert.equal(await page.locator("#example-picker").isVisible(), true);
   assert.equal(await page.locator(".shell-stage").isVisible(), false);
   assert.equal(await page.locator("#resume-button").isVisible(), false);
+  const fullShellPaths = await page.evaluate(async () => {
+    const { exampleFiles } = await import("/src/examples.ts");
+    return Object.keys(exampleFiles());
+  });
+  for (const path of [
+    "node/server.js", "python/server.py", "python-django/manage.py",
+    "python-django/mysite/settings.py", "next/pages/index.js", "yt-dlp/yt-dlp.conf",
+  ])
+    assert(fullShellPaths.includes(path), `Missing full-shell source: ${path}`);
   assert.equal(
     packages.length,
     0,
@@ -104,9 +113,12 @@ try {
     ),
     true,
   );
-  const ytDlp = page.locator('[data-example="yt-dlp"]');
-  await ytDlp.scrollIntoViewIfNeeded();
-  assert.equal(await ytDlp.isVisible(), true);
+  for (const id of ["ffmpeg", "yt-dlp"]) {
+    const tool = page.locator(`[data-example="${id}"]`);
+    await tool.scrollIntoViewIfNeeded();
+    assert.equal(await tool.isVisible(), true);
+    await tool.locator("img").evaluate((icon) => icon.decode());
+  }
   if (process.env.WASMER_PICKER_SCREENSHOTS)
     await page.screenshot({
       path: `${process.env.WASMER_PICKER_SCREENSHOTS}-mobile.png`,
@@ -141,11 +153,16 @@ try {
       { timeout: 180_000 },
     );
     await command(
-      `test "$PWD" = /workspace/${example.source} && test -f README.md && test ! -d node_modules && test ! -d .python-packages && test ! -d /workspace/${example.id === "node" ? "python" : "node"}`,
+      `test "$PWD" = /workspace && test -f README.md && test ! -d node_modules && test ! -d .python-packages && test ! -d /workspace/${example.source} && test ! -e .picker-example && test "$PIP_TARGET" = /workspace/.python-packages && test "$PYTHONPATH" = /workspace/.python-packages`,
     );
+    await command(`printf '%s' '${example.id}' > .picker-example`);
     if (example.group === "Node.js")
       await command(
         "command -v node && ! command -v python && ! command -v php && ! command -v ffmpeg",
+      );
+    else if (example.id === "ffmpeg")
+      await command(
+        "command -v ffmpeg && command -v ffprobe && ! command -v python && ! command -v node && ! command -v php",
       );
     else
       await command(
@@ -161,22 +178,43 @@ try {
       console.log(`INSTALL ${example.id}`);
       await command(example.install, 300_000);
     }
+    if (example.id === "python-django") {
+      await command(
+        "test -f manage.py && test -f mysite/urls.py && test ! -f server.py && python manage.py check && python manage.py migrate --noinput && python manage.py migrate --check",
+        180_000,
+      );
+    }
     if (example.id === "yt-dlp") {
       await command(
-        'qjs --version && ffmpeg -version && python -m yt_dlp --version && python -c "import yt_dlp_ejs; from yt_dlp.utils._jsruntime import QuickJsRuntime; assert QuickJsRuntime().info.supported"',
+        'qjs --version && ffmpeg -version && /workspace/.python-packages/bin/yt-dlp --version && python -c "import yt_dlp_ejs; from yt_dlp.utils._jsruntime import QuickJsRuntime; assert QuickJsRuntime().info.supported"',
       );
       // Showing usage must not download a video; a URL is an explicit CLI argument.
-      assert((await command(example.run)).includes("Video URL"));
+      assert((await command(example.run)).includes("Usage: yt-dlp [OPTIONS] URL"));
       if (process.env.WASMER_YTDLP_TEST_URL) {
         const quotedUrl =
           "'" +
           process.env.WASMER_YTDLP_TEST_URL.replaceAll("'", "'\\''") +
           "'";
-        await command(`python download.py ${quotedUrl}`, 300_000);
+        await command(
+          `/workspace/.python-packages/bin/yt-dlp ${quotedUrl}`,
+          300_000,
+        );
         await command(
           "python -c \"from pathlib import Path; files = list(Path('downloads').glob('*.mp4')); assert files and all(p.stat().st_size > 0 for p in files)\"",
         );
       }
+    } else if (example.id === "ffmpeg") {
+      await command(example.run, 180_000);
+      const metadata = await command(
+        "test -s /workspace/wordpress.gif && ffprobe -v error -count_frames -show_entries stream=codec_name,width,height,nb_read_frames:format=format_name,duration -of json /workspace/wordpress.gif",
+      );
+      assert(metadata.includes('"format_name": "gif"'));
+      assert(metadata.includes('"codec_name": "gif"'));
+      assert(metadata.includes('"width": 320'));
+      assert(metadata.includes('"height": 180'));
+      const frames = metadata.match(/"nb_read_frames": "(\d+)"/);
+      assert(frames && Number(frames[1]) > 1, "Expected an animated GIF");
+      assert.equal(await page.locator("#preview-panel").isVisible(), false);
     } else {
       await page.evaluate(
         (input) => window.__wasmerShell.send(input),
@@ -196,7 +234,28 @@ try {
         await frame
           .getByText("Express can reach this JSON route.", { exact: true })
           .waitFor();
-      if (["python-django", "python-fastapi"].includes(example.id)) {
+      if (example.id === "python-django") {
+        assert.equal(
+          await frame.locator("h1").innerText(),
+          "The install worked successfully! Congratulations!",
+        );
+        const admin = await frame.locator("body").evaluate(async () => {
+          const login = await fetch("/admin/login/?next=/admin/");
+          const html = await login.text();
+          const css = await fetch("/static/admin/css/base.css");
+          return {
+            status: login.status,
+            hasLogin: html.includes('name="username"') && html.includes('name="csrfmiddlewaretoken"'),
+            cssStatus: css.status,
+            css: await css.text(),
+          };
+        });
+        assert.equal(admin.status, 200);
+        assert.equal(admin.hasLogin, true);
+        assert.equal(admin.cssStatus, 200);
+        assert(admin.css.includes("body"));
+      }
+      if (example.id === "python-fastapi") {
         await frame.locator("#checks li").nth(2).waitFor();
         assert(
           (await frame.locator("#checks li").allTextContents()).every((text) =>
@@ -214,7 +273,7 @@ try {
   }
   assert.deepEqual(diagnostics, []);
   console.log(
-    "PASS picker, runtime isolation, selected installs, server previews, and Ctrl-C",
+    "PASS picker and selected examples: runtime isolation, installs, tools, conversions, server previews, and Ctrl-C",
   );
 } catch (error) {
   if (page) {

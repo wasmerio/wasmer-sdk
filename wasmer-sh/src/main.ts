@@ -413,8 +413,8 @@ async function start(): Promise<void> {
         PIP_EXTRA_INDEX_URL: "https://python-registry.wasmer.app/simple/",
         PIP_PLATFORM: "wasix_wasm32",
         PIP_ONLY_BINARY: ":all:",
-        PIP_TARGET: selectedExample ? `/workspace/${selectedExample.source}/.python-packages` : "/workspace/wasix-packages",
-        PYTHONPATH: selectedExample ? `/workspace/${selectedExample.source}/.python-packages` : "/workspace/wasix-packages",
+        PIP_TARGET: selectedExample ? "/workspace/.python-packages" : "/workspace/wasix-packages",
+        PYTHONPATH: selectedExample ? "/workspace/.python-packages" : "/workspace/wasix-packages",
         PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:.",
         USER: "wasmer",
         LOGNAME: "wasmer",
@@ -488,7 +488,7 @@ async function runInteractiveShell(
     .command(
       mainPackage,
       ["--noprofile", "--rcfile", "/workspace/.bashrc", "-i"],
-      { cwd: selectedExample ? `/workspace/${selectedExample.source}` : "/workspace" },
+      { cwd: "/workspace" },
     )
     .spawn({
       terminal: { columns: terminal.cols, rows: terminal.rows },
