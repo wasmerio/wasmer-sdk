@@ -335,6 +335,16 @@ impl JsSandboxBuilder {
         Ok(())
     }
 
+    /// Use an embedder filesystem as `/workspace`, including the SDK file API.
+    #[wasm_bindgen(js_name = storageHost)]
+    pub fn storage_host(&mut self, mount_id: u32) -> Result<(), JsValue> {
+        self.inner = Some(
+            self.take()?
+                .storage(host_filesystem::HostFileSystem { mount_id }),
+        );
+        Ok(())
+    }
+
     /// Configure guest networking from a stable mode string.
     pub fn network(&mut self, mode: String) -> Result<(), JsValue> {
         let builder = self.take()?;

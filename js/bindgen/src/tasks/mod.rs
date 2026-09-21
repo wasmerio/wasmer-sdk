@@ -38,6 +38,7 @@ mod scheduler_message;
 mod task_wasm;
 mod thread_pool;
 mod thread_pool_worker;
+mod timer;
 mod worker_handle;
 mod worker_message;
 

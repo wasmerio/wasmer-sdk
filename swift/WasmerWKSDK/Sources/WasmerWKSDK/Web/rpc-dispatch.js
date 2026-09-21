@@ -15,9 +15,9 @@ const outputValue = value => {
 };
 
 export class SDKDispatcher {
-  #core; #initialize; #network; #ready; #next = 0;
+  #core; #initialize; #network; #storage; #ready; #next = 0;
   #packages = new Map(); #packageIDs = new Map(); #sandboxes = new Map(); #processes = new Map(); #jobs = new Map();
-  constructor(initialize, network) { this.#initialize = initialize; this.#network = network; }
+  constructor(initialize, network, storage) { this.#initialize = initialize; this.#network = network; this.#storage = storage; }
   async request(id, method, args) {
     const job = { cancelled: false, process: undefined, sandbox: undefined };
     this.#jobs.set(id, job);
@@ -104,12 +104,23 @@ export class SDKDispatcher {
       }
       case "sandbox.create": {
         const builder = this.#core.sandbox();
-        let network;
+        let network, storageMount;
         try {
           for (const handle of args.packages) builder.package(this.#package(handle));
           for (const [path, bytes] of Object.entries(args.files)) builder.file(path, decode(bytes));
           for (const [key, value] of Object.entries(args.env)) builder.env(key, value);
-          for (const mount of args.mounts ?? []) builder.mountHost(mount.path, mount.id, mount.readOnly);
+          for (const mount of args.mounts ?? []) {
+            if (mount.path === "/workspace" && args.storage?.kind === "native") builder.storageHost(mount.id);
+            else builder.mountHost(mount.path, mount.id, mount.readOnly);
+          }
+          // Memory uses the core's shared in-memory filesystem, just like the
+          // browser SDK. Guest file operations stay inside Wasm instead of
+          // making a synchronous worker round trip for every read and stat.
+          if (args.storage?.kind === "opfs") {
+            if (!this.#storage) fail("CAPABILITY_UNAVAILABLE", "Worker storage is unavailable");
+            storageMount = await this.#storage.open(args.storage.volume);
+            builder.storageHost(storageMount);
+          }
           if (args.network === "host") { network = this.#network(); builder.networkWisp(network); }
           else builder.network(args.network);
           const value = await builder.start();
@@ -118,9 +129,9 @@ export class SDKDispatcher {
             fail("CANCELLED", "Swift task cancelled");
           }
           const handle = ++this.#next;
-          this.#sandboxes.set(handle, { handle, value, network, closed: false });
+          this.#sandboxes.set(handle, { handle, value, network, storageMount, closed: false });
           return handle;
-        } catch (error) { network?.close(); throw error; }
+        } catch (error) { network?.close(); if (storageMount) await this.#storage.close(storageMount); throw error; }
         finally { if (builder.__wbg_ptr) builder.free(); }
       }
       case "sandbox.install": {
@@ -134,6 +145,7 @@ export class SDKDispatcher {
         for (const value of this.#processes.values()) if (value.sandbox === args.sandbox) value.process.kill();
         await sandbox.value.close();
         sandbox.network?.close();
+        if (sandbox.storageMount) await this.#storage.close(sandbox.storageMount);
         // Free only after outstanding async SDK borrows have unwound.
         return true;
       }

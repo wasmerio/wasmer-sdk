@@ -150,19 +150,20 @@ struct HostFile {
 #[async_trait]
 impl File for HostFile {
     async fn read_at(&self, offset: u64, length: usize) -> FsResult<Bytes> {
-        let bytes: Vec<u8> = call(
+        // ByteBuf accepts legacy number arrays as well as the binary reply
+        // transport, which copies a Uint8Array without decoding each element.
+        let bytes: serde_bytes::ByteBuf = call(
             self.mount_id,
             "read",
             (self.id, offset, length.min(CHUNK_BYTES)),
         )?;
-        Ok(bytes.into())
+        Ok(bytes.into_vec().into())
     }
     async fn write_at(&self, offset: u64, data: Bytes) -> FsResult<usize> {
-        call(
-            self.mount_id,
-            "write",
-            (self.id, offset, &data[..data.len().min(CHUNK_BYTES)]),
-        )
+        // Serialize as a Uint8Array. A plain byte slice becomes a JS number
+        // array, forcing every worker hop to clone each byte individually.
+        let bytes = serde_bytes::Bytes::new(&data[..data.len().min(CHUNK_BYTES)]);
+        call(self.mount_id, "write", (self.id, offset, bytes))
     }
     async fn set_len(&self, length: u64) -> FsResult<()> {
         call(self.mount_id, "setLen", (self.id, length))

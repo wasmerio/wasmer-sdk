@@ -9,8 +9,9 @@ test("WebKit budget bounds shared memories while retaining Wasm import compatibi
     assert.ok(memory instanceof NativeMemory);
     assert.ok(memory instanceof WebAssembly.Memory);
     assert.ok(structuredClone(memory).buffer instanceof SharedArrayBuffer);
-    assert.throws(() => memory.grow(2048), RangeError);
-    assert.throws(() => new WebAssembly.Memory({ initial: 2049, maximum: 32767, shared: true }), /128 MiB/);
+    assert.equal(memory.grow(2048), 1);
+    assert.throws(() => memory.grow(3072), RangeError);
+    assert.throws(() => new WebAssembly.Memory({ initial: 3073, maximum: 32767, shared: true }), /192 MiB/);
     // (module (import "env" "memory" (memory 1 32767 shared)))
     const module = new WebAssembly.Module(new Uint8Array([
       0, 97, 115, 109, 1, 0, 0, 0,
@@ -18,12 +19,12 @@ test("WebKit budget bounds shared memories while retaining Wasm import compatibi
       2, 3, 1, 255, 255, 1,
     ]));
     assert.ok(new WebAssembly.Instance(module, { env: { memory } }));
-    // Python's SDK heap needs to grow past the guest limit, without eagerly
-    // allocating its full 512 MiB ceiling at startup.
+    // The SDK heap can grow past the guest limit, without eagerly
+    // allocating its full 1 GiB ceiling at startup.
     const runtime = createRuntimeMemory();
     assert.equal(runtime.buffer.byteLength, 25 * 65536);
-    assert.equal(runtime.grow(2048), 25);
-    assert.throws(() => runtime.grow(8192), RangeError);
+    assert.equal(runtime.grow(8192), 25);
+    assert.throws(() => runtime.grow(16384), RangeError);
   } finally {
     WebAssembly.Memory = NativeMemory;
   }

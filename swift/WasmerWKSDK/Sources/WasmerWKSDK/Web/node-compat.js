@@ -13,3 +13,91 @@ export function installNodeSymbols(symbol = Symbol) {
 }
 
 installNodeSymbols();
+
+// JavaScriptCore's captureStackTrace returns text even when prepareStackTrace
+// asks for CallSites. Node dependencies such as depd rely on that hook. Keep
+// native implementations when they support it; otherwise adapt captured JSC
+// frames. Receiver/function objects and eval origins cannot be recovered from
+// text, so those CallSite methods return undefined rather than invented values.
+function callSite(frame) {
+  const separator = frame.indexOf("@");
+  if (separator < 0) return null;
+  const name = frame.slice(0, separator) || null;
+  const location = frame.slice(separator + 1);
+  const match = /^(.*):(\d+):(\d+)$/.exec(location);
+  const file = match?.[1] ?? null;
+  return {
+    getFileName: () => file,
+    getScriptNameOrSourceURL: () => file,
+    getLineNumber: () => match ? Number(match[2]) : null,
+    getColumnNumber: () => match ? Number(match[3]) : null,
+    getFunctionName: () => name,
+    getMethodName: () => null,
+    getTypeName: () => null,
+    getThis: () => undefined,
+    getFunction: () => undefined,
+    getEvalOrigin: () => undefined,
+    isEval: () => name === "eval code",
+    isNative: () => location === "[native code]",
+    isToplevel: () => !name,
+    isConstructor: () => name?.startsWith("new ") ?? false,
+    isAsync: () => name?.startsWith("async ") ?? false,
+    isPromiseAll: () => false,
+    getPromiseIndex: () => null,
+    toString: () => name && location ? `${name} (${location})` : name || location || "<anonymous>",
+  };
+}
+
+export function installNodeStackTrace(error = Error) {
+  const originalCapture = error.captureStackTrace;
+  if (typeof originalCapture === "function") {
+    const descriptor = Object.getOwnPropertyDescriptor(error, "prepareStackTrace");
+    const marker = {};
+    try {
+      error.prepareStackTrace = () => marker;
+      const probe = {};
+      originalCapture.call(error, probe);
+      if (probe.stack === marker) return false;
+    } finally {
+      if (descriptor) Object.defineProperty(error, "prepareStackTrace", descriptor);
+      else delete error.prepareStackTrace;
+    }
+  }
+  if (typeof error.stackTraceLimit !== "number") error.stackTraceLimit = 10;
+  function captureStackTrace(target, constructorOpt) {
+    if ((typeof target !== "object" || target === null) && typeof target !== "function") {
+      throw new TypeError("Error.captureStackTrace requires an object");
+    }
+    let raw;
+    if (typeof originalCapture === "function") {
+      const holder = {};
+      originalCapture.call(error, holder, constructorOpt ?? captureStackTrace);
+      raw = holder.stack;
+    } else {
+      raw = new error().stack;
+    }
+    let frames = String(raw ?? "").split("\n").map(callSite).filter(Boolean);
+    if (typeof originalCapture !== "function") {
+      const name = constructorOpt?.name ?? "captureStackTrace";
+      const index = frames.findIndex(frame => frame.getFunctionName() === name);
+      frames = index < 0 ? [] : frames.slice(index + 1);
+    }
+    frames = frames.slice(0, Math.max(0, error.stackTraceLimit));
+    Object.defineProperty(target, "stack", {
+      configurable: true,
+      enumerable: false,
+      get() {
+        const value = typeof error.prepareStackTrace === "function"
+          ? error.prepareStackTrace(target, frames)
+          : `${target.name ?? "Error"}${target.message ? `: ${target.message}` : ""}` + frames.map(frame => `\n    at ${frame}`).join("");
+        Object.defineProperty(target, "stack", { value, configurable: true, writable: true });
+        return value;
+      },
+      set(value) { Object.defineProperty(target, "stack", { value, configurable: true, writable: true }); },
+    });
+  }
+  Object.defineProperty(error, "captureStackTrace", { value: captureStackTrace, configurable: true, writable: true });
+  return true;
+}
+
+installNodeStackTrace();

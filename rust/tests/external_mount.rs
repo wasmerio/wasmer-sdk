@@ -185,3 +185,39 @@ module = "copy-mount"
     )
     .expect("write Wasm module");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn workspace_storage_is_shared_by_provider_and_sandbox_api() -> Result<()> {
+    let state = TempDir::new().expect("create SDK state directory");
+    let client = Wasmer::with_config(WasmerConfig {
+        cache: CacheConfig {
+            root: state.path().join(".wasmer"),
+        },
+        output_bytes: 1024,
+    })?;
+    let storage = Directory::new();
+    storage.write_text("existing.txt", "before create").await?;
+    let sandbox = client
+        .sandboxes()
+        .create()
+        .storage(storage.clone())
+        .file("seeded.txt", b"seeded".to_vec())
+        .await?;
+    assert_eq!(
+        sandbox.fs().read_text("existing.txt").await?,
+        "before create"
+    );
+    assert_eq!(storage.read_text("seeded.txt").await?, "seeded");
+    sandbox
+        .fs()
+        .write_text("/workspace/nested/from-sdk.txt", "shared")
+        .await?;
+    assert_eq!(storage.read_text("nested/from-sdk.txt").await?, "shared");
+    sandbox.fs().rename("nested", "moved").await?;
+    assert_eq!(storage.read_text("moved/from-sdk.txt").await?, "shared");
+    sandbox.fs().remove("moved", true)?;
+    assert!(sandbox.fs().stat("moved").is_err());
+    sandbox.close().await?;
+    assert_eq!(storage.read_text("existing.txt").await?, "before create");
+    Ok(())
+}

@@ -49,7 +49,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Cache restoration is optional; bound downloads and archive extraction.
       - uses: ./.github/actions/cache-sdk
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           cargo-profile: native-1.95
 
@@ -74,7 +77,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Cache restoration is optional; bound downloads and archive extraction.
       - uses: ./.github/actions/cache-sdk
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           cargo-profile: swift-1.95-sys
           cache-compiled-artifacts: "false"
@@ -141,7 +147,10 @@ jobs:
           cache: npm
           cache-dependency-path: js/package-lock.json
 
+      # Cache restoration is optional; bound downloads and archive extraction.
       - uses: ./.github/actions/cache-sdk
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           cargo-profile: js-nightly
           cache-compiled-artifacts: "false"
@@ -227,7 +236,10 @@ jobs:
           cache: pip
           cache-dependency-path: python/pyproject.toml
 
+      # Cache restoration is optional; bound downloads and archive extraction.
       - uses: ./.github/actions/cache-sdk
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           cargo-profile: native-1.95-release
 

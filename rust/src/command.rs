@@ -320,7 +320,7 @@ impl Command {
             .with_current_dir(current_dir)
             .with_mount(
                 "/workspace".to_owned(),
-                Arc::new(self.sandbox.inner.workspace.clone()),
+                Arc::clone(&self.sandbox.inner.workspace),
             )
             .with_injected_packages(
                 packages

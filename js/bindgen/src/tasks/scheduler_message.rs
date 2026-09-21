@@ -31,13 +31,25 @@ pub(crate) enum SchedulerMessage {
     SpawnAsync(#[derivative(Debug(format_with = "crate::worker_utils::hidden"))] AsyncTask),
     /// Run a blocking operation on a worker thread.
     SpawnBlocking(#[derivative(Debug(format_with = "crate::worker_utils::hidden"))] BlockingTask),
+    /// Timers never import guest modules or memories.
+    Timer(super::timer::Timer),
     /// A message sent from a worker thread.
     /// Mark a worker as idle.
-    WorkerIdle { worker_id: u32 },
+    WorkerIdle {
+        worker_id: u32,
+    },
     /// Mark a worker as busy.
-    WorkerBusy { worker_id: u32 },
+    WorkerBusy {
+        worker_id: u32,
+    },
+    WorkerRetired {
+        worker_id: u32,
+    },
     /// Terminate the browser worker executing a WASIX thread.
-    TerminateWasmThread { pid: u32, tid: u32 },
+    TerminateWasmThread {
+        pid: u32,
+        tid: u32,
+    },
     /// Publish a nested WebAssembly object to the other browser workers.
     CapiShare {
         source_worker_id: u32,
@@ -83,6 +95,10 @@ impl SchedulerMessage {
         let de = unsafe { Deserializer::new(value)? };
 
         match de.ty()?.as_str() {
+            "worker-retired" => Ok(Self::WorkerRetired {
+                worker_id: de.serde(consts::WORKER_ID)?,
+            }),
+            "timer" => Ok(Self::Timer(unsafe { de.boxed("ptr")? })),
             consts::TYPE_CLOSE => Ok(SchedulerMessage::Close {
                 completion: None,
                 drain: false,
@@ -120,6 +136,10 @@ impl SchedulerMessage {
 
     pub(crate) fn into_js(self) -> Result<JsValue, Error> {
         match self {
+            Self::WorkerRetired { worker_id } => Serializer::new("worker-retired")
+                .set(consts::WORKER_ID, worker_id)
+                .finish(),
+            Self::Timer(timer) => timer.into_js(),
             SchedulerMessage::Close {
                 completion: None, ..
             } => Serializer::new(consts::TYPE_CLOSE).finish(),

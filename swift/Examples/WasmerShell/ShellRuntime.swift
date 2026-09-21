@@ -6,6 +6,7 @@ import WasmerSDK
 final class ShellRuntime {
   private let client: Wasmer
   private let directory: URL
+  private let storage: ShellStorage
   private var sandbox: Sandbox?
   private var process: WasmerSDK.Process?
   private var outputTask: Task<Void, Never>?
@@ -17,7 +18,8 @@ final class ShellRuntime {
   var onListeningPortsChanged: (([UInt16]) -> Void)?
   private(set) var isWebViewAttached = false
 
-  init(directory: URL) throws {
+  init(directory: URL, storage: ShellStorage) throws {
+    self.storage = storage
     self.directory = directory
     client = try Wasmer()
   }
@@ -31,24 +33,57 @@ final class ShellRuntime {
     onProgress?("Loading cowsay…")
     let cowsay = try await client.packages.load("syrusakbary/cowsay@=0.3.0")
     onProgress?("Loading Node.js…")
-    let node = try await client.packages.load("wasmer/edgejs@=0.2.0")
+    let node: Package
+    if let package = Bundle.main.url(forResource: "edgejs", withExtension: "webc") {
+      node = try await client.packages.load(.file(package))
+    } else {
+      node = try await client.packages.load("wasmer/edge@=0.2.1")
+    }
     sandbox = try await client.sandboxes.create(
       packages: [.package(python), .package(cowsay), .package(node)],
       env: [
-        "HOME": "/native",
+        "HOME": "/workspace",
+        "npm_config_store_dir": "/workspace/.pnpm-store",
+        "npm_config_cache_dir": "/workspace/.pnpm-cache",
+        "npm_config_network_concurrency": "1",
+        "PATH": "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:.",
         "PIP_EXTRA_INDEX_URL": "https://python-registry.wasmer.app/simple/",
         "PIP_PLATFORM": "wasix_wasm32",
         "PIP_ONLY_BINARY": ":all:",
-        "PIP_TARGET": "/native/wasix-packages",
-        "PYTHONPATH": "/native/wasix-packages",
+        "PIP_TARGET": "/workspace/wasix-packages",
+        "PYTHONPATH": "/workspace/wasix-packages",
       ],
       network: .host,
       mounts: [
         .init("/native", directory: directory),
         .init("/readonly", directory: directory, readOnly: true),
-      ])
+      ], storage: storage.backend(directory: directory))
     shell = try python.command("bash")
     isWebViewAttached = await client.diagnostics().webViewAttached
+  }
+  var fs: SandboxFileSystem {
+    get throws {
+      guard let sandbox else { throw DemoError.failed("Shell is closed") }
+      return sandbox.fs
+    }
+  }
+  func seedExamples(_ name: String? = nil, at destination: String = ".") async throws {
+    let root = Bundle.main.resourceURL!.appendingPathComponent("Examples")
+    let source = name.map { root.appendingPathComponent($0) } ?? root
+    try await copyMissing(source, to: destination)
+  }
+  private func copyMissing(_ source: URL, to destination: String) async throws {
+    let fs = try fs
+    try await fs.mkdir(destination)
+    let existing = Set(try await fs.readDir(destination).map(\.name))
+    for file in try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isDirectoryKey]) {
+      let target = destination + "/" + file.lastPathComponent
+      if try file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true {
+        try await copyMissing(file, to: target)
+      } else if !existing.contains(file.lastPathComponent) {
+        try await fs.write(target, Data(contentsOf: file))
+      }
+    }
   }
   private var shell: CommandRef?
 
@@ -56,7 +91,7 @@ final class ShellRuntime {
     guard let sandbox, let shell else { throw DemoError.failed("Shell is not initialized") }
     let process = try await sandbox.command(
       shell,
-      ["--noprofile", "--norc", "-c", "exec bash --noprofile --norc -i 2>&1"], cwd: "/native",
+      ["--noprofile", "--norc", "-c", "exec bash --noprofile --norc -i 2>&1"], cwd: "/workspace",
       env: ["TERM": "xterm-256color", "PS1": "\\[\\e[38;5;42m\\]wasmer\\[\\e[0m\\]:\\w $ "]
     )
     .spawn(stdin: .pipe, terminal: TerminalOptions(columns: UInt32(columns), rows: UInt32(rows)))
@@ -125,5 +160,26 @@ enum DemoError: Error, LocalizedError {
     switch self {
     case .failed(let message): message
     }
+  }
+}
+
+/// Changing storage starts a new shell; native and OPFS volumes retain files.
+enum ShellStorage: String, CaseIterable {
+  case native, memory, opfs
+  var label: String {
+    switch self { case .native: "Native"; case .memory: "Memory"; case .opfs: "OPFS" }
+  }
+  func backend(directory: URL) -> SandboxStorage {
+    switch self {
+    case .native: .native(directory)
+    case .memory: .memory
+    case .opfs: .opfs("WasmerShell")
+    }
+  }
+  static var initial: Self {
+    let arguments = ProcessInfo.processInfo.arguments
+    if let index = arguments.firstIndex(of: "--storage"), index + 1 < arguments.count,
+       let value = Self(rawValue: arguments[index + 1]) { return value }
+    return Self(rawValue: UserDefaults.standard.string(forKey: "shellStorage") ?? "") ?? .native
   }
 }

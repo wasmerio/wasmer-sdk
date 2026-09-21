@@ -6,7 +6,7 @@ test('cancellation releases process and sandbox results already queued by the wo
   let worker;
   class Worker {
     messages = [];
-    constructor() { worker = this; }
+    constructor(url) { worker = this; this.url = url; }
     postMessage(message) { this.messages.push(message); }
     terminate() {}
   }
@@ -30,6 +30,9 @@ test('cancellation releases process and sandbox results already queued by the wo
     const normal = rpc.request({ id: 'normal', method: 'command.spawn', args: {} });
     await worker.onmessage({ data: { id: 'normal', value: { handle: 9, id: 2 } } });
     assert.equal((await normal).value.handle, 9);
-    rpc.stop();
+    const stopped = rpc.stop();
+    assert.equal(worker.messages.at(-1).kind, 'storage-close');
+    await worker.onmessage({data: {id: worker.messages.at(-1).id, value: true}});
+    await stopped;
   } finally { Object.assign(globalThis, saved); delete globalThis.wasmerRPC; }
 });

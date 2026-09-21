@@ -428,7 +428,7 @@ fn internal_path(path: &RelativePath) -> PathBuf {
 }
 
 pub(crate) fn remove_directory_tree(
-    filesystem: &virtual_fs::mem_fs::FileSystem,
+    filesystem: &dyn VirtualFileSystem,
     path: &Path,
 ) -> FsResult<()> {
     let entries: Vec<_> = filesystem

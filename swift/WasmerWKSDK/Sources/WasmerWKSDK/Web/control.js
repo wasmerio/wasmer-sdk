@@ -1,4 +1,5 @@
 import { isHostFileSystemRequest, respondToHostFileSystem } from "./sdk/dist/host-filesystem.js";
+import { callNativeFileSystem } from "./native-filesystem.js";
 
 const native = window.webkit.messageHandlers.wasmer;
 const session = crypto.randomUUID();
@@ -7,13 +8,21 @@ void networkReady.catch(() => {});
 const worker = new Worker(new URL("./runtime.js", import.meta.url), { type: "module" });
 const pending = new Map();
 let stopped = false;
-function stop(message = "Runtime closed") {
+async function stop(message = "Runtime closed") {
   if (stopped) return;
   stopped = true;
   void native.postMessage({ kind: "network", session, method: "close", args: [] }).catch(() => {});
-  worker.terminate();
   for (const entry of pending.values()) entry.resolve({ error: { code: "CLIENT_CLOSED", message } });
   pending.clear();
+  // Give the storage worker a bounded opportunity to flush and release its
+  // volume lock. A wedged guest must never prevent Restart from completing.
+  const id = crypto.randomUUID();
+  let timer;
+  await Promise.race([
+    new Promise(resolve => { pending.set(id, {resolve}); worker.postMessage({kind:"storage-close", id}); }),
+    new Promise(resolve => { timer = setTimeout(resolve, 1000); }),
+  ]);
+  clearTimeout(timer); pending.delete(id); worker.terminate();
 }
 worker.onmessage = async ({ data }) => {
   if (data.kind === "network") {
@@ -26,7 +35,7 @@ worker.onmessage = async ({ data }) => {
     return;
   }
   if (isHostFileSystemRequest(data)) {
-    try { respondToHostFileSystem(data, await native.postMessage({ kind: "filesystem", mount: data.mount, method: data.method, args: data.args })); }
+    try { respondToHostFileSystem(data, await callNativeFileSystem(data, message => native.postMessage(message))); }
     catch (error) { respondToHostFileSystem(data, { error: { code: "EIO", message: String(error) } }); }
     return;
   }
