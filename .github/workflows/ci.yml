@@ -42,6 +42,25 @@ jobs:
           github.ref_name == 'release-please--branches--main--components--wasmer-sdk-swift'
         run: python .github/scripts/sdk_release.py verify-swift-inputs
 
+  shell:
+    name: Shell (published SDK)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install pnpm
+        run: npm install --global pnpm@12.5.1
+      - name: Install published dependencies
+        working-directory: wasmer-sh
+        run: pnpm --config.minimum-release-age=0 install --frozen-lockfile
+      - name: Build deployment output
+        working-directory: wasmer-sh
+        run: pnpm run build
+
   rust:
     name: Rust and UniFFI
     runs-on: ubuntu-24.04
