@@ -16,6 +16,8 @@ import tomllib
 import zipfile
 from pathlib import Path
 
+import go_release
+
 ROOT = Path(__file__).resolve().parents[2]
 METADATA = "release-metadata.json"
 SWIFT_METADATA = "swift/release-artifacts.json"
@@ -42,8 +44,10 @@ def digest(path: Path) -> str:
 
 
 def version(component: str, root: Path = ROOT, tag: str | None = None) -> str:
-    if component == "swift":
-        value = (root / "swift/version.txt").read_text().strip()
+    if component in {"swift", "go"}:
+        value = (root / component / "version.txt").read_text().strip()
+        if component == "go":
+            require(f"module {go_release.MODULE}" in (root / "go/go.mod").read_text(), "Unexpected Go module identity")
     elif component == "js":
         package = read_json(root / "js/package.json")
         lock = read_json(root / "js/package-lock.json")
@@ -57,6 +61,8 @@ def version(component: str, root: Path = ROOT, tag: str | None = None) -> str:
         value = package["version"]
     require(bool(re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", value)),
             "Release automation currently requires a stable MAJOR.MINOR.PATCH version")
+    if component == "go":
+        require(value.split(".")[0] in {"0", "1"}, "Go v2+ requires a new module path and proxy configuration")
     if tag is not None:
         require(tag == release_tag(component, value), f"{tag} differs from {component} version {value}")
     return value
@@ -158,6 +164,8 @@ def wheel_platform(filename: str) -> str:
 
 def validate_assets(directory: Path, component: str, value: str) -> dict[str, str]:
     """Check embedded package identities and the complete platform matrix."""
+    if component == "go":
+        return go_release.validate_assets(directory, value)
     npm = list(directory.glob("*.tgz"))
     wheels = list(directory.glob("*.whl"))
     archives = list(directory.glob("*.zip"))
@@ -316,6 +324,10 @@ def verify(directory: Path, component: str, *, root: Path = ROOT, tag: str | Non
     else:
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
         require(metadata["source_sha"] == sha, "Artifacts were built from a different commit")
+        if component == "go":
+            with zipfile.ZipFile(directory / f"v{value}.zip") as archive:
+                manifest = json.loads(archive.read(f"{go_release.MODULE}@v{value}/internal/distribution/native.json"))
+            require(manifest["source_sha"] == sha, "Go module/native libraries were built from a different commit")
     require((directory / "SHA256SUMS").read_text() == checksums({**files, METADATA: digest(directory / METADATA)}),
             "SHA256SUMS differs from release metadata")
     require({p.name for p in directory.iterdir()} == {*files, METADATA, "SHA256SUMS"},
@@ -354,7 +366,7 @@ def archive_framework(framework: Path, destination: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("check", "archive-swift", "seal", "verify", "verify-swift-inputs", "refresh-swift"))
-    parser.add_argument("--component", choices=("js", "python", "swift"), default="swift")
+    parser.add_argument("--component", choices=("js", "python", "swift", "go"), default="swift")
     parser.add_argument("--assets", type=Path)
     parser.add_argument("--tag")
     parser.add_argument("--ref", help="Fetched release PR ref for refresh-swift")

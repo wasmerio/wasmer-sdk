@@ -1,7 +1,7 @@
 # Wasmer SDK
 
 Run real software inside lightweight WebAssembly sandboxes from JavaScript,
-Python, Swift (macOS preview), or Rust.
+Python, Go (preview), Swift (macOS preview), or Rust.
 
 The Wasmer SDK turns packages from the
 [Wasmer registry](https://wasmer.io/products/registry) into composable
@@ -90,11 +90,14 @@ applications can inspect every exit reason directly.
 | Python | `pip install wasmer-sdk` | [Python SDK](python/README.md) |
 | Rust | Workspace/Git while crate publishing is disabled | [Rust SDK](rust/README.md) |
 | Swift | SwiftPM for macOS and iOS 27+ | [Swift SDK](swift/README.md) |
+| Go | Native preview; release installation pending first publication | [Go SDK](go/README.md) |
 
 JavaScript runs Wasmer and WASIX directly in WebAssembly through
 `wasm-bindgen`; Node networking is bridged through `node:net` and `node:dns`,
 not a native addon. Python uses the Rust SDK through a Python-independent
 UniFFI library. Swift uses that same UniFFI facade with an async Swift API.
+Go uses the same UniFFI facade through cgo, with static and dynamic native linking.
+Its generated bindings and native archives are distributed through Go releases.
 The Swift preview runs on macOS; the pinned runtime needs an iOS-capable backend
 before it can run on iPhone. Rust uses Wasmer natively.
 
@@ -120,6 +123,7 @@ Each SDK guide contains its own build and test commands:
 - [Build and test Python](python/README.md#build-and-test-locally)
 - [Build and test Rust](rust/README.md#build-and-test-locally)
 - [Build and test Swift](swift/README.md#build-and-use-locally)
+- [Build and test Go](go/README.md#build-and-test-from-source)
 
 CI runs the Rust and UniFFI foundation first, then JavaScript and Python in
 parallel, with a separate native Swift job on macOS. Cargo outputs, Wasmer

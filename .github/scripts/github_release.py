@@ -54,7 +54,7 @@ def download(component: str, directory: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("upload", "download"))
-    parser.add_argument("--component", choices=("js", "python", "swift"), required=True)
+    parser.add_argument("--component", choices=("js", "python", "swift", "go"), required=True)
     parser.add_argument("--assets", type=Path, required=True)
     args = parser.parse_args()
     (upload if args.command == "upload" else download)(args.component, args.assets)

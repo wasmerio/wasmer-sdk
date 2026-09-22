@@ -1,0 +1,41 @@
+name: Activate Go module proxy
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published wasmer-sdk-go-vX.Y.Z tag
+        required: true
+        type: string
+
+concurrency:
+  group: go-module-proxy-index
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  activate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: '[[ "$RELEASE_TAG" =~ ^wasmer-sdk-go-v(0|1)\.[0-9]+\.[0-9]+$ ]]'
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Verify the published artifacts and activate the version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python .github/scripts/github_release.py download --component go --assets release-dist
+          version="$(python .github/scripts/sdk_release.py check --component go)"
+          node go/proxy/publish-index.mjs release-dist/release-metadata.json "release-dist/v${version}.info"

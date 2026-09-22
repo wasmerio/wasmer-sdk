@@ -1,0 +1,6 @@
+/.build/
+/Artifacts/
+/internal/ffi/wasmer_sdk_uniffi.go
+/internal/ffi/wasmer_sdk_uniffi.h
+/internal/distribution/native.json
+/testdata/

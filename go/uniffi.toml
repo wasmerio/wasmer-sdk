@@ -1,0 +1,4 @@
+[crates.wasmer_sdk_uniffi.bindings.go]
+package_name = "ffi"
+c_module_filename = "wasmer_sdk_uniffi"
+go_mod = "go.wasmer.io/sdk/internal"
