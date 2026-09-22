@@ -1,3 +1,4 @@
+import "./node-compat.js";
 import init, {
   setSDKUrl,
   setWorkerUrl,

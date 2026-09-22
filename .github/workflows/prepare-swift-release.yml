@@ -76,7 +76,7 @@ jobs:
         working-directory: js
         run: |
           npm test
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium firefox webkit
           npm run test:browser
       - uses: actions/upload-artifact@v4
         with:

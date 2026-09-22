@@ -209,16 +209,16 @@ jobs:
         working-directory: js
         run: npm ci
 
-      - name: Install browser
+      - name: Install browsers
         working-directory: js
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium firefox webkit
 
       - uses: actions/download-artifact@v4
         with:
           name: wasmer-sdk-js-${{ github.sha }}
           path: js
 
-      - name: Test Python in the browser
+      - name: Test browser runtimes
         working-directory: js
         run: npm run test:browser
 

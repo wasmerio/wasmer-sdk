@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installNodeSymbols, installNodeStackTrace } from "../Sources/WasmerWKSDK/Web/node-compat.js";
+import { installNodeSymbols, installNodeStackTrace } from "../dist/node-compat.js";
 
 test("missing disposal symbols support Node's primordial getter and remain stable", () => {
   const symbol = (description) => Symbol(description);

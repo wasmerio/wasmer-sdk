@@ -353,10 +353,18 @@ Run the network and browser regressions explicitly:
 ```console
 npm run test:edgejs
 npm run test:postgres
-npx playwright install chromium
+npx playwright install chromium firefox webkit
 npm run test:browser
 npm run test:browser-http
+npm run test:browser-node
 ```
 
 `npm run check` type-checks the handwritten TypeScript API without rebuilding
 the wasm module.
+
+The Node browser regression suite covers HTTP, readline, Express installation,
+structured stack traces, and server cancellation/restart in Chromium, Firefox, and WebKit.
+To run the same suite in Safari 27+, run
+`node tests/support/serve-node-compat.mjs` and open its printed URL in Safari.
+It displays each check and a final pass or failure. `WASMER_TEST_BROWSERS` selects
+Playwright engines; `WASMER_EDGEJS_WEBC` optionally supplies a local Edge package.

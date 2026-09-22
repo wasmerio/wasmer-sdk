@@ -21,7 +21,7 @@ const edgejsWebcPath = edgejsWebcUrl?.startsWith("/@fs/")
 // entrypoints as assets without traversing their ESM imports, so emit their
 // package-owned companion modules at the relative paths the entrypoints use.
 function sdkRuntimeAssets(): Plugin {
-  const dependencies = ["node-network-rpc.js", "capi-worker-bridge.js"];
+  const dependencies = ["node-compat.js", "node-network-rpc.js", "capi-worker-bridge.js"];
 
   return {
     name: "wasmer-sdk-runtime-assets",
