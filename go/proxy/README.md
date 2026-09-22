@@ -4,10 +4,14 @@ This Node.js 24+ service has no npm dependencies. GitHub Releases hold the Go
 module ZIP, `.mod`, `.info`, and native archives. The service handles discovery,
 version metadata, and redirects; it never regenerates or serves native binaries.
 
+From the repository root (no dependency installation is needed):
+
 ```sh
-node --test go/proxy/*.test.mjs
-node go/proxy/server.mjs
+npm --prefix go/proxy test
+npm --prefix go/proxy start
 ```
+
+Inside `go/proxy`, use `npm test` and `npm start` directly.
 
 Deployment configuration:
 
