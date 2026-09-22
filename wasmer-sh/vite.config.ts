@@ -1,5 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig, type Plugin } from "vite";
@@ -24,12 +24,32 @@ function sdkRuntimeAssets(): Plugin {
   return {
     name: "wasmer-sdk-runtime-assets",
     async generateBundle() {
-      const dependencies = ["node-network-rpc.js", "capi-worker-bridge.js"];
-      // Deployment uses the published SDK, which can lag this repository.
-      // SDK 0.14.0 has no node-compat module; newer SDKs import it in workers.
-      if ((await readdir(sdkDist)).includes("node-compat.js")) {
-        dependencies.push("node-compat.js");
-      }
+      // Follow the installed worker's imports instead of maintaining a list
+      // that can miss new SDK modules. Vite emits the worker itself by URL.
+      const visited = new Set<string>();
+      const emitWorkerImports = async (file: string, emit = true): Promise<void> => {
+        if (visited.has(file)) return;
+        visited.add(file);
+        const source = await readFile(file, "utf8");
+        if (emit) {
+          this.emitFile({
+            type: "asset",
+            fileName: `assets/${relative(sdkDist, file).split(sep).join("/")}`,
+            source,
+          });
+        }
+        for (const statement of this.parse(source).body) {
+          if (
+            (statement.type === "ImportDeclaration" ||
+              statement.type === "ExportNamedDeclaration" ||
+              statement.type === "ExportAllDeclaration") &&
+            typeof statement.source?.value === "string" &&
+            statement.source.value.startsWith(".")
+          ) {
+            await emitWorkerImports(resolve(dirname(file), statement.source.value));
+          }
+        }
+      };
       const emitDirectory = async (
         sourceDirectory: string,
         outputDirectory: string,
@@ -51,13 +71,7 @@ function sdkRuntimeAssets(): Plugin {
         }
       };
 
-      for (const fileName of dependencies) {
-        this.emitFile({
-          type: "asset",
-          fileName: `assets/${fileName}`,
-          source: await readFile(resolve(sdkDist, fileName)),
-        });
-      }
+      await emitWorkerImports(resolve(sdkDist, "browser-worker.js"), false);
       await emitDirectory(resolve(sdkDist, "../pkg/snippets"), "assets/snippets");
     },
   };

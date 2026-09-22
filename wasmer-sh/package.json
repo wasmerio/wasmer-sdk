@@ -15,7 +15,8 @@
     "test": "npm run test:compatibility && node tests/browser-smoke.mjs",
     "test:stress": "node tests/terminal-stress.mjs",
     "test:compatibility": "node --test tests/browser-compatibility.mjs",
-    "test:examples": "node tests/example-picker.mjs"
+    "test:examples": "node tests/example-picker.mjs",
+    "test:production": "node --test --test-timeout=180000 tests/production-shell.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
