@@ -152,7 +152,12 @@ const elements = {
   wispCancel: requiredElement<HTMLButtonElement>("wisp-cancel-button"),
 };
 
-showBrowserCompatibilityWarning(navigator.userAgent);
+const browserCompatibilityWarning = detectBrowserCompatibilityWarning(
+  navigator.userAgent,
+  globalThis.WebAssembly,
+  navigator.maxTouchPoints,
+);
+showBrowserCompatibilityWarning();
 
 const params = new URLSearchParams(window.location.search);
 const selectedExample = examples.find(example => example.id === params.get("example"));
@@ -1184,6 +1189,9 @@ HISTFILE=/workspace/.bash_history
 }
 
 function assertBrowserCapabilities(): void {
+  if (browserCompatibilityWarning) {
+    throw new Error(browserCompatibilityWarning.message);
+  }
   if (!globalThis.crossOriginIsolated) {
     throw new Error(
       "Cross-origin isolation is unavailable. Serve this page with COOP and COEP headers.",
@@ -1194,8 +1202,8 @@ function assertBrowserCapabilities(): void {
   }
 }
 
-function showBrowserCompatibilityWarning(userAgent: string): void {
-  const warning = detectBrowserCompatibilityWarning(userAgent);
+function showBrowserCompatibilityWarning(): void {
+  const warning = browserCompatibilityWarning;
   if (!warning) return;
   elements.browserWarning.dataset.browser = warning.browser;
   elements.browserWarningTitle.textContent = warning.title;
