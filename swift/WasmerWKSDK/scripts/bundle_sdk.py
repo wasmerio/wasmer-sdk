@@ -15,7 +15,7 @@ MANIFEST = DESTINATION / "manifest.json"
 INPUTS = ("Cargo.toml", "Cargo.lock", ".cargo", "rust/Cargo.toml", "rust/src",
           "js/bindgen", "js/src", "js/package.json", "js/package-lock.json",
           "js/tsconfig.json", "js/scripts/build-wasm.mjs")
-DIST = ("browser-worker.js", "capi-worker-bridge.js", "host-filesystem.js", "node-network-rpc.js")
+DIST = ("node-compat.js", "browser-worker.js", "capi-worker-bridge.js", "host-filesystem.js", "node-network-rpc.js")
 
 
 def sha256(path):

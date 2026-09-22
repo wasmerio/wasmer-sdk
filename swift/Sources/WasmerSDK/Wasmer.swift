@@ -128,24 +128,41 @@ public struct CommandRef: Sendable {
   public var name: String { core.name() }
 }
 
+/// Storage for `/workspace`, shared by guest processes and `sandbox.fs`.
+public enum SandboxStorage: Sendable {
+  /// Fast runtime storage, discarded when the sandbox closes.
+  case memory
+  /// An app-accessible directory. Currently supported by the iOS backend.
+  case native(URL)
+  /// A named persistent browser volume. Currently supported by the iOS backend.
+  case opfs(String)
+}
+
 public struct Sandboxes: Sendable {
   fileprivate let core: WasmerCore
 
   public func create(
     packages: [PackageSource] = [], files: [String: Data] = [:],
     env: [String: String] = [:], network: NetworkPolicy = .disabled,
-    mounts: [DirectoryMount] = []
+    mounts: [DirectoryMount] = [], storage: SandboxStorage = .memory
   ) async throws -> Sandbox {
     var resolved: [PackageCore] = []
     for source in packages {
       resolved.append(try await Packages(core: core).load(source).core)
     }
     #if os(iOS)
+    let backendStorage: WorkspaceStorage
+    switch storage {
+    case .memory: backendStorage = .memory
+    case .native(let directory): backendStorage = .native(URL(fileURLWithPath: try localPath(directory)))
+    case .opfs(let volume): backendStorage = .opfs(volume)
+    }
     return Sandbox(core: try await core.createSandbox(
       packages: resolved, files: files, env: env, network: network,
-      mounts: try mounts.map { .init(path: $0.path, directory: URL(fileURLWithPath: try localPath($0.directory)), readOnly: $0.readOnly) }))
+      storage: backendStorage, mounts: try mounts.map { .init(path: $0.path, directory: URL(fileURLWithPath: try localPath($0.directory)), readOnly: $0.readOnly) }))
     #else
     guard mounts.isEmpty else { throw unavailable("Native directory mounts") }
+    guard case .memory = storage else { throw unavailable("External workspace storage") }
     return Sandbox(core: try await core.createSandbox(packages: resolved, files: files, env: env, network: network))
     #endif
   }
@@ -404,15 +421,17 @@ public struct TerminalOptions: Sendable {
 public struct Capabilities: Sendable {
   public let localPackageDirectories: Bool
   public let directoryMounts: Bool
+  public let nativeStorage: Bool
+  public let opfsStorage: Bool
   public let terminal: Bool
   public let httpExposure: Bool
 }
 extension Wasmer {
   public var capabilities: Capabilities {
     #if os(iOS)
-    return Capabilities(localPackageDirectories: false, directoryMounts: true, terminal: true, httpExposure: true)
+    return Capabilities(localPackageDirectories: false, directoryMounts: true, nativeStorage: true, opfsStorage: true, terminal: true, httpExposure: true)
     #else
-    return Capabilities(localPackageDirectories: true, directoryMounts: false, terminal: false, httpExposure: false)
+    return Capabilities(localPackageDirectories: true, directoryMounts: false, nativeStorage: false, opfsStorage: false, terminal: false, httpExposure: false)
     #endif
   }
   /// Diagnostic counters for integration tests, independent of the selected backend.

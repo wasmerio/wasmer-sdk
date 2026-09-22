@@ -5,6 +5,9 @@ import CryptoKit
 /// Serves bundled assets only on IPv4 loopback, beneath an unguessable URL.
 /// All mutable connection state is confined to `queue`.
 final class LoopbackServer: @unchecked Sendable {
+  private let port: UInt16
+  private var stopped: [CheckedContinuation<Void, Never>] = []
+  private var cancelled = false
   private let directory: URL
   private let cacheDirectory: URL
   private let token = UUID().uuidString
@@ -14,7 +17,8 @@ final class LoopbackServer: @unchecked Sendable {
   private var startupCompleted = false
   private let downloads = URLSession(configuration: .ephemeral)
 
-  init(directory: URL, cacheDirectory: URL? = nil) {
+  init(directory: URL, cacheDirectory: URL? = nil, port: UInt16 = 0) {
+    self.port = port
     self.directory = directory.standardizedFileURL
     self.cacheDirectory = cacheDirectory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("WasmerWKSDKPackages")
@@ -25,7 +29,7 @@ final class LoopbackServer: @unchecked Sendable {
       queue.async {
         do {
           let parameters = NWParameters.tcp
-          parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+          parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: self.port)!)
           let listener = try NWListener(using: parameters)
           self.listener = listener
           listener.stateUpdateHandler = { state in
@@ -34,9 +38,20 @@ final class LoopbackServer: @unchecked Sendable {
               guard !self.startupCompleted, let port = listener.port else { return }
               self.startupCompleted = true
               continuation.resume(returning: URL(string: "http://127.0.0.1:\(port.rawValue)/\(self.token)/index.html")!)
-            case .failed(let error):
+            case .failed(let error), .waiting(let error):
               if !self.startupCompleted { self.startupCompleted = true; continuation.resume(throwing: error) }
               listener.cancel()
+            case .cancelled:
+              self.cancelled = true
+              self.listener = nil
+              listener.stateUpdateHandler = nil
+              listener.newConnectionHandler = nil
+              if !self.startupCompleted {
+                self.startupCompleted = true
+                continuation.resume(throwing: CancellationError())
+              }
+              for waiter in self.stopped { waiter.resume() }
+              self.stopped.removeAll()
             default: break
             }
           }
@@ -55,10 +70,19 @@ final class LoopbackServer: @unchecked Sendable {
   func stop() {
     queue.async {
       self.listener?.cancel()
-      self.listener = nil
       self.downloads.invalidateAndCancel()
       for connection in self.connections.values { connection.cancel() }
       self.connections.removeAll()
+    }
+  }
+
+  func stopAndWait() async {
+    stop()
+    await withCheckedContinuation { continuation in
+      queue.async {
+        if self.listener == nil || self.cancelled { continuation.resume() }
+        else { self.stopped.append(continuation) }
+      }
     }
   }
 

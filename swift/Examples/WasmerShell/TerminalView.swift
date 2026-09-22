@@ -31,7 +31,7 @@ final class TerminalView: UIView, UIKeyInput {
     self.terminal = terminal
     cellWidth = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)]).width
     super.init(frame: frame)
-    backgroundColor = UIColor(red: 13/255, green: 20/255, blue: 18/255, alpha: 1)
+    backgroundColor = ShellTheme.terminalBackground
     isOpaque = true
     contentMode = .redraw
     accessibilityLabel = "Terminal"
@@ -135,7 +135,7 @@ final class TerminalView: UIView, UIKeyInput {
       context.restoreGState()
     }
     if frame.visible {
-      UIColor(red: 0.38, green: 0.9, blue: 0.63, alpha: 0.8).setFill()
+      ShellTheme.cursor.setFill()
       context.fill(CGRect(x: inset + CGFloat(frame.column) * cellWidth, y: inset + CGFloat(frame.row + 1) * cellHeight - 3,
         width: cellWidth, height: 2))
     }

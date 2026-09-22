@@ -30,7 +30,10 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      # Cache restoration is optional; bound downloads and archive extraction.
       - uses: ./.github/actions/cache-sdk
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           cargo-profile: js-nightly
           cache-compiled-artifacts: 'false'
@@ -49,7 +52,7 @@ jobs:
         run: |
           timeout --kill-after=30s 6m npm test
           npm run test:bindgen
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium firefox webkit
           npm run test:browser
       - name: Pack the tested build
         working-directory: js
@@ -89,7 +92,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+      # Cache restoration is optional; bound downloads and archive extraction.
       - uses: ./.github/actions/cache-sdk
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           cargo-profile: native-1.95-release-${{ matrix.backend }}
       - run: rustup toolchain install 1.95.0 --profile minimal --no-self-update

@@ -1,4 +1,7 @@
-use std::path::{Component, Path, PathBuf};
+use std::{
+    path::{Component, Path, PathBuf},
+    sync::Arc,
+};
 
 use virtual_fs::{AsyncReadExt, AsyncWriteExt, FileSystem as VirtualFileSystem};
 
@@ -9,11 +12,11 @@ use crate::{
 /// Filesystem access to a sandbox's persistent `/workspace`.
 #[derive(Clone, Debug)]
 pub struct SandboxFileSystem {
-    pub(crate) inner: virtual_fs::mem_fs::FileSystem,
+    pub(crate) inner: Arc<dyn VirtualFileSystem + Send + Sync>,
 }
 
 impl SandboxFileSystem {
-    pub(crate) fn new(inner: virtual_fs::mem_fs::FileSystem) -> Self {
+    pub(crate) fn new(inner: Arc<dyn VirtualFileSystem + Send + Sync>) -> Self {
         Self { inner }
     }
 
@@ -26,10 +29,12 @@ impl SandboxFileSystem {
     pub async fn write(&self, path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> Result<()> {
         let (guest, internal) = workspace_path(path.as_ref())?;
         if let Some(parent) = internal.parent() {
-            virtual_fs::create_dir_all(&self.inner, parent).map_err(|error| Error::FileSystem {
-                operation: "create_dir_all",
-                path: guest.clone(),
-                message: error.to_string(),
+            virtual_fs::create_dir_all(self.inner.as_ref(), parent).map_err(|error| {
+                Error::FileSystem {
+                    operation: "create_dir_all",
+                    path: guest.clone(),
+                    message: error.to_string(),
+                }
             })?;
         }
         let mut file = self
@@ -114,10 +119,12 @@ impl SandboxFileSystem {
     /// operation.
     pub fn create_dir_all(&self, path: impl AsRef<Path>) -> Result<()> {
         let (guest, internal) = workspace_path(path.as_ref())?;
-        virtual_fs::create_dir_all(&self.inner, internal).map_err(|error| Error::FileSystem {
-            operation: "create_dir_all",
-            path: guest,
-            message: error.to_string(),
+        virtual_fs::create_dir_all(self.inner.as_ref(), internal).map_err(|error| {
+            Error::FileSystem {
+                operation: "create_dir_all",
+                path: guest,
+                message: error.to_string(),
+            }
         })
     }
 
@@ -216,10 +223,12 @@ impl SandboxFileSystem {
                 .map_err(map_error("remove"));
         }
         if recursive {
-            remove_directory_tree(&self.inner, &internal).map_err(|error| Error::FileSystem {
-                operation: "remove",
-                path: guest.clone(),
-                message: error.to_string(),
+            remove_directory_tree(self.inner.as_ref(), &internal).map_err(|error| {
+                Error::FileSystem {
+                    operation: "remove",
+                    path: guest.clone(),
+                    message: error.to_string(),
+                }
             })?;
         }
         self.inner
@@ -279,7 +288,9 @@ pub(crate) fn validate_guest_path(path: &Path) -> Result<PathBuf> {
 
 fn workspace_path(path: &Path) -> Result<(PathBuf, PathBuf)> {
     let path = validate_guest_path(path)?;
-    let relative = if path.is_absolute() {
+    // Guest paths use POSIX roots. On wasm32-unknown-unknown, std::Path
+    // treats `/workspace/file` as rooted but not absolute.
+    let relative = if path.has_root() {
         path.strip_prefix("/workspace")
             .map_err(|_| Error::InvalidGuestPath {
                 path: path.clone(),

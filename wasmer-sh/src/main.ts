@@ -16,48 +16,14 @@ import { Terminal } from "@xterm/xterm";
 
 import { detectBrowserCompatibilityWarning } from "./browser-compatibility";
 import { WorkspaceEditor } from "./editor";
-import expressReadme from "../workspace/node-express/README.md?raw";
-import expressPackage from "../workspace/node-express/package.json?raw";
-import expressLockfile from "../workspace/node-express/pnpm-lock.yaml?raw";
-import expressServer from "../workspace/node-express/server.js?raw";
-import nextPage from "../workspace/next/pages/index.js?raw";
-import nextApiHello from "../workspace/next/pages/api/hello.js?raw";
-import nextNpmrc from "../workspace/next/.npmrc?raw";
-import nextConfig from "../workspace/next/next.config.mjs?raw";
-import nextLockfile from "../workspace/next/pnpm-lock.yaml?raw";
-import nextPackage from "../workspace/next/package.json?raw";
-import nextReadme from "../workspace/next/README.md?raw";
-import nodeReadme from "../workspace/node/README.md?raw";
-import nodeServer from "../workspace/node/server.js?raw";
-import phpIndex from "../workspace/php/index.php?raw";
-import phpInfo from "../workspace/php/phpinfo.php?raw";
-import phpReadme from "../workspace/php/README.md?raw";
-import fastapiReadme from "../workspace/python-fastapi/README.md?raw";
-import fastapiServer from "../workspace/python-fastapi/server.py?raw";
-import fastapiRequirements from "../workspace/python-fastapi/requirements.txt?raw";
-import djangoReadme from "../workspace/python-django/README.md?raw";
-import djangoServer from "../workspace/python-django/server.py?raw";
-import djangoRequirements from "../workspace/python-django/requirements.txt?raw";
-import pythonReadme from "../workspace/python/README.md?raw";
-import pythonServer from "../workspace/python/server.py?raw";
-import vinextApp from "../workspace/vinext/pages/_app.js?raw";
-import vinextPage from "../workspace/vinext/pages/index.js?raw";
-import vinextApiHello from "../workspace/vinext/pages/api/hello.js?raw";
-import vinextNpmrc from "../workspace/vinext/.npmrc?raw";
-import vinextLockfile from "../workspace/vinext/pnpm-lock.yaml?raw";
-import vinextPackage from "../workspace/vinext/package.json?raw";
-import vinextReadme from "../workspace/vinext/README.md?raw";
-import vinextStyles from "../workspace/vinext/styles.css?raw";
-import vinextViteConfig from "../workspace/vinext/vite.config.js?raw";
-import workspaceReadme from "../workspace/README.md?raw";
+import { examples, exampleFiles, renderExamples, exampleUrl } from "./examples";
 
 const DEFAULT_PACKAGE = "wasmer/bash";
-const EDGEJS_PACKAGE = "wasmer/edgejs@0.2.0";
+const EDGEJS_PACKAGE = "wasmer/edge@=0.2.1";
 const DEFAULT_USES = [
   "wasmer/neatvi",
   "curl/curl",
-  "python/python@=3.13.20",
-  EDGEJS_PACKAGE,
+  ...new Set(examples.flatMap(example => example.packages)),
   "php/php-32",
 ];
 const TRANSCRIPT_LIMIT = 128 * 1024;
@@ -141,6 +107,9 @@ const elements = {
     "browser-warning-dismiss",
   ),
   stage: document.querySelector<HTMLElement>(".shell-stage")!,
+  picker: requiredElement<HTMLElement>("example-picker"),
+  examplesButton: requiredElement<HTMLButtonElement>("examples-button"),
+  resume: requiredElement<HTMLButtonElement>("resume-button"),
   workspaceColumn: requiredElement<HTMLDivElement>("workspace-column"),
   terminal: requiredElement<HTMLDivElement>("terminal"),
   status: requiredElement<HTMLSpanElement>("session-status"),
@@ -183,9 +152,16 @@ const elements = {
   wispCancel: requiredElement<HTMLButtonElement>("wisp-cancel-button"),
 };
 
-showBrowserCompatibilityWarning(navigator.userAgent);
+const browserCompatibilityWarning = detectBrowserCompatibilityWarning(
+  navigator.userAgent,
+  globalThis.WebAssembly,
+  navigator.maxTouchPoints,
+);
+showBrowserCompatibilityWarning();
 
-const config = readConfig(new URLSearchParams(window.location.search));
+const params = new URLSearchParams(window.location.search);
+const selectedExample = examples.find(example => example.id === params.get("example"));
+const config = readConfig(params);
 const wispAutoconfigureChannel = new BroadcastChannel(
   WISP_AUTOCONFIGURE_CHANNEL,
 );
@@ -252,8 +228,6 @@ let wispSetupMode: WispSetupMode = "deploy";
 terminal.loadAddon(fit);
 terminal.open(elements.terminal);
 fitTerminal();
-terminal.focus();
-
 new ResizeObserver(fitTerminal).observe(elements.terminal);
 terminal.onData((data) => {
   inputQueue = inputQueue
@@ -271,6 +245,10 @@ elements.clear.addEventListener("click", () => {
 elements.browserWarningDismiss.addEventListener("click", () => {
   elements.browserWarning.hidden = true;
 });
+renderExamples(requiredElement("example-groups"));
+requiredElement<HTMLAnchorElement>("full-shell-link").href = exampleUrl("shell");
+elements.examplesButton.addEventListener("click", () => showExamples(true));
+elements.resume.addEventListener("click", () => showExamples(false));
 elements.restart.addEventListener("click", () => void start());
 elements.editorButton.addEventListener("click", () => void toggleEditor());
 elements.networkButton.addEventListener("click", () => void changeWispProxy());
@@ -360,9 +338,26 @@ if (import.meta.env.DEV) {
   };
 }
 
-void start();
+// Merely browsing examples must not download or initialize any guest packages.
+if (selectedExample || params.get("example") === "shell" ||
+    ["package", "command", "use", "arg"].some(key => params.has(key))) {
+  void start();
+} else {
+  setState("choosing", "Choose an example");
+  showExamples(true);
+}
+
+function showExamples(show: boolean): void {
+  elements.picker.hidden = !show;
+  elements.stage.hidden = show;
+  document.documentElement.classList.toggle("show-examples", show);
+  elements.resume.hidden = !activeSession;
+  if (show) requiredElement("examples-title").focus();
+  else { fitTerminal(); terminal.focus(); }
+}
 
 async function start(): Promise<void> {
+  showExamples(false);
   const currentGeneration = ++generation;
   setBusy(true);
   setState("booting", "Preparing runtime");
@@ -423,8 +418,8 @@ async function start(): Promise<void> {
         PIP_EXTRA_INDEX_URL: "https://python-registry.wasmer.app/simple/",
         PIP_PLATFORM: "wasix_wasm32",
         PIP_ONLY_BINARY: ":all:",
-        PIP_TARGET: "/workspace/wasix-packages",
-        PYTHONPATH: "/workspace/wasix-packages",
+        PIP_TARGET: selectedExample ? "/workspace/.python-packages" : "/workspace/wasix-packages",
+        PYTHONPATH: selectedExample ? "/workspace/.python-packages" : "/workspace/wasix-packages",
         PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:.",
         USER: "wasmer",
         LOGNAME: "wasmer",
@@ -928,7 +923,11 @@ function writeWelcome(): void {
     [
       "\x1b[38;5;245mWelcome to wasmer.sh\x1b[0m",
       "Run any Wasmer package in your browser with the Wasmer SDK for JavaScript.",
-      "Type \x1b[38;5;81mcat README.md\x1b[0m to explore the workspace.",
+      ...(selectedExample ? [
+        `${selectedExample.title} · ${selectedExample.description}`,
+        ...(selectedExample.install ? [`Install:  ${selectedExample.install}`] : []),
+        `Run:      ${selectedExample.run}`,
+      ] : ["Type \x1b[38;5;81mcat README.md\x1b[0m to explore the workspace."]),
       "",
     ].join("\r\n"),
   );
@@ -955,9 +954,9 @@ function isManagedShell(shellConfig: ShellConfig): boolean {
 }
 
 function readConfig(params: URLSearchParams): ShellConfig {
-  const packageName = params.get("package")?.trim() || DEFAULT_PACKAGE;
-  const commandName = params.get("command")?.trim() || undefined;
-  const uses = params.has("use")
+  const packageName = selectedExample ? DEFAULT_PACKAGE : params.get("package")?.trim() || DEFAULT_PACKAGE;
+  const commandName = selectedExample ? undefined : params.get("command")?.trim() || undefined;
+  const uses = selectedExample ? selectedExample.packages : params.has("use")
     ? params.getAll("use").map((value) => value.trim()).filter(Boolean)
     : packageName === DEFAULT_PACKAGE
       ? DEFAULT_USES
@@ -966,7 +965,7 @@ function readConfig(params: URLSearchParams): ShellConfig {
     packageName,
     commandName,
     uses,
-    args: params.getAll("arg"),
+    args: selectedExample ? [] : params.getAll("arg"),
     wispUrl:
       params.get("wisp")?.trim() ||
       import.meta.env.VITE_WISP_URL?.trim() ||
@@ -1182,49 +1181,17 @@ function normalizeWispUrl(value: string): string {
 
 function workspaceFiles(): Record<string, string> {
   return {
-    ".bashrc": `# wasmer.sh is a real Bash session. Keep runtime conveniences here
-# so Bash—not the browser—owns command parsing and process execution.
-PS1='\\[\\033[1;38;5;141m\\]➜\\[\\033[0m\\] \\[\\033[1;38;5;117m\\]\\W\\[\\033[0m\\] \\[\\033[1m\\]$\\[\\033[0m\\] '
+    ...exampleFiles(selectedExample),
+    ".bashrc": `PS1='\\[\\033[1;38;5;141m\\]➜\\[\\033[0m\\] \\[\\033[1;38;5;117m\\]\\W\\[\\033[0m\\] \\[\\033[1m\\]$\\[\\033[0m\\] '
 HISTFILE=/workspace/.bash_history
 `,
-    "README.md": workspaceReadme,
-    "node/README.md": nodeReadme,
-    "node/server.js": nodeServer,
-    "node-express/README.md": expressReadme,
-    "node-express/package.json": expressPackage,
-    "node-express/pnpm-lock.yaml": expressLockfile,
-    "node-express/server.js": expressServer,
-    "next/README.md": nextReadme,
-    "next/.npmrc": nextNpmrc,
-    "next/package.json": nextPackage,
-    "next/pnpm-lock.yaml": nextLockfile,
-    "next/next.config.mjs": nextConfig,
-    "next/pages/index.js": nextPage,
-    "next/pages/api/hello.js": nextApiHello,
-    "vinext/README.md": vinextReadme,
-    "vinext/.npmrc": vinextNpmrc,
-    "vinext/package.json": vinextPackage,
-    "vinext/pnpm-lock.yaml": vinextLockfile,
-    "vinext/pages/_app.js": vinextApp,
-    "vinext/pages/index.js": vinextPage,
-    "vinext/pages/api/hello.js": vinextApiHello,
-    "vinext/styles.css": vinextStyles,
-    "vinext/vite.config.js": vinextViteConfig,
-    "python-fastapi/README.md": fastapiReadme,
-    "python-fastapi/server.py": fastapiServer,
-    "python-fastapi/requirements.txt": fastapiRequirements,
-    "python-django/README.md": djangoReadme,
-    "python-django/server.py": djangoServer,
-    "python-django/requirements.txt": djangoRequirements,
-    "python/README.md": pythonReadme,
-    "python/server.py": pythonServer,
-    "php/README.md": phpReadme,
-    "php/index.php": phpIndex,
-    "php/phpinfo.php": phpInfo,
   };
 }
 
 function assertBrowserCapabilities(): void {
+  if (browserCompatibilityWarning) {
+    throw new Error(browserCompatibilityWarning.message);
+  }
   if (!globalThis.crossOriginIsolated) {
     throw new Error(
       "Cross-origin isolation is unavailable. Serve this page with COOP and COEP headers.",
@@ -1235,8 +1202,8 @@ function assertBrowserCapabilities(): void {
   }
 }
 
-function showBrowserCompatibilityWarning(userAgent: string): void {
-  const warning = detectBrowserCompatibilityWarning(userAgent);
+function showBrowserCompatibilityWarning(): void {
+  const warning = browserCompatibilityWarning;
   if (!warning) return;
   elements.browserWarning.dataset.browser = warning.browser;
   elements.browserWarningTitle.textContent = warning.title;

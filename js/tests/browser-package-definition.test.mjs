@@ -68,6 +68,10 @@ test("creates and loads large browser modules with automatic entrypoints", { tim
         files: { "/data/input.txt": "browser data" },
       });
       sandbox = await client.sandboxes.create({ packages: [pkg] });
+      // wasm32-unknown-unknown Path::is_absolute differs from POSIX. Absolute
+      // and relative workspace paths must still address the same guest file.
+      await sandbox.fs.writeText("/workspace/from-swift.txt", "shared");
+      if (await sandbox.fs.readText("from-swift.txt") !== "shared") throw new Error("Absolute workspace path was nested");
       const first = (await sandbox.command(pkg).run()).text();
       const second = (await sandbox.command("hello").run()).text();
       const raw = await client.packages.load(largeModule(hello));

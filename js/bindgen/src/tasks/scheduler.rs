@@ -190,6 +190,10 @@ struct SchedulerState {
     /// Workers that are currently blocked on synchronous operations and can't
     /// receive work at this time.
     busy: VecDeque<WorkerHandle>,
+    /// Never receives guest tasks or their shared-object snapshots.
+    timer_worker: Option<WorkerHandle>,
+    retire_wasm_workers: bool,
+    retiring: BTreeSet<u32>,
     /// A channel that can be used to send messages to this scheduler.
     mailbox: Scheduler,
     /// Nested WebAssembly objects waiting to travel with the next blocking
@@ -223,6 +227,15 @@ impl SchedulerState {
         SchedulerState {
             idle: VecDeque::new(),
             busy: VecDeque::new(),
+            timer_worker: None,
+            retire_wasm_workers: js_sys::Reflect::get(
+                &js_sys::global(),
+                &JsValue::from_str("__wasmerWorkerPerThread"),
+            )
+            .ok()
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+            retiring: BTreeSet::new(),
             mailbox,
             pending_capi_transfers: BTreeMap::new(),
             capi_values: BTreeMap::new(),
@@ -243,6 +256,15 @@ impl SchedulerState {
         message: SchedulerMessage,
     ) -> Result<(), Error> {
         match message {
+            SchedulerMessage::Timer(timer) => {
+                if self.timer_worker.is_none() {
+                    self.timer_worker = Some(self.start_worker(false)?);
+                }
+                self.timer_worker
+                    .as_ref()
+                    .unwrap()
+                    .send_with_capi_transfers(PostMessagePayload::Timer(timer), Vec::new())
+            }
             SchedulerMessage::Close { .. } | SchedulerMessage::WorkerFailed => {
                 // Unreachable in practice: the receive loop breaks on Close
                 // before calling execute(), and dropping the state terminates
@@ -287,6 +309,11 @@ impl SchedulerState {
                 Ok(())
             }
             SchedulerMessage::WorkerIdle { worker_id } => {
+                // A dedicated guest worker sends Retired after the JS promise
+                // has settled and its SDK stack/TLS have been released.
+                if self.retiring.contains(&worker_id) {
+                    return Ok(());
+                }
                 move_worker(worker_id, &mut self.busy, &mut self.idle);
                 let active_wasm_threads = self.wasm_workers.len();
                 self.wasm_workers
@@ -315,6 +342,22 @@ impl SchedulerState {
                     self.idle.len(),
                     self.wasm_workers.len(),
                 ));
+                Ok(())
+            }
+            SchedulerMessage::WorkerRetired { worker_id } => {
+                if !self.retiring.remove(&worker_id) {
+                    if self.worker(worker_id).is_none() {
+                        return Ok(());
+                    }
+                    anyhow::bail!("unexpected retired worker {worker_id}");
+                }
+                self.busy.retain(|worker| worker.id() != worker_id);
+                self.wasm_workers
+                    .retain(|_, worker| worker.worker_id != worker_id);
+                wasmer::js::collect_shared_objects();
+                for worker in &self.idle {
+                    worker.collect_shared_objects()?;
+                }
                 Ok(())
             }
             SchedulerMessage::CapiShare {
@@ -392,6 +435,7 @@ impl SchedulerState {
     ) -> Result<(), Error> {
         let would_block = msg.would_block();
         let reason = match &msg {
+            PostMessagePayload::Timer(_) => "timer",
             PostMessagePayload::Async(_) => "async",
             PostMessagePayload::Blocking(BlockingJob::Thunk(_)) => "blocking-thunk",
             PostMessagePayload::Blocking(BlockingJob::SpawnWasm(_)) => "blocking-wasm",
@@ -419,7 +463,13 @@ impl SchedulerState {
         process: wasmer_wasix::WasiProcess,
     ) -> Result<(), Error> {
         let reason = format!("wasm-{}.{}", task_key.0, task_key.1);
-        let worker = self.next_available_worker(&reason)?;
+        let worker = if self.retire_wasm_workers {
+            let worker = self.start_worker(true)?;
+            self.retiring.insert(worker.id());
+            worker
+        } else {
+            self.next_available_worker(&reason)?
+        };
         let transfers = self.take_capi_transfers(source_worker_id, true, Some(worker.id()));
         self.wasm_workers.insert(
             task_key,
@@ -450,7 +500,7 @@ impl SchedulerState {
         // Rather than sending the task to one of the blocking workers,
         // let's spawn a new worker
 
-        let worker = self.start_worker()?;
+        let worker = self.start_worker(false)?;
         scheduler_diag(format!(
             "create worker={} reason={} busy={} idle={} wasm={}",
             worker.id(),
@@ -466,7 +516,7 @@ impl SchedulerState {
         Ok(worker)
     }
 
-    fn start_worker(&mut self) -> Result<WorkerHandle, Error> {
+    fn start_worker(&mut self, retire_after_task: bool) -> Result<WorkerHandle, Error> {
         // Note: By using a monotonically incrementing counter, we can make sure
         // every single worker created with this shared linear memory will get a
         // unique ID.
@@ -474,7 +524,7 @@ impl SchedulerState {
 
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
 
-        let handle = WorkerHandle::spawn(id, self.mailbox.clone())?;
+        let handle = WorkerHandle::spawn(id, self.mailbox.clone(), retire_after_task)?;
 
         Ok(handle)
     }
@@ -574,6 +624,7 @@ impl SchedulerState {
             return;
         };
         let worker_id = worker.worker_id;
+        self.retiring.remove(&worker_id);
 
         self.idle.retain(|worker| worker.id() != worker_id);
         self.busy.retain(|worker| worker.id() != worker_id);

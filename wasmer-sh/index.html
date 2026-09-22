@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-state="booting">
+<html lang="en" data-state="choosing" class="show-examples">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,13 +8,14 @@
       content="Run Unix commands in your browser with Wasmer, WASIX, and the Wasmer JavaScript SDK."
     />
     <meta name="theme-color" content="#09090d" />
+    <meta name="color-scheme" content="dark" />
     <link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml" />
     <title>wasmer.sh — Unix in your browser</title>
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
     <header class="app-bar">
-      <a class="brand" href="/" aria-label="Restart the default Wasmer shell">
+      <a class="brand" href="/" aria-label="Wasmer examples">
         <img
           class="brand-logo"
           src="/wasmer-logo.svg"
@@ -26,16 +27,17 @@
 
       <div class="session-summary" aria-live="polite">
         <span class="status-dot" aria-hidden="true"></span>
-        <span id="session-status">Preparing runtime</span>
+        <span id="session-status">Choose an example</span>
         <button id="live-http-badge" class="live-http-badge" type="button" title="Open web preview" hidden>
           <span class="live-http-dot" aria-hidden="true"></span>
           <span id="live-http-label">Live HTTP</span>
         </button>
         <span class="summary-divider" aria-hidden="true"></span>
-        <span id="package-name">sharrattj/bash</span>
+        <span id="package-name">wasmer/bash</span>
       </div>
 
       <nav class="app-actions" aria-label="Shell actions">
+        <button id="examples-button" class="text-button" type="button">Examples</button>
         <button id="editor-button" class="text-button" type="button" aria-pressed="false" disabled>
           Editor
         </button>
@@ -86,7 +88,25 @@
       </button>
     </aside>
 
-    <main class="shell-stage">
+    <main id="example-picker" class="example-picker" aria-labelledby="examples-title">
+      <div class="example-container">
+        <div class="example-heading">
+          <div>
+            <h1 id="examples-title" tabindex="-1">Choose an example</h1>
+            <p>A terminal, your code, and everything you need to get started.</p>
+          </div>
+          <button id="resume-button" class="text-button" type="button" hidden>Resume terminal →</button>
+        </div>
+        <div id="example-groups"></div>
+        <div class="example-footer">
+          <div><strong>Just need a terminal?</strong><p>Open Bash with Node.js, Python, PHP, and command-line tools.</p></div>
+          <a id="full-shell-link" class="text-button" href="?example=shell">Open full shell <span aria-hidden="true">→</span></a>
+        </div>
+        <p class="example-note">Each example opens a fresh workspace with only its required runtimes. Install dependencies in the terminal when you’re ready.</p>
+      </div>
+    </main>
+
+    <main class="shell-stage" hidden>
       <div id="workspace-column" class="workspace-column">
         <section id="editor-panel" class="editor-panel" aria-label="Workspace editor" hidden>
           <div id="editor-loading" class="editor-loading" role="status">

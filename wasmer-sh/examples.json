@@ -1,0 +1,114 @@
+[
+  {
+    "id": "node",
+    "source": "node",
+    "title": "Node.js",
+    "group": "Node.js",
+    "description": "A small HTTP server, ready to make your own.",
+    "icon": "node.svg",
+    "dependencies": "No npm dependencies",
+    "packages": ["wasmer/edge@=0.2.1"],
+    "install": null,
+    "run": "node server.js"
+  },
+  {
+    "id": "node-express",
+    "source": "node-express",
+    "title": "Express",
+    "group": "Node.js",
+    "description": "Web routes and a JSON API with Express.",
+    "icon": "express.svg",
+    "dependencies": "express",
+    "packages": ["wasmer/edge@=0.2.1"],
+    "install": "pnpm i",
+    "run": "pnpm dev"
+  },
+  {
+    "id": "node-next",
+    "source": "next",
+    "title": "Next.js",
+    "group": "Node.js",
+    "description": "React pages and API routes in one project.",
+    "icon": "next.svg",
+    "dependencies": "next · react · react-dom",
+    "packages": ["wasmer/edge@=0.2.1"],
+    "install": "pnpm i",
+    "run": "pnpm dev"
+  },
+  {
+    "id": "python",
+    "source": "python",
+    "title": "Python",
+    "group": "Python",
+    "description": "An HTTP server using the standard library.",
+    "icon": "python.svg",
+    "dependencies": "No pip dependencies",
+    "packages": ["python/python@=3.13.20"],
+    "install": null,
+    "run": "python server.py"
+  },
+  {
+    "id": "python-flask",
+    "source": "python-flask",
+    "title": "Flask",
+    "group": "Python",
+    "description": "A lightweight web app with a greeting API.",
+    "icon": "flask.svg",
+    "dependencies": "flask",
+    "packages": ["python/python@=3.13.20"],
+    "install": "pip install -r requirements.txt",
+    "run": "python server.py"
+  },
+  {
+    "id": "python-django",
+    "source": "python-django",
+    "title": "Django",
+    "group": "Python",
+    "description": "Django’s default starter project, ready to build on.",
+    "icon": "django.svg",
+    "dependencies": "django",
+    "packages": ["python/python@=3.13.20"],
+    "install": "pip install -r requirements.txt",
+    "run": "python manage.py runserver 0.0.0.0:8000 --noreload --nothreading"
+  },
+  {
+    "id": "python-fastapi",
+    "source": "python-fastapi",
+    "title": "FastAPI",
+    "group": "Python",
+    "description": "A typed API with validation and an OpenAPI schema.",
+    "icon": "fastapi.svg",
+    "dependencies": "fastapi · pydantic · uvicorn",
+    "packages": ["python/python@=3.13.20"],
+    "install": "pip install -r requirements.txt",
+    "run": "python server.py"
+  },
+  {
+    "id": "ffmpeg",
+    "source": "ffmpeg",
+    "title": "FFmpeg",
+    "group": "Tools",
+    "description": "Turn a video URL into an animated GIF.",
+    "icon": "ffmpeg.svg",
+    "dependencies": "No installation needed",
+    "packages": ["wasmer/ffmpeg@=1.0.5"],
+    "install": null,
+    "run": "ffmpeg -n -multiple_requests 1 -i https://cdn.wasmer.io/media/wordpress.mp4 -vf 'fps=10,scale=320:-1' /workspace/wordpress.gif"
+  },
+  {
+    "id": "yt-dlp",
+    "source": "yt-dlp",
+    "title": "yt-dlp",
+    "group": "Tools",
+    "description": "Download video and audio from a URL.",
+    "icon": "yt-dlp.png",
+    "dependencies": "yt-dlp · yt-dlp-ejs",
+    "packages": [
+      "python/python@=3.13.20",
+      "wasmer/quickjs@=0.15.1",
+      "wasmer/ffmpeg@=1.0.5"
+    ],
+    "install": "pip install -r requirements.txt",
+    "run": "/workspace/.python-packages/bin/yt-dlp --help"
+  }
+]

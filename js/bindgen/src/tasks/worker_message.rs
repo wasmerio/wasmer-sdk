@@ -16,6 +16,7 @@ pub(crate) enum WorkerMessage {
     MarkBusy,
     /// Mark this worker as idle.
     MarkIdle,
+    Retired,
     Scheduler(SchedulerMessage),
 }
 
@@ -24,6 +25,7 @@ impl WorkerMessage {
         let de = unsafe { Deserializer::new(value)? };
 
         match de.ty()?.as_str() {
+            "retired" => Ok(Self::Retired),
             consts::TYPE_BUSY => Ok(WorkerMessage::MarkBusy),
             consts::TYPE_IDLE => Ok(WorkerMessage::MarkIdle),
             consts::TYPE_SCHEDULER => {
@@ -37,6 +39,7 @@ impl WorkerMessage {
 
     pub(crate) fn into_js(self) -> Result<JsValue, Error> {
         match self {
+            Self::Retired => Serializer::new("retired").finish(),
             WorkerMessage::MarkBusy => Serializer::new(consts::TYPE_BUSY).finish(),
             WorkerMessage::MarkIdle => Serializer::new(consts::TYPE_IDLE).finish(),
             WorkerMessage::Scheduler(msg) => {

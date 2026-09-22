@@ -55,7 +55,10 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      # Cache restoration is optional; bound downloads and archive extraction.
       - uses: ./.github/actions/cache-sdk
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           cargo-profile: js-nightly
           cache-compiled-artifacts: 'false'
@@ -73,7 +76,7 @@ jobs:
         working-directory: js
         run: |
           npm test
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium firefox webkit
           npm run test:browser
       - uses: actions/upload-artifact@v4
         with:
@@ -103,7 +106,10 @@ jobs:
           python swift/WasmerWKSDK/scripts/bundle_sdk.py
           python swift/WasmerWKSDK/scripts/build_runtime.py
           python swift/WasmerWKSDK/scripts/verify_runtime.py
+      # Cache restoration is optional; bound downloads and archive extraction.
       - uses: ./.github/actions/cache-sdk
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           cargo-profile: swift-1.95-universal-release
           cache-compiled-artifacts: 'false'

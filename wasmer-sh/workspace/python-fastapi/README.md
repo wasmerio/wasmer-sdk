@@ -3,7 +3,6 @@
 Install the dependencies and start the server in the Wasmer shell:
 
 ```sh
-cd /workspace/python-fastapi
 pip install -r requirements.txt
 python server.py
 ```

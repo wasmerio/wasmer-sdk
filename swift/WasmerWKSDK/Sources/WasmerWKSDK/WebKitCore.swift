@@ -182,6 +182,12 @@ private actor WebKitClient {
   }
 }
 
+public enum WorkspaceStorage: Sendable {
+  case memory
+  case native(URL)
+  case opfs(String)
+}
+
 public struct HostMount: Sendable {
   public let path: String
   public let directory: URL
@@ -263,11 +269,27 @@ public final class WasmerCore: Sendable {
   }
   public func createSandbox(
     packages: [PackageCore], files: [String: Data], env: [String: String], network: NetworkMode,
-    mounts: [HostMount] = []
+    storage: WorkspaceStorage = .memory, mounts: [HostMount] = []
   ) async throws -> SandboxCore {
+    guard !mounts.contains(where: { $0.path == "/workspace" }) else {
+      throw SdkError.Failure(code: "INVALID_ARGUMENT", message: "Use storage to configure /workspace")
+    }
     var handles: [Wire] = []
     for package in packages { handles.append(.handle(try await owned(package).value.handle)) }
-    let registered = try await client.register(mounts)
+    var allMounts = mounts
+    let storageWire: Wire
+    switch storage {
+    case .memory: storageWire = .object(["kind": .string("memory")])
+    case .native(let directory):
+      allMounts.append(HostMount(path: "/workspace", directory: directory, readOnly: false))
+      storageWire = .object(["kind": .string("native")])
+    case .opfs(let volume):
+      guard !volume.isEmpty, volume.utf8.count <= 128,
+        volume.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_ ")).contains($0) })
+      else { throw SdkError.Failure(code: "INVALID_ARGUMENT", message: "OPFS volume must be a short name containing letters, numbers, spaces, - or _") }
+      storageWire = .object(["kind": .string("opfs"), "volume": .string(volume)])
+    }
+    let registered = try await client.register(allMounts)
     let ids = registered.compactMap { value -> Int? in
       guard case .object(let mount) = value, case .number(let id) = mount["id"] else { return nil }
       return Int(id)
@@ -278,7 +300,7 @@ public final class WasmerCore: Sendable {
         [
           "packages": .array(handles), "files": try Wire.encode(files),
           "env": try Wire.encode(env), "network": .string(network.rawValue),
-          "mounts": .array(registered),
+          "mounts": .array(registered), "storage": storageWire,
         ])
       return SandboxCore(owner: self, client: client, handle: handle, mounts: ids)
     } catch {

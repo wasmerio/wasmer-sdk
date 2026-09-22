@@ -76,7 +76,9 @@ guest HTTP to a browser with `sandbox.ports.expose(port)`. Retain the returned
 `ExposedPort`, use its `url`, and call `close()` when done. Closing the sandbox or
 client also stops its preview listeners. Networking is disabled by default.
 
-As in the Rust/JS SDK, `sandbox.fs` manages the sandbox workspace. Directory
+As in the Rust/JS SDK, `sandbox.fs` manages `/workspace`. Select its backing with
+`storage: .memory` (default), `.native(directoryURL)`, or `.opfs("volume-name")`.
+The same API reads and writes the selected backend; guest commands see those files. Directory
 mounts are attached to guest processes; access them from guest code or through
 the original native directory URL.
 
@@ -100,10 +102,30 @@ The bridge uses structured messages with a fixed operation allowlist. Native mes
 are accepted only from the main frame of the hidden runtime origin. Guest preview
 pages use a separate loopback origin and data store, without native message handlers.
 
+OPFS runs in a dedicated worker beside the SDK. File bytes use synchronous OPFS
+handles; an append-only namespace journal preserves directory renames, while an
+in-memory index serves metadata. Cached file handles are bounded. A named volume
+has one writer, enforced by a Web Lock. Explicit flushes and periodic checkpoints
+persist writes; normal shutdown flushes storage before terminating workers, with
+a bounded deadline so Restart can recover from a wedged runtime. Abrupt termination
+can lose writes since the last flush. Unlinked data files are reclaimed when the
+volume reopens. The namespace journal currently grows until the volume is removed.
+
+The hidden runtime uses a persistent WebKit data-store identifier and a stable
+loopback port, saved in Application Support. Clients with the same cache location
+share the asset server. If that saved port is unavailable, initialization fails
+instead of changing the origin and appearing to lose OPFS files. Preview WebViews
+remain separate and nonpersistent. OPFS uses WebKit quotas and is experimental.
+
 Native directory access uses descriptor-relative `openat` with `O_NOFOLLOW` on every
 component; symlinks are unsupported. Read-only mounts enforce permissions on both
 sides. Worker filesystem RPC uses SharedArrayBuffer/Atomics, 64 KiB chunks, a 512 KiB
-response limit, and a 30-second timeout. JSPI does not remove the isolation requirement.
+response limit, and a 30-second deadline. File bytes use base64 across the WebKit
+native message boundary and raw bytes in the worker reply buffer, avoiding
+per-byte JSON numbers. Metadata and errors retain structured JSON replies.
+Inside Swift, typed Sendable filesystem requests and responses cross actors directly,
+without additional JSON serialization.
+JSPI does not remove the isolation requirement.
 
 The control server binds to `127.0.0.1`, uses a random URL token, and serves COOP/COEP.
 Native package downloads are limited to content-addressed Wasmer CDN URLs, verify
@@ -113,10 +135,23 @@ Each network-enabled sandbox has its own bridge. DNS and nonblocking TCP use nat
 APIs; TLS remains in the guest. Buffers are bounded to 1 MiB receive / 256 KiB send
 per socket, native chunks are at most 64 KiB, and DNS/connect time out after 30 seconds.
 UDP and native inbound listeners are unsupported. HTTP exposure supports bounded
-request/response forwarding, not WebSocket upgrades or streaming responses.
+request/response forwarding, not WebSocket upgrades or streaming responses. It
+allows 35 seconds to receive a request and 180 seconds for the guest response,
+so development servers can compile their first page.
 
-Guest shared memories are capped at 128 MiB. The coordinator heap starts at 1.5625 MiB
-and grows to at most 512 MiB; these are not total process-memory limits. The cap works
+Guest shared memories are capped at 192 MiB.
+Memory workspace files use the same shared in-memory filesystem as the browser
+SDK. Guest filesystem operations stay inside Wasm without storage-worker RPCs;
+file contents count toward the SDK heap limit. Native and OPFS store file
+contents outside that heap.
+Each WASIX thread runs in a dedicated Web Worker, which releases its SDK stack
+and closes after the thread and its local asynchronous work finish. This lets
+WebKit reclaim guest memories between commands. Host timers use a separate
+worker and carry no guest-memory snapshots. Storage and the shell remain alive
+across commands; users do not need to restart after installing dependencies.
+The coordinator heap starts at 1.5625 MiB
+and grows to at most 1 GiB; these are growth ceilings, not eager allocations or
+total process-memory limits. The cap works
 around WebKit shared-memory reservation failures, but does not update Wasmer's internal
 MemoryType metadata. A production backend should expose these limits through Wasmer.
 

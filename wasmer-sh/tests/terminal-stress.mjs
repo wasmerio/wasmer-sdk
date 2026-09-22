@@ -133,7 +133,7 @@ try {
   page.on("worker", worker => { diagnostics.push(`worker: ${worker.url()}`); worker.on("close", () => diagnostics.push(`worker closed: ${worker.url()}`)); });
   const query = new URLSearchParams({ use: "python/python@=3.13.20", wisp: `ws://127.0.0.1:${proxy.address().port}/` });
   query.append("use", "syrusakbary/cowsay@=0.3.0");
-  query.append("use", "wasmer/edgejs@=0.2.0");
+  query.append("use", "wasmer/edge@=0.2.1");
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/?${query}`);
   await page.waitForFunction(() => document.querySelector("#session-status")?.textContent === "Ready", undefined, { timeout: 180_000 });
   await waitFor("$ ");

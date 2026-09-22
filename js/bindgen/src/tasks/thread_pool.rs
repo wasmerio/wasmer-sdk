@@ -118,16 +118,11 @@ impl VirtualTaskManager for ThreadPool {
             i32::MAX
         };
 
-        // This timer runs on a separate worker because a WASIX syscall may
-        // synchronously block its calling worker. The guest now runs inside an
-        // environment-owned JavaScript global, so this worker's host timer is
-        // no longer exposed to guest mutation.
-        let _ = self.task_dedicated(Box::new(move || {
-            wasm_bindgen_futures::spawn_local(async move {
-                let global = GlobalScope::current();
-                let _ = wasm_bindgen_futures::JsFuture::from(global.sleep(time)).await;
-                let _ = tx.send(());
-            })
+        // A syscall can synchronously block its caller. Use a dedicated timer
+        // worker, with no guest-memory transfers and no blocking guest work.
+        let _ = self.send(SchedulerMessage::Timer(super::timer::Timer {
+            millis: time,
+            completion: tx,
         }));
 
         Box::pin(async move {

@@ -1,3 +1,4 @@
+import "./node-compat.js";
 import type { NodeNetworkMethod } from "./node-network.js";
 import { installHostFileSystemWorkerBridge } from "./host-filesystem.js";
 import {
@@ -14,6 +15,7 @@ import {
 interface WorkerRuntime {
   handle(message: unknown): Promise<void>;
   collectSharedObjects(): void;
+  free(): void;
 }
 
 interface InitMessage {
@@ -22,6 +24,7 @@ interface InitMessage {
   sdkUrl: string;
   module: WebAssembly.Module;
   memory: WebAssembly.Memory;
+  retireAfterTask?: boolean;
 }
 
 Error.stackTraceLimit = 50;
@@ -42,6 +45,8 @@ globalThis.addEventListener("unhandledrejection", (event) => {
 });
 
 let worker: WorkerRuntime | undefined;
+let retireAfterTask = false;
+let destroyThread: (() => void) | undefined;
 const pendingMessages: unknown[] = [];
 let failureReported = false;
 
@@ -75,10 +80,23 @@ async function handleMessage(data: unknown): Promise<void> {
       // Rust consumes the shared-object envelope when it dispatches the task.
       // Awaiting here keeps that envelope (and every attached guest memory)
       // alive for the whole task, including long-lived background jobs.
-      return worker.handle(data);
+      const completion = worker.handle(data);
+      return retireAfterTask ? completion.then(retireWorker) : completion;
     }
   }
   else pendingMessages.push(data);
+}
+
+function retireWorker(): void {
+  // The dedicated worker receives one WASIX thread only. Its completion
+  // includes shutdown of worker-local async contexts. Never destroy a pooled
+  // worker here: it may still own timers or unrelated asynchronous jobs.
+  worker?.collectSharedObjects();
+  worker?.free();
+  worker = undefined;
+  destroyThread?.(); // Must be the final call into this SDK instance.
+  globalThis.postMessage({ type: "retired" });
+  globalThis.close();
 }
 
 async function initialize(data: InitMessage): Promise<void> {
@@ -87,10 +105,12 @@ async function initialize(data: InitMessage): Promise<void> {
     default(options: {
       module_or_path: WebAssembly.Module;
       memory: WebAssembly.Memory;
-    }): Promise<unknown>;
+    }): Promise<{ __wbindgen_thread_destroy(): void }>;
     ThreadPoolWorker: new (id: number) => WorkerRuntime;
   };
-  await sdk.default({ module_or_path: data.module, memory: data.memory });
+  const exports = await sdk.default({ module_or_path: data.module, memory: data.memory });
+  retireAfterTask = data.retireAfterTask === true;
+  destroyThread = () => exports.__wbindgen_thread_destroy();
   const initialized = new sdk.ThreadPoolWorker(data.id);
   worker = initialized;
   while (pendingMessages.length > 0) {
