@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import email
 import hashlib
+import importlib.util
 import json
 import os
 import plistlib
@@ -16,7 +17,11 @@ import tomllib
 import zipfile
 from pathlib import Path
 
-import go_release
+# Swift's runtime verifier loads this module by file path, without adding this
+# directory to sys.path. Resolve the sibling helper relative to this file too.
+_go_spec = importlib.util.spec_from_file_location("go_release", Path(__file__).with_name("go_release.py"))
+go_release = importlib.util.module_from_spec(_go_spec)
+_go_spec.loader.exec_module(go_release)
 
 ROOT = Path(__file__).resolve().parents[2]
 METADATA = "release-metadata.json"
