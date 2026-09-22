@@ -55,6 +55,56 @@ test("browser workers report rejected initialization, tasks, and unhandled promi
   }
 });
 
+test("missing worker modules fail processes and shutdown instead of hanging", { timeout: 90_000 }, async () => {
+  const server = await startServer();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    for (const workerPath of ["/missing-worker.js", "/broken-import-worker.js"]) {
+      const page = await browser.newPage();
+      await page.route("**/broken-import-worker.js", route => route.fulfill({
+        contentType: "text/javascript",
+        body: "import './missing-dependency.js';",
+      }));
+      await page.goto(server.url);
+      let timer;
+      try {
+        const result = await Promise.race([
+          page.evaluate(async workerPath => {
+            const { Wasmer } = await import("/dist/index.js");
+            const { setWorkerUrl } = await import("/pkg/wasmer_sdk_js.js");
+            const client = new Wasmer({ cache: false });
+            const pkg = await client.packages.load("wasmer/hello-world@0.2.5");
+            const sandbox = await client.sandboxes.create({ packages: [pkg] });
+            setWorkerUrl(new URL(workerPath, location.href).href);
+            const process = await sandbox.command("hello").spawn();
+            const closed = client.close().then(
+              () => ({ code: "unexpected success", message: "" }),
+              error => ({ code: error.code, message: error.message }),
+            );
+            const output = await process.wait();
+            const failure = await closed;
+            await sandbox.close();
+            return { exitCode: output.exitCode, failure };
+          }, workerPath),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`Worker failure was not propagated: ${workerPath}`)), 40_000);
+          }),
+        ]);
+        assert.equal(result.exitCode, 1);
+        assert.equal(result.failure.code, "WORKER_FAILED");
+        assert.match(result.failure.message, /Unable to load worker module/);
+        assert.ok(result.failure.message.includes(workerPath));
+      } finally {
+        clearTimeout(timer);
+        await page.close();
+      }
+    }
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+
 test(
   "runs Python browser workers with threads, late modules, files and streams",
   { timeout: MAX_ATTEMPTS * ATTEMPT_TIMEOUT_MS + 30_000 },

@@ -60,6 +60,12 @@ jobs:
       - name: Build deployment output
         working-directory: wasmer-sh
         run: pnpm run build
+      - name: Install browser
+        working-directory: wasmer-sh
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Test production shell startup
+        working-directory: wasmer-sh
+        run: pnpm run test:production
 
   rust:
     name: Rust and UniFFI

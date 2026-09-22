@@ -48,11 +48,9 @@ impl WorkerHandle {
         let on_message: js_sys::Function = on_message.into_js_value().unchecked_into();
         worker.set_onmessage(Some(&on_message));
 
-        let on_error: Closure<dyn FnMut(web_sys::ErrorEvent)> =
-            Closure::new(move |msg: web_sys::ErrorEvent| {
-                sender.worker_failed(worker_id, msg.message());
-                on_error(msg, worker_id);
-            });
+        let on_error: Closure<dyn FnMut(JsValue)> = Closure::new(move |msg: JsValue| {
+            on_error(msg, worker_id, &sender, &worker_url);
+        });
         let on_error: js_sys::Function = on_error.into_js_value().unchecked_into();
         worker.set_onerror(Some(&on_error));
 
@@ -238,12 +236,21 @@ mod tests {
 }
 
 #[tracing::instrument(level = "trace", skip_all, fields(worker.id=worker_id))]
-fn on_error(msg: web_sys::ErrorEvent, worker_id: u32) {
+fn on_error(msg: JsValue, worker_id: u32, sender: &Scheduler, worker_url: &str) {
+    // Module download/import failures dispatch a plain Event, not ErrorEvent.
+    // Reading its absent message through ErrorEvent's string getter throws in
+    // wasm-bindgen before the scheduler can fail the pending process.
+    let message = js_sys::Reflect::get(&msg, &JsValue::from_str("message"))
+        .ok()
+        .and_then(|value| value.as_string())
+        .filter(|message| !message.is_empty())
+        .unwrap_or_else(|| {
+            format!("Unable to load worker module {worker_url}; check its URL and imports")
+        });
+    sender.worker_failed(worker_id, message.clone());
     tracing::error!(
-        error = %msg.message(),
-        filename = %msg.filename(),
-        line_number = %msg.lineno(),
-        column = %msg.colno(),
+        error = %message,
+        event = ?msg,
         "An error occurred",
     );
 }
