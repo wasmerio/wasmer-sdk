@@ -42,6 +42,25 @@ jobs:
           github.ref_name == 'release-please--branches--main--components--wasmer-sdk-swift'
         run: python .github/scripts/sdk_release.py verify-swift-inputs
 
+  shell:
+    name: Shell (published SDK)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install pnpm
+        run: npm install --global pnpm@12.5.1
+      - name: Install published dependencies
+        working-directory: wasmer-sh
+        run: pnpm --config.minimum-release-age=0 install --frozen-lockfile
+      - name: Build deployment output
+        working-directory: wasmer-sh
+        run: pnpm run build
+
   rust:
     name: Rust and UniFFI
     runs-on: ubuntu-24.04
@@ -209,16 +228,16 @@ jobs:
         working-directory: js
         run: npm ci
 
-      - name: Install browser
+      - name: Install browsers
         working-directory: js
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium firefox webkit
 
       - uses: actions/download-artifact@v4
         with:
           name: wasmer-sdk-js-${{ github.sha }}
           path: js
 
-      - name: Test Python in the browser
+      - name: Test browser runtimes
         working-directory: js
         run: npm run test:browser
 

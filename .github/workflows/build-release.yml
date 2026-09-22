@@ -52,7 +52,7 @@ jobs:
         run: |
           timeout --kill-after=30s 6m npm test
           npm run test:bindgen
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium firefox webkit
           npm run test:browser
       - name: Pack the tested build
         working-directory: js

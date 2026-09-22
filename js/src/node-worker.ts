@@ -1,3 +1,4 @@
+import "./node-compat.js";
 import { parentPort } from "node:worker_threads";
 import type { NodeNetworkMethod } from "./node-network.js";
 import {

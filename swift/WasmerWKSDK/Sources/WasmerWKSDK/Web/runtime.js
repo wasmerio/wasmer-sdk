@@ -1,4 +1,4 @@
-import "./node-compat.js";
+import "./sdk/dist/node-compat.js";
 import { installHostFileSystemWorkerBridge } from "./sdk/dist/host-filesystem.js";
 import { createRuntimeMemory } from "./memory-budget.js";
 import { probeJSPI } from "./jspi.js";

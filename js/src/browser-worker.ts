@@ -1,3 +1,4 @@
+import "./node-compat.js";
 import type { NodeNetworkMethod } from "./node-network.js";
 import { installHostFileSystemWorkerBridge } from "./host-filesystem.js";
 import {
