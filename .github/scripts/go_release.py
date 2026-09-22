@@ -125,6 +125,10 @@ def pack_module(directory: Path, version: str, root: Path = ROOT, complete: bool
     edgejs = root / "fixtures/edgejs/server.js"
     if edgejs.exists():
         contents["testdata/edgejs-server.js"] = edgejs.read_bytes()
+    for name in ("python/hello.py", "edgejs/server.js", "postgres/query.sql"):
+        source = root / "fixtures" / name
+        if source.exists():
+            contents["examples/internal/guest/fixtures/" + name] = source.read_bytes()
     contents["internal/distribution/native.json"] = (json.dumps(manifest, indent=2) + "\n").encode()
     prefix = f"{MODULE}@v{version}/"
     with zipfile.ZipFile(directory / f"v{version}.zip", "w", compression=zipfile.ZIP_DEFLATED) as archive:

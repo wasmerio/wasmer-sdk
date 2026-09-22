@@ -39,18 +39,22 @@ available in every language SDK.
   [JavaScript service-worker example](js/examples/browser_php)
 - **Python 3.13** — [JavaScript example](js/examples/python.mjs),
   [Python example](python/examples/python.py),
+  [Go example](go/examples/python/main.go),
   [Rust example](rust/examples/python.rs)
 - **A Node.js-compatible HTTP server with Edge.js** —
   [JavaScript example](js/examples/edgejs_http.mjs),
   [Python example](python/examples/edgejs_http.py),
+  [Go example](go/examples/edgejs_http/main.go),
   [Rust example](rust/examples/edgejs_http.rs)
 - **PostgreSQL 18 with a standard native `psql` client** —
   [JavaScript example](js/examples/postgres_psql.mjs),
   [Python example](python/examples/postgres_psql.py),
+  [Go example](go/examples/postgres_psql/main.go),
   [Rust example](rust/examples/postgres_psql.rs)
 - **Python, Edge.js, PHP, and shell tools in one sandbox** —
   [JavaScript example](js/examples/multiple_runtimes.mjs),
   [Python example](python/examples/multiple_runtimes.py),
+  [Go example](go/examples/multiple_runtimes/main.go),
   [Rust example](rust/examples/multiple_runtimes.rs)
 
 The examples share the guest programs in [`fixtures/`](fixtures), so each SDK

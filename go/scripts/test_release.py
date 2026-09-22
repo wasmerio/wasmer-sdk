@@ -90,6 +90,9 @@ func main() {
             run([go, "build", "-o", str(work / "helper"), f"{module}/cmd/wasmer-sdk"])
             env.update(GOPROXY="off", GOSUMDB="off")
             run([str(work / "helper"), "install"])
+            run([str(work / "helper"), "exec", "--", go, "build", *[
+                f"{module}/examples/{name}" for name in ("python", "multiple_runtimes", "edgejs_http", "postgres_psql")
+            ]])
             for mode in ("static", "dynamic"):
                 run([str(work / "helper"), "exec", "--link", mode, "--", go, "build", "-o", mode, "."])
                 completed = run([str(consumer / mode), "hello.wasm"], capture_output=True, text=True)

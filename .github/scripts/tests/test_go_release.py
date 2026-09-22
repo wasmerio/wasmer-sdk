@@ -74,6 +74,23 @@ class GoReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"asset set"):
             go.validate_assets(self.assets,"0.1.0")
 
+    def test_examples_include_the_shared_guest_programs(self):
+        guests = ("python/hello.py", "edgejs/server.js", "postgres/query.sql")
+        for name in guests:
+            source = self.root / "fixtures" / name
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("shared " + name)
+        example = self.package / "examples/python/main.go"
+        example.parent.mkdir(parents=True)
+        example.write_text("package main\n")
+        self.complete()
+        with zipfile.ZipFile(self.assets / "v0.1.0.zip") as archive:
+            prefix = go.MODULE + "@v0.1.0/"
+            self.assertEqual(archive.read(prefix + "examples/python/main.go"), example.read_bytes())
+            for name in guests:
+                self.assertEqual(archive.read(prefix + "examples/internal/guest/fixtures/" + name),
+                                 (self.root / "fixtures" / name).read_bytes())
+
     def test_mod_and_zip_must_match(self):
         self.complete()
         (self.assets / "v0.1.0.mod").write_text("module different.example/sdk\n")

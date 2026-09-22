@@ -203,6 +203,16 @@ jobs:
         run: |
           python go/scripts/test.py --link static --race
           python go/scripts/test.py --link dynamic
+      - name: Run Go examples
+        env:
+          SDK_BACKEND: ${{ matrix.backend }}
+        run: |
+          python go/scripts/run_example.py python
+          python go/scripts/run_example.py postgres_psql
+          if [ "$SDK_BACKEND" = napi-v8 ]; then
+            python go/scripts/run_example.py multiple_runtimes
+            python go/scripts/run_example.py edgejs_http
+          fi
       - name: Package the tested native libraries
         env:
           GO_TARGET: ${{ matrix.target }}

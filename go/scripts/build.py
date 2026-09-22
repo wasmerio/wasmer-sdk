@@ -119,6 +119,10 @@ def main() -> None:
     for source in (ROOT / "swift/Tests/WasmerSDKTests/Fixtures").glob("*.wasm"):
         shutil.copy2(source, fixtures / source.name)
     shutil.copy2(ROOT / "fixtures/edgejs/server.js", fixtures / "edgejs-server.js")
+    for name in ("python/hello.py", "edgejs/server.js", "postgres/query.sql"):
+        path = PACKAGE / "examples/internal/guest/fixtures" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / "fixtures" / name, path)
     print(f"Built {destination}")
 
 

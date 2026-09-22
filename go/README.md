@@ -105,6 +105,37 @@ owned native handles. Closing a sandbox terminates its processes. Packages can
 be closed explicitly to release their Go-owned handles early. Do not mutate input
 maps or byte slices while a call is using them.
 
+## Examples
+
+Runnable examples match the Node and Python SDKs and use the same guest programs
+from the repository's `fixtures/` directory:
+
+- [Python](examples/python/main.go): load Python and execute `hello.py` in a sandbox.
+- [Multiple runtimes](examples/multiple_runtimes/main.go): run shell tools, Python, Edge.js, and PHP in one sandbox.
+- [Edge.js HTTP](examples/edgejs_http/main.go): start a server, wait for its port, make an HTTP request, and terminate it.
+- [PostgreSQL](examples/postgres_psql/main.go): start PostgreSQL and execute the shared SQL query with native `psql`.
+
+After building from source, run these commands from the repository root:
+
+```sh
+python3.13 go/scripts/run_example.py python
+python3.13 go/scripts/run_example.py multiple_runtimes
+python3.13 go/scripts/run_example.py edgejs_http
+python3.13 go/scripts/run_example.py postgres_psql
+```
+
+Pass `--link dynamic` before the example name to use the shared library. The
+Edge.js and multiple-runtime examples require a `napi-v8` build (macOS arm64 or
+Linux amd64). PostgreSQL needs port 5432 available and `psql` on `PATH`, or pass
+`postgres_psql --psql /path/to/psql`.
+
+Examples and their embedded guest programs are also included in the released Go
+module. After installing a release in your application, run one with:
+
+```sh
+go run go.wasmer.io/sdk/cmd/wasmer-sdk@v0.1.0 exec -- go run go.wasmer.io/sdk/examples/python
+```
+
 ## Build and test from source
 
 ```sh
