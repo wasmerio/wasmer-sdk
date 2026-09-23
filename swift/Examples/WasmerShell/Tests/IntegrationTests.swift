@@ -339,6 +339,7 @@ extension TerminalSession {
       try await waitFor("➜ ~ $ ")
       try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
       try await shellCheck(host, command: "test -f hello.c && command -v clang && ! command -v node && ! command -v python; printf '\\nCLANG_ISOLATION:%s\\n' \"$?\"", marker: "\nCLANG_ISOLATION:0\n")
+      try await shellCheck(host, command: "test \"$(clang -print-resource-dir)\" = /lib/clang/16 && test \"$(clang -resource-dir=/override -print-resource-dir)\" = /override; printf '\\nCLANG_ENV:%s\\n' \"$?\"", marker: "\nCLANG_ENV:0\n")
       try await host.fs.writeText(workspace + "/hello.c", try await host.fs.readText("hello.c"))
       try await shellCheck(host, command: "cd \(workspace) && printf '\\nCLANG_DIRECTORY\\n'", marker: "\nCLANG_DIRECTORY\n")
       let output = try await shellCheck(host, command: example.run + "; printf '\\nCLANG_EXIT:%s\\n' \"$?\"", marker: "\nCLANG_EXIT:0\n", timeout: 180)
@@ -347,9 +348,9 @@ extension TerminalSession {
       }
       try await shellCheck(host, command: "./hello.wasm 'C developer'", marker: "\nHello, C developer!\n")
       try await host.fs.writeText(workspace + "/rebuilt.c", "#include <stdio.h>\nint main(void) { puts(\"Rebuilt C program\"); return 0; }\n")
-      try await shellCheck(host, command: "clang -resource-dir=/lib/clang/16 rebuilt.c -o hello.wasm && ./hello.wasm", marker: "\nRebuilt C program\n", timeout: 180)
+      try await shellCheck(host, command: "clang rebuilt.c -o hello.wasm && ./hello.wasm", marker: "\nRebuilt C program\n", timeout: 180)
       try await host.fs.writeText(workspace + "/broken.c", "invalid C source\n")
-      try await shellCheck(host, command: "clang -resource-dir=/lib/clang/16 broken.c -o broken.wasm; printf '\\nCLANG_INVALID:%s\\n' \"$?\"", marker: "\nCLANG_INVALID:1\n")
+      try await shellCheck(host, command: "clang broken.c -o broken.wasm; printf '\\nCLANG_INVALID:%s\\n' \"$?\"", marker: "\nCLANG_INVALID:1\n")
       guard previews.isEmpty else { throw DemoError.failed("Clang unexpectedly opened a server preview") }
       try await host.fs.remove(workspace, recursive: true)
       host.onTerminalExit = nil
@@ -360,9 +361,10 @@ extension TerminalSession {
       // overlapping the terminal's compiler WebView in memory.
       let client = try Wasmer()
       do {
-        let sandbox = try await client.sandboxes.create(packages: example.packages.map { .registry($0) })
+        let sandbox = try await client.sandboxes.create(
+          packages: example.packages.map { .registry($0) }, env: ShellExample.environment(for: nil))
         try await sandbox.fs.writeText("hello.c", "#include <stdio.h>\nint main(void) { puts(\"Hello from the Swift SDK!\"); return 0; }\n")
-        _ = try await sandbox.command("clang", ["-resource-dir=/lib/clang/16", "hello.c", "-o", "hello.wasm"]).run()
+        _ = try await sandbox.command("clang", ["hello.c", "-o", "hello.wasm"]).run()
         let bytes = try await sandbox.fs.read("hello.wasm")
         let program = try await sandbox.installPackage(.bytes(bytes))
         let result = try await sandbox.command(program).run()

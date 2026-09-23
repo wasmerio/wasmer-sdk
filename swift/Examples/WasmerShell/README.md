@@ -115,7 +115,7 @@ Choose **Clang / C** under **Tools**. The `clang/clang` package includes the
 compiler, linker, and C library; no npm or pip installation is needed:
 
 ```sh
-clang -resource-dir=/lib/clang/16 hello.c -o hello.wasm
+clang hello.c -o hello.wasm
 ./hello.wasm
 ./hello.wasm "C developer"
 ```

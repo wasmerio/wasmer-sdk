@@ -8,14 +8,25 @@ is substantially larger than the example source.
 ## In the terminal
 
 ```sh
-clang -resource-dir=/lib/clang/16 hello.c -o hello.wasm
+clang hello.c -o hello.wasm
 ./hello.wasm
 ./hello.wasm "C developer"
 ```
 
-The resource-directory flag points Clang to the builtin headers and libraries
-inside this package. Without it, launching Clang from the shell makes it look
-under `/usr/lib/clang/16` instead of the packaged `/lib/clang/16`.
+Both shells configure Clang's resource directory automatically through the
+example's environment, including when you open the full shell. The SDK snippets
+below set it in the sandbox's `env` option. To configure an existing Bash session
+manually, use:
+
+```sh
+export CCC_OVERRIDE_OPTIONS='#^-resource-dir=/lib/clang/16'
+```
+
+Clang's [documented environment override](https://clang.llvm.org/docs/UsersManual.html#ccc-override-options)
+prepends the resource-directory option (`^`) without diagnostic chatter (`#`).
+Explicit command-line options still take precedence. This points Clang to this
+package's builtin headers and libraries under `/lib/clang/16`; its executable
+path would otherwise lead it to `/usr/lib/clang/16`.
 
 The first run prints `Hello, Wasmer!`; the second uses your argument. Edit
 `hello.c`, compile it again, and run the new `hello.wasm`. In wasmer.sh, use the
@@ -41,12 +52,13 @@ let sandbox;
 try {
   sandbox = await wasmer.sandboxes.create({
     packages: ["clang/clang@=0.160000.1"],
+    env: { CCC_OVERRIDE_OPTIONS: "#^-resource-dir=/lib/clang/16" },
     files: {
       "hello.c": '#include <stdio.h>\nint main(void) { puts("Hello from C!"); return 0; }\n',
     },
   });
   // run() throws if compilation fails, so a stale binary is never run.
-  await sandbox.command("clang", ["-resource-dir=/lib/clang/16", "hello.c", "-o", "hello.wasm"]).run();
+  await sandbox.command("clang", ["hello.c", "-o", "hello.wasm"]).run();
   const bytes = await sandbox.fs.readFile("hello.wasm");
   const program = await sandbox.installPackage(bytes);
   const output = await sandbox.command(program).run();
@@ -67,14 +79,15 @@ import WasmerSDK
 let wasmer = try Wasmer()
 do {
     let sandbox = try await wasmer.sandboxes.create(
-        packages: ["clang/clang@=0.160000.1"]
+        packages: ["clang/clang@=0.160000.1"],
+        env: ["CCC_OVERRIDE_OPTIONS": "#^-resource-dir=/lib/clang/16"]
     )
     do {
         try await sandbox.fs.writeText("hello.c", """
         #include <stdio.h>
         int main(void) { puts("Hello from C!"); return 0; }
         """)
-        _ = try await sandbox.command("clang", ["-resource-dir=/lib/clang/16", "hello.c", "-o", "hello.wasm"]).run()
+        _ = try await sandbox.command("clang", ["hello.c", "-o", "hello.wasm"]).run()
         let bytes = try await sandbox.fs.read("hello.wasm")
         let program = try await sandbox.installPackage(.bytes(bytes))
         let output = try await sandbox.command(program).run()

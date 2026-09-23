@@ -104,8 +104,9 @@
     "icon": "cpp.svg",
     "dependencies": "Clang · C standard library",
     "packages": ["clang/clang@=0.160000.1"],
+    "env": { "CCC_OVERRIDE_OPTIONS": "#^-resource-dir=/lib/clang/16" },
     "install": null,
-    "run": "clang -resource-dir=/lib/clang/16 hello.c -o hello.wasm && ./hello.wasm"
+    "run": "clang hello.c -o hello.wasm && ./hello.wasm"
   },
   {
     "id": "ffmpeg",

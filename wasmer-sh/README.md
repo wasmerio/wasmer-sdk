@@ -25,7 +25,7 @@ for what the timings include and how to compare platforms.
 Choose **Clang / C** under **Tools** (`?example=clang`) to compile and run C:
 
 ```sh
-clang -resource-dir=/lib/clang/16 hello.c -o hello.wasm
+clang hello.c -o hello.wasm
 ./hello.wasm
 ```
 
