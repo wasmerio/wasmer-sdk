@@ -91,26 +91,50 @@ public struct Packages: Sendable {
 
   /// Load WEBC or raw WASI/WASIX bytes. A raw module must export `_start` and
   /// gets a single command and entrypoint named `main` automatically.
-  public func load(_ bytes: Data) async throws -> Package {
-    return Package(core: try await core.loadPackageBytes(bytes: bytes))
+  public func load(_ bytes: Data, onProgress: (@Sendable (PackageLoadProgress) -> Void)? = nil) async throws -> Package {
+    try await load(.bytes(bytes), onProgress: onProgress)
   }
 
-  public func load(_ source: PackageSource) async throws -> Package {
-    switch source {
-    case .registry(let specifier):
-      return Package(core: try await core.loadPackageRegistry(specifier: specifier))
-    case .file(let url):
-      return Package(core: try await core.loadPackagePath(path: localPath(url)))
-    case .bytes(let data), .webc(let data):
-      return try await load(data)
-    case .package(let package):
-      return package
+  public func load(_ source: PackageSource, onProgress: (@Sendable (PackageLoadProgress) -> Void)? = nil) async throws -> Package {
+    try await loadMany([source], onProgress: onProgress)[0]
+  }
+
+  public func load(_ specifier: String, onProgress: (@Sendable (PackageLoadProgress) -> Void)? = nil) async throws -> Package {
+    try await load(.registry(specifier), onProgress: onProgress)
+  }
+
+  /// Load concurrently, sharing downloads and preserving input order.
+  /// Callbacks are serialized and have no main-actor guarantee.
+  public func loadMany(_ sources: [PackageSource], onProgress: (@Sendable (PackageLoadProgress) -> Void)? = nil) async throws -> [Package] {
+    let encoded: [CorePackageLoadSource] = try sources.map { source in
+      switch source {
+      case .registry(let specifier): return .registry(specifier: specifier)
+      case .file(let url): return .path(path: try localPath(url))
+      case .bytes(let data), .webc(let data): return .bytes(bytes: data)
+      case .package(let package): return .package(package: package.core)
+      }
     }
+    let cancellation = CorePackageLoadCancellation()
+    let observer = onProgress.map(ProgressObserver.init)
+    return try await withTaskCancellationHandler {
+      try Task.checkCancellation()
+      do {
+        let loaded = try await core.loadPackages(sources: encoded, observer: observer, cancellation: cancellation)
+        try Task.checkCancellation()
+        return loaded.map { Package(core: $0) }
+      } catch {
+        try Task.checkCancellation()
+        throw error
+      }
+    } onCancel: { cancellation.cancel() }
   }
 
-  public func load(_ specifier: String) async throws -> Package {
-    try await load(.registry(specifier))
-  }
+}
+
+private final class ProgressObserver: CorePackageLoadObserver {
+  let callback: @Sendable (PackageLoadProgress) -> Void
+  init(_ callback: @escaping @Sendable (PackageLoadProgress) -> Void) { self.callback = callback }
+  func onProgress(progress: PackageLoadProgress) { callback(progress) }
 }
 
 public struct Package: Sendable {
@@ -144,12 +168,10 @@ public struct Sandboxes: Sendable {
   public func create(
     packages: [PackageSource] = [], files: [String: Data] = [:],
     env: [String: String] = [:], network: NetworkPolicy = .disabled,
-    mounts: [DirectoryMount] = [], storage: SandboxStorage = .memory
+    mounts: [DirectoryMount] = [], storage: SandboxStorage = .memory,
+    onPackageProgress: (@Sendable (PackageLoadProgress) -> Void)? = nil
   ) async throws -> Sandbox {
-    var resolved: [PackageCore] = []
-    for source in packages {
-      resolved.append(try await Packages(core: core).load(source).core)
-    }
+    let resolved = try await Packages(core: core).loadMany(packages, onProgress: onPackageProgress).map(\.core)
     #if os(iOS)
     let backendStorage: WorkspaceStorage
     switch storage {
@@ -157,18 +179,19 @@ public struct Sandboxes: Sendable {
     case .native(let directory): backendStorage = .native(URL(fileURLWithPath: try localPath(directory)))
     case .opfs(let volume): backendStorage = .opfs(volume)
     }
-    return Sandbox(core: try await core.createSandbox(
+    return Sandbox(owner: core, core: try await core.createSandbox(
       packages: resolved, files: files, env: env, network: network,
       storage: backendStorage, mounts: try mounts.map { .init(path: $0.path, directory: URL(fileURLWithPath: try localPath($0.directory)), readOnly: $0.readOnly) }))
     #else
     guard mounts.isEmpty else { throw unavailable("Native directory mounts") }
     guard case .memory = storage else { throw unavailable("External workspace storage") }
-    return Sandbox(core: try await core.createSandbox(packages: resolved, files: files, env: env, network: network))
+    return Sandbox(owner: core, core: try await core.createSandbox(packages: resolved, files: files, env: env, network: network))
     #endif
   }
 }
 
 public struct Sandbox: Sendable {
+  fileprivate let owner: WasmerCore
   fileprivate let core: SandboxCore
   public var fs: SandboxFileSystem { SandboxFileSystem(core: core.filesystem()) }
   public var ports: Ports { Ports(core: core.ports()) }
@@ -195,19 +218,10 @@ public struct Sandbox: Sendable {
   }
 
   @discardableResult
-  public func installPackage(_ source: PackageSource) async throws -> Package {
-    let package: PackageCore
-    switch source {
-    case .registry(let specifier):
-      package = try await core.installPackageRegistry(specifier: specifier)
-    case .file(let url):
-      package = try await core.installPackagePath(path: localPath(url))
-    case .bytes(let data), .webc(let data):
-      package = try await core.installPackageBytes(bytes: data)
-    case .package(let value):
-      package = try await core.installPackageRef(package: value.core)
-    }
-    return Package(core: package)
+  public func installPackage(_ source: PackageSource, onProgress: (@Sendable (PackageLoadProgress) -> Void)? = nil) async throws -> Package {
+    let loaded = try await Packages(core: owner).load(source, onProgress: onProgress)
+    try Task.checkCancellation()
+    return Package(core: try await core.installPackageRef(package: loaded.core))
   }
 
   public func close() async throws { try await core.close() }

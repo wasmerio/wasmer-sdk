@@ -1,3 +1,4 @@
+from ._progress import DownloadProgress, PackageLoadPhase, PackageLoadProgress, PackageProgress
 from ._api import (
     BytesLike,
     CapturedOutput,
@@ -28,6 +29,11 @@ from ._api import (
 )
 
 __all__ = [
+    "DownloadProgress",
+    "PackageLoadPhase",
+    "PackageLoadProgress",
+    "PackageProgress",
+
     "BytesLike",
     "CapturedOutput",
     "Command",

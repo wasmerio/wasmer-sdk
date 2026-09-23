@@ -4,6 +4,42 @@ Run Wasmer packages in lightweight, composable sandboxes from Python. The
 public API is handwritten and typed; a Python-independent UniFFI library calls
 the Rust `wasmer-sdk` underneath.
 
+## Package download progress
+
+```python
+packages = await wasmer.packages.load_many(
+    ["wasmer/bash", "python/python"],
+    on_progress=lambda p: print(p.phase.value, p.download.percent, p.download.downloaded_bytes),
+)
+```
+
+`packages.load` and `sandbox.install_package` accept the same keyword-only
+`on_progress`. `sandboxes.create` accepts `on_package_progress`. Snapshots are
+immutable dataclasses and use Python's `None` for an unknown total/percentage.
+Callbacks run on the calling asyncio loop. An exception is reported through
+the loop's exception handler and detaches the observer without failing the
+load. Cancelling the asyncio task cancels its acquisition.
+
+Progress is a snapshot, not a delta. `download` contains downloaded bytes, an
+optional total, and an optional percentage from 0 to 100. Totals include the
+unique required package artifacts and their dependencies, weighted by bytes.
+Unknown sizes stay indeterminate. Counts describe decoded package bodies;
+SDK cache hits and local sources add zero download bytes. An entirely cached
+or local load reports 0 bytes of 0 and 100%.
+
+The phases are `resolving`, `downloading`, `loading`, and `ready`. Downloading
+can overlap resolution. 100% means the transfer is complete; await the load
+before using the package. The callback does not cover SDK initialization,
+guest execution, or guest `npm`/`pip` downloads. The final `ready` snapshot is
+delivered before a successful load returns, with no callbacks after settlement.
+Errors use the existing load error channel and do not emit `ready`.
+
+Batch results preserve input order. Concurrent loads on the same client share
+in-flight downloads. Cancelling one caller does not interrupt other callers;
+cancelling the last subscriber stops its acquisition. Callbacks are serialized
+per operation, coalesced to about ten byte updates per second, with phase changes
+and completion delivered promptly. Keep callbacks short.
+
 ## Install
 
 ```console

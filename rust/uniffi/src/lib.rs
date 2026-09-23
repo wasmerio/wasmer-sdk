@@ -1,7 +1,9 @@
 #![allow(clippy::missing_errors_doc, clippy::must_use_candidate)]
 
 mod error;
+mod package_progress;
 mod runtime;
+pub use package_progress::*;
 
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 

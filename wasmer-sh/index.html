@@ -118,18 +118,10 @@
         <section class="terminal-frame" aria-label="Wasmer shell terminal">
           <div id="terminal"></div>
 
-          <div class="boot-screen" role="status">
+          <div class="boot-screen" aria-label="Loading environment">
             <div class="boot-card">
-              <div class="runtime-glyph" aria-hidden="true">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-              <p class="eyebrow">WebAssembly + WASIX</p>
-              <h1 id="boot-title">Starting your shell</h1>
-              <p id="boot-detail">
-                Initializing the Wasmer runtime in this browser.
-              </p>
+              <p id="boot-detail" role="status">Initializing the SDK…</p>
+              <ul id="package-downloads" aria-label="Loading progress"></ul>
               <button id="retry-button" class="primary-button" type="button" hidden>
                 Try again
               </button>

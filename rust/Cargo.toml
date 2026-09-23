@@ -38,6 +38,8 @@ async-trait = "0.1"
 bytes = "1.11"
 crossbeam-queue = "0.3"
 futures = "0.3"
+instant = { version = "0.1", features = ["wasm-bindgen"] }
+serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 thiserror = "2.0"
 tokio = { version = "1.49", features = ["io-util", "macros", "rt", "sync", "time"] }

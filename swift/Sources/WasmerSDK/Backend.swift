@@ -1,6 +1,13 @@
 // Backend selection is internal; applications always import WasmerSDK.
 #if os(iOS)
   import WasmerWKSDK
+  public typealias DownloadProgress = WasmerWKSDK.DownloadProgress
+  public typealias PackageLoadPhase = WasmerWKSDK.PackageLoadPhase
+  public typealias PackageProgress = WasmerWKSDK.PackageProgress
+  public typealias PackageLoadProgress = WasmerWKSDK.PackageLoadProgress
+  typealias CorePackageLoadObserver = WasmerWKSDK.PackageLoadObserver
+  typealias CorePackageLoadCancellation = WasmerWKSDK.PackageLoadCancellation
+  typealias CorePackageLoadSource = WasmerWKSDK.PackageLoadSource
   public typealias SdkError = WasmerWKSDK.SdkError
   public typealias NetworkMode = WasmerWKSDK.NetworkMode
   public typealias ProcessExitReason = WasmerWKSDK.ProcessExitReason
@@ -25,6 +32,13 @@
   typealias CorePackageCommandDefinition = WasmerWKSDK.PackageCommandDefinition
 #else
   import WasmerSDKCore
+  public typealias DownloadProgress = WasmerSDKCore.DownloadProgress
+  public typealias PackageLoadPhase = WasmerSDKCore.PackageLoadPhase
+  public typealias PackageProgress = WasmerSDKCore.PackageProgress
+  public typealias PackageLoadProgress = WasmerSDKCore.PackageLoadProgress
+  typealias CorePackageLoadObserver = WasmerSDKCore.PackageLoadObserver
+  typealias CorePackageLoadCancellation = WasmerSDKCore.PackageLoadCancellation
+  typealias CorePackageLoadSource = WasmerSDKCore.PackageLoadSource
   public typealias SdkError = WasmerSDKCore.SdkError
   public typealias NetworkMode = WasmerSDKCore.NetworkMode
   public typealias ProcessExitReason = WasmerSDKCore.ProcessExitReason

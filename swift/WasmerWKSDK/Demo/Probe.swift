@@ -15,6 +15,29 @@ func runPrototypeProbe(progress: @escaping (String) -> Void) async -> [String: A
     runtime = client
     progress("Checking the shared SDK API")
     report["contractChecks"] = try await runSDKContract(fixtures: Bundle.main.resourceURL!.appendingPathComponent("Fixtures"))
+    progress("Checking streamed package progress")
+    let progressCache = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let progressClient = try Wasmer(cacheDirectory: progressCache)
+    let snapshots = DownloadRecorder()
+    let package = try await progressClient.packages.load("wasmer/hello-world@0.2.5", onProgress: snapshots.record)
+    let cold = snapshots.values
+    guard let final = cold.last, final.phase == .ready, final.download.downloadedBytes > 0,
+      final.download.percent == 100 else { throw ProbeError.failed("cold package progress") }
+    _ = try await progressClient.packages.load("wasmer/hello-world@0.2.5", onProgress: snapshots.record)
+    guard let warm = snapshots.values.last, warm.phase == .ready,
+      warm.download.downloadedBytes == 0, warm.packages.allSatisfy(\.cached)
+    else { throw ProbeError.failed("cached package progress") }
+    report["packageProgress"] = ["id": package.id, "snapshots": cold.count,
+      "downloadedBytes": final.download.downloadedBytes,
+      "intermediateBytes": cold.map { $0.download.downloadedBytes }]
+    try await progressClient.close()
+    let restarted = try Wasmer(cacheDirectory: progressCache)
+    _ = try await restarted.packages.load("wasmer/hello-world@0.2.5", onProgress: snapshots.record)
+    guard let nativeCached = snapshots.values.last, nativeCached.download.downloadedBytes == 0,
+      nativeCached.packages.allSatisfy(\.cached) else { throw ProbeError.failed("native cache progress") }
+    try await restarted.close()
+    report["nativeCacheProgress"] = "zero network bytes after restart"
+    try? FileManager.default.removeItem(at: progressCache)
     progress("Loading Python")
     let sandbox = try await client.sandboxes.create(packages: ["python/python@=3.13.20"],
       mounts: [.init("/native", directory: directory), .init("/readonly", directory: directory, readOnly: true)])
@@ -55,3 +78,10 @@ func runPrototypeProbe(progress: @escaping (String) -> Void) async -> [String: A
   return report
 }
 private enum ProbeError: Error { case failed(String) }
+
+private final class DownloadRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var snapshots: [PackageLoadProgress] = []
+  func record(_ progress: PackageLoadProgress) { lock.withLock { snapshots.append(progress) } }
+  var values: [PackageLoadProgress] { lock.withLock { snapshots } }
+}

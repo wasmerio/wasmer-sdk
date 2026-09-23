@@ -43,7 +43,22 @@ func runSDKContract(fixtures: URL) async throws -> [String] {
     async let left = sandbox.command("hello").run()
     async let right = second.command("hello").run()
     try check(try await left.stdout == right.stdout, "concurrent sandboxes")
-    let raw = try await client.packages.load(modules["hello"]!)
+    let progress = ProgressRecorder()
+    let raw = try await client.packages.load(modules["hello"]!, onProgress: progress.record)
+    let final = progress.last
+    try check(final?.phase == .ready && final?.download.downloadedBytes == 0
+      && final?.download.totalBytes == 0 && final?.download.percent == 100,
+      "local package final progress before return")
+    let batch = try await client.packages.loadMany([.package(raw), .bytes(modules["hello"]!)], onProgress: progress.record)
+    try check(batch.count == 2 && batch[0].id == batch[1].id, "batch package order")
+    let empty = try await client.packages.loadMany([], onProgress: progress.record)
+    try check(empty.isEmpty && progress.last?.phase == .ready, "empty batch progress")
+    let cancelled = Task {
+      withUnsafeCurrentTask { $0?.cancel() }
+      return try await client.packages.load(modules["hello"]!)
+    }
+    do { _ = try await cancelled.value; throw ContractFailure.failed("cancelled package load") }
+    catch is CancellationError { checks.append("cancelled package load") }
     try check(raw.commands == ["main"] && raw.entrypoint == "main", "raw Wasm package")
     try await sandbox.installPackage(.package(raw))
     try check(try await sandbox.command(raw).run().ok, "package selector")
@@ -150,3 +165,10 @@ func runSDKContract(fixtures: URL) async throws -> [String] {
   }
 }
 private enum ContractFailure: Error { case failed(String) }
+
+private final class ProgressRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value: PackageLoadProgress?
+  func record(_ progress: PackageLoadProgress) { lock.withLock { value = progress } }
+  var last: PackageLoadProgress? { lock.withLock { value } }
+}
