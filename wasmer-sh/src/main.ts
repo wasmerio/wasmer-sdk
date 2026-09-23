@@ -16,7 +16,7 @@ import { Terminal } from "@xterm/xterm";
 
 import { detectBrowserCompatibilityWarning } from "./browser-compatibility";
 import { WorkspaceEditor } from "./editor";
-import { examples, exampleFiles, renderExamples, exampleUrl } from "./examples";
+import { examples, exampleFiles, exampleEnvironment, renderExamples, exampleUrl } from "./examples";
 
 const DEFAULT_PACKAGE = "wasmer/bash";
 const EDGEJS_PACKAGE = "wasmer/edge@=0.2.1";
@@ -108,8 +108,8 @@ const elements = {
   ),
   stage: document.querySelector<HTMLElement>(".shell-stage")!,
   picker: requiredElement<HTMLElement>("example-picker"),
-  examplesButton: requiredElement<HTMLButtonElement>("examples-button"),
-  resume: requiredElement<HTMLButtonElement>("resume-button"),
+  examplesButton: requiredElement<HTMLAnchorElement>("examples-button"),
+  resume: requiredElement<HTMLAnchorElement>("resume-button"),
   workspaceColumn: requiredElement<HTMLDivElement>("workspace-column"),
   terminal: requiredElement<HTMLDivElement>("terminal"),
   status: requiredElement<HTMLSpanElement>("session-status"),
@@ -161,6 +161,9 @@ showBrowserCompatibilityWarning();
 
 const params = new URLSearchParams(window.location.search);
 const selectedExample = examples.find(example => example.id === params.get("example"));
+const terminalUrl = new URL(window.location.href);
+const startsInTerminal = Boolean(selectedExample || params.get("example") === "shell" ||
+  ["package", "command", "use", "arg"].some(key => params.has(key)));
 const config = readConfig(params);
 const wispAutoconfigureChannel = new BroadcastChannel(
   WISP_AUTOCONFIGURE_CHANNEL,
@@ -247,8 +250,20 @@ elements.browserWarningDismiss.addEventListener("click", () => {
 });
 renderExamples(requiredElement("example-groups"));
 requiredElement<HTMLAnchorElement>("full-shell-link").href = exampleUrl("shell");
-elements.examplesButton.addEventListener("click", () => showExamples(true));
-elements.resume.addEventListener("click", () => showExamples(false));
+elements.examplesButton.href = exampleUrl();
+elements.resume.href = terminalUrl.href;
+for (const [link, show] of [[elements.examplesButton, true], [elements.resume, false]] as const) {
+  link.addEventListener("click", event => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (window.location.href !== link.href) window.history.pushState(null, "", link.href);
+    showExamples(show);
+  });
+}
+window.addEventListener("popstate", () => showExamples(
+  !startsInTerminal || window.location.pathname !== terminalUrl.pathname ||
+  window.location.search !== terminalUrl.search,
+));
 elements.restart.addEventListener("click", () => void start());
 elements.editorButton.addEventListener("click", () => void toggleEditor());
 elements.networkButton.addEventListener("click", () => void changeWispProxy());
@@ -339,8 +354,7 @@ if (import.meta.env.DEV) {
 }
 
 // Merely browsing examples must not download or initialize any guest packages.
-if (selectedExample || params.get("example") === "shell" ||
-    ["package", "command", "use", "arg"].some(key => params.has(key))) {
+if (startsInTerminal) {
   void start();
 } else {
   setState("choosing", "Choose an example");
@@ -425,6 +439,7 @@ async function start(): Promise<void> {
         LOGNAME: "wasmer",
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
+        ...exampleEnvironment(selectedExample),
       },
     });
 
@@ -439,6 +454,7 @@ async function start(): Promise<void> {
       pendingPreviewPorts: new Set(),
     };
     activeSession = session;
+    elements.resume.hidden = false;
     session.stopWatchingPorts = sandbox.ports.onListen(
       (port) => {
         session.listeningPorts.add(port);

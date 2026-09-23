@@ -36,6 +36,18 @@
     "run": "pnpm dev"
   },
   {
+    "id": "node-richards",
+    "source": "node-richards",
+    "title": "Richards.js",
+    "group": "Node.js",
+    "description": "Measure JavaScript speed with the Richards benchmark.",
+    "icon": "benchmark.svg",
+    "dependencies": "No npm dependencies",
+    "packages": ["wasmer/edge@=0.2.1"],
+    "install": null,
+    "run": "node richards.js"
+  },
+  {
     "id": "python",
     "source": "python",
     "title": "Python",
@@ -82,6 +94,19 @@
     "packages": ["python/python@=3.13.20"],
     "install": "pip install -r requirements.txt",
     "run": "python server.py"
+  },
+  {
+    "id": "clang",
+    "source": "clang",
+    "title": "Clang / C",
+    "group": "Tools",
+    "description": "Compile a C program to WebAssembly and run it locally.",
+    "icon": "cpp.svg",
+    "dependencies": "Clang · C standard library",
+    "packages": ["clang/clang@=0.160000.1"],
+    "env": { "CCC_OVERRIDE_OPTIONS": "#^-resource-dir=/lib/clang/16" },
+    "install": null,
+    "run": "clang hello.c -o hello.wasm && ./hello.wasm"
   },
   {
     "id": "ffmpeg",

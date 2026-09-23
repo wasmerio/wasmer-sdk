@@ -4,11 +4,12 @@ These locally bundled assets are shared by wasmer.sh and the WasmerShell iOS
 example. The native build compiles them into an asset catalog; no icon font or
 runtime download is required.
 
-- The seven SVGs are from [Devicon](https://github.com/devicons/devicon/tree/7330accdbc47e2dc0c19789a48533c4a3c50fe58/icons),
+- The eight SVGs are from [Devicon](https://github.com/devicons/devicon/tree/7330accdbc47e2dc0c19789a48533c4a3c50fe58/icons),
   revision `7330accdbc47e2dc0c19789a48533c4a3c50fe58`: `nodejs/nodejs-original.svg`,
   `express/express-original.svg`, `nextjs/nextjs-original.svg`,
   `python/python-original.svg`, `flask/flask-original.svg`,
-  `django/django-plain.svg`, and `fastapi/fastapi-original.svg`.
+  `django/django-plain.svg`, `fastapi/fastapi-original.svg`, and
+  `cplusplus/cplusplus-original.svg` (bundled as `cpp.svg` for the Clang example).
   See `DEVICON-LICENSE.txt` (MIT).
   Express and Flask use white fills, Next.js uses its inverse colors, and Django
   uses green `#44B78B` for contrast on the dark picker. Logo paths are unchanged.
@@ -19,5 +20,8 @@ runtime download is required.
   revision `b86d5c9a0bdd4f3f5c30898a63654dd32f39fd76`, with a green `#44B78B`
   fill for contrast on the dark picker. The logo path is unchanged.
   See `SIMPLE-ICONS-LICENSE.txt` (CC0 1.0).
+
+`benchmark.svg` is an original speedometer illustration for the Richards.js
+performance example, shared under the repository license.
 
 Project names and logos belong to their respective owners.
