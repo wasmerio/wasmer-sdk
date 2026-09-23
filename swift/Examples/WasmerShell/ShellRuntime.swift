@@ -58,7 +58,7 @@ final class ShellRuntime {
         "PIP_ONLY_BINARY": ":all:",
         "PIP_TARGET": pythonPath,
         "PYTHONPATH": pythonPath,
-      ],
+      ].merging(ShellExample.environment(for: example)) { _, value in value },
       network: .host,
       mounts: [
         .init("/native", directory: directory),

@@ -16,7 +16,7 @@ import { Terminal } from "@xterm/xterm";
 
 import { detectBrowserCompatibilityWarning } from "./browser-compatibility";
 import { WorkspaceEditor } from "./editor";
-import { examples, exampleFiles, renderExamples, exampleUrl } from "./examples";
+import { examples, exampleFiles, exampleEnvironment, renderExamples, exampleUrl } from "./examples";
 
 const DEFAULT_PACKAGE = "wasmer/bash";
 const EDGEJS_PACKAGE = "wasmer/edge@=0.2.1";
@@ -425,6 +425,7 @@ async function start(): Promise<void> {
         LOGNAME: "wasmer",
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
+        ...exampleEnvironment(selectedExample),
       },
     });
 

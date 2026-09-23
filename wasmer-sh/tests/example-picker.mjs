@@ -103,6 +103,17 @@ try {
     0,
     "The picker should not download any runtime packages",
   );
+  const environments = await page.evaluate(async () => {
+    const { examples, exampleEnvironment } = await import("/src/examples.ts");
+    return {
+      shell: exampleEnvironment(),
+      clang: exampleEnvironment(examples.find(example => example.id === "clang")),
+      node: exampleEnvironment(examples.find(example => example.id === "node")),
+    };
+  });
+  assert.equal(environments.shell.CCC_OVERRIDE_OPTIONS, "#^-resource-dir=/lib/clang/16");
+  assert.equal(environments.clang.CCC_OVERRIDE_OPTIONS, environments.shell.CCC_OVERRIDE_OPTIONS);
+  assert.equal(environments.node.CCC_OVERRIDE_OPTIONS, undefined);
   if (process.env.WASMER_PICKER_SCREENSHOTS)
     await page.screenshot({
       path: `${process.env.WASMER_PICKER_SCREENSHOTS}-desktop.png`,
@@ -221,30 +232,32 @@ try {
       await command("node richards.js 0; test \"$?\" = 1");
       assert.equal(await page.locator("#preview-panel").isVisible(), false);
     } else if (example.id === "clang") {
+      await command('test "$(clang -print-resource-dir)" = /lib/clang/16 && test "$(clang -resource-dir=/override -print-resource-dir)" = /override');
       const output = await command(example.run, 180_000);
       assert(output.includes("Hello, Wasmer!"));
       assert(output.includes("This C program was compiled to WebAssembly and run locally."));
       assert((await command('./hello.wasm "C developer"')).includes("Hello, C developer!"));
       const rebuilt = await command(
-        'printf \'#include <stdio.h>\\nint main(void) { puts("Rebuilt C program"); return 0; }\\n\' > rebuilt.c && clang -resource-dir=/lib/clang/16 rebuilt.c -o hello.wasm && ./hello.wasm',
+        'printf \'#include <stdio.h>\\nint main(void) { puts("Rebuilt C program"); return 0; }\\n\' > rebuilt.c && clang rebuilt.c -o hello.wasm && ./hello.wasm',
         180_000,
       );
       assert(rebuilt.includes("Rebuilt C program"));
-      await command("printf 'invalid C source' > broken.c; ! clang -resource-dir=/lib/clang/16 broken.c -o broken.wasm", 180_000);
+      await command("printf 'invalid C source' > broken.c; ! clang broken.c -o broken.wasm", 180_000);
       assert.equal(await page.locator("#preview-panel").isVisible(), false);
 
       // Also exercise the documented public SDK path without Bash: compile,
       // read the emitted bytes, install the module, and run its entrypoint.
-      const sdkOutput = await page.evaluate(async (sdkUrl) => {
+      const sdkOutput = await page.evaluate(async ({ sdkUrl, env }) => {
         const { Wasmer } = await import(sdkUrl);
         const client = new Wasmer();
         let sandbox;
         try {
           sandbox = await client.sandboxes.create({
             packages: ["clang/clang@=0.160000.1"],
+            env,
             files: { "hello.c": '#include <stdio.h>\nint main(void) { puts("Hello from the JS SDK!"); return 0; }\n' },
           });
-          await sandbox.command("clang", ["-resource-dir=/lib/clang/16", "hello.c", "-o", "hello.wasm"]).run();
+          await sandbox.command("clang", ["hello.c", "-o", "hello.wasm"]).run();
           const bytes = await sandbox.fs.readFile("hello.wasm");
           const program = await sandbox.installPackage(bytes);
           return (await sandbox.command(program).run()).text();
@@ -252,7 +265,7 @@ try {
           await sandbox?.close();
           await client.close();
         }
-      }, "/@fs" + fileURLToPath(import.meta.resolve("@wasmer/sdk/browser")));
+      }, { sdkUrl: "/@fs" + fileURLToPath(import.meta.resolve("@wasmer/sdk/browser")), env: example.env });
       assert.equal(sdkOutput, "Hello from the JS SDK!\n");
     } else if (example.id === "ffmpeg") {
       await command(example.run, 180_000);
