@@ -95,6 +95,7 @@ try {
   for (const path of [
     "node/server.js", "python/server.py", "python-django/manage.py",
     "python-django/mysite/settings.py", "next/pages/index.js", "yt-dlp/yt-dlp.conf",
+    "node-richards/richards.js", "clang/hello.c",
   ])
     assert(fullShellPaths.includes(path), `Missing full-shell source: ${path}`);
   assert.equal(
@@ -113,7 +114,7 @@ try {
     ),
     true,
   );
-  for (const id of ["ffmpeg", "yt-dlp"]) {
+  for (const id of ["clang", "ffmpeg", "yt-dlp"]) {
     const tool = page.locator(`[data-example="${id}"]`);
     await tool.scrollIntoViewIfNeeded();
     assert.equal(await tool.isVisible(), true);
@@ -160,6 +161,10 @@ try {
       await command(
         "command -v node && ! command -v python && ! command -v php && ! command -v ffmpeg",
       );
+    else if (example.id === "clang")
+      await command(
+        "command -v clang && ! command -v node && ! command -v python && ! command -v ffmpeg",
+      );
     else if (example.id === "ffmpeg")
       await command(
         "command -v ffmpeg && command -v ffprobe && ! command -v python && ! command -v node && ! command -v php",
@@ -203,6 +208,52 @@ try {
           "python -c \"from pathlib import Path; files = list(Path('downloads').glob('*.mp4')); assert files and all(p.stat().st_size > 0 for p in files)\"",
         );
       }
+    } else if (example.id === "node-richards") {
+      const output = await command(example.run);
+      assert(output.includes("1000 iterations/sample; 5 samples;"));
+      assert(output.includes("Sample 5/5:"));
+      assert(/Median: [\d.]+ ms \([\d.]+ ms\/iteration\)/.test(output));
+      assert(output.includes("PASS: every iteration checked queueCount=2322, holdCount=928."));
+      console.log(output.slice(output.lastIndexOf("Richards.js —")));
+      const repeated = await command("node richards.js 2000 2");
+      assert(repeated.includes("2000 iterations/sample; 2 samples;"));
+      assert(repeated.includes("Sample 2/2:"));
+      await command("node richards.js 0; test \"$?\" = 1");
+      assert.equal(await page.locator("#preview-panel").isVisible(), false);
+    } else if (example.id === "clang") {
+      const output = await command(example.run, 180_000);
+      assert(output.includes("Hello, Wasmer!"));
+      assert(output.includes("This C program was compiled to WebAssembly and run locally."));
+      assert((await command('./hello.wasm "C developer"')).includes("Hello, C developer!"));
+      const rebuilt = await command(
+        'printf \'#include <stdio.h>\\nint main(void) { puts("Rebuilt C program"); return 0; }\\n\' > rebuilt.c && clang -resource-dir=/lib/clang/16 rebuilt.c -o hello.wasm && ./hello.wasm',
+        180_000,
+      );
+      assert(rebuilt.includes("Rebuilt C program"));
+      await command("printf 'invalid C source' > broken.c; ! clang -resource-dir=/lib/clang/16 broken.c -o broken.wasm", 180_000);
+      assert.equal(await page.locator("#preview-panel").isVisible(), false);
+
+      // Also exercise the documented public SDK path without Bash: compile,
+      // read the emitted bytes, install the module, and run its entrypoint.
+      const sdkOutput = await page.evaluate(async (sdkUrl) => {
+        const { Wasmer } = await import(sdkUrl);
+        const client = new Wasmer();
+        let sandbox;
+        try {
+          sandbox = await client.sandboxes.create({
+            packages: ["clang/clang@=0.160000.1"],
+            files: { "hello.c": '#include <stdio.h>\nint main(void) { puts("Hello from the JS SDK!"); return 0; }\n' },
+          });
+          await sandbox.command("clang", ["-resource-dir=/lib/clang/16", "hello.c", "-o", "hello.wasm"]).run();
+          const bytes = await sandbox.fs.readFile("hello.wasm");
+          const program = await sandbox.installPackage(bytes);
+          return (await sandbox.command(program).run()).text();
+        } finally {
+          await sandbox?.close();
+          await client.close();
+        }
+      }, "/@fs" + fileURLToPath(import.meta.resolve("@wasmer/sdk/browser")));
+      assert.equal(sdkOutput, "Hello from the JS SDK!\n");
     } else if (example.id === "ffmpeg") {
       await command(example.run, 180_000);
       const metadata = await command(

@@ -3,8 +3,8 @@
 A fast, browser-native command shell powered by Wasmer, WASIX, and the new
 [`@wasmer/sdk`](https://www.npmjs.com/package/@wasmer/sdk) sandbox API.
 
-The opening screen offers Node.js, Express, Next.js, Python HTTP, Flask, Django,
-FastAPI, FFmpeg, and yt-dlp templates. Selecting a template opens Bash at
+The opening screen offers Node.js, Express, Next.js, Richards.js, Python HTTP, Flask, Django,
+FastAPI, Clang / C, FFmpeg, and yt-dlp templates. Selecting a template opens Bash at
 `/workspace`, with that example's source files directly in the root and only its
 required runtime packages. The terminal shows the install and run commands;
 nothing is installed automatically. Python dependencies are isolated in each
@@ -15,6 +15,24 @@ Use **Examples** to browse templates and **Resume terminal** to return without
 interrupting the current session. Selecting another template opens a fresh
 workspace. A template can also be linked directly, for example `?example=node-next`.
 The catalog in `examples.json` is shared with the native Swift WasmerShell app.
+
+Choose **Richards.js** (`?example=node-richards`) to compare JavaScript CPU speed.
+Run `node richards.js` for a warm-up and five timed samples, or
+`node richards.js 10000 7` for longer runs. The benchmark reports a median and
+checks the result of every iteration. See its [README](workspace/node-richards/README.md)
+for what the timings include and how to compare platforms.
+
+Choose **Clang / C** under **Tools** (`?example=clang`) to compile and run C:
+
+```sh
+clang -resource-dir=/lib/clang/16 hello.c -o hello.wasm
+./hello.wasm
+```
+
+The compiler, linker, and C library come from `clang/clang`. No dependency
+installation is needed. The [example README](workspace/clang/README.md) also
+shows how to compile, read the emitted bytes, and run them through the JavaScript
+and Swift SDK APIs. Generated binaries are not bundled with the example.
 
 The Django template is a standard `manage.py` / `mysite` starter based on
 [Wasmer's Django example](https://github.com/wasmerio/examples/tree/main/python-django).

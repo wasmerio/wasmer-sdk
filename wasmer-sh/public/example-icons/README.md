@@ -4,11 +4,12 @@ These locally bundled assets are shared by wasmer.sh and the WasmerShell iOS
 example. The native build compiles them into an asset catalog; no icon font or
 runtime download is required.
 
-- The seven SVGs are from [Devicon](https://github.com/devicons/devicon/tree/7330accdbc47e2dc0c19789a48533c4a3c50fe58/icons),
+- The eight SVGs are from [Devicon](https://github.com/devicons/devicon/tree/7330accdbc47e2dc0c19789a48533c4a3c50fe58/icons),
   revision `7330accdbc47e2dc0c19789a48533c4a3c50fe58`: `nodejs/nodejs-original.svg`,
   `express/express-original.svg`, `nextjs/nextjs-original.svg`,
   `python/python-original.svg`, `flask/flask-original.svg`,
-  `django/django-plain.svg`, and `fastapi/fastapi-original.svg`.
+  `django/django-plain.svg`, `fastapi/fastapi-original.svg`, and
+  `cplusplus/cplusplus-original.svg` (bundled as `cpp.svg` for the Clang example).
   See `DEVICON-LICENSE.txt` (MIT).
   Express and Flask use white fills, Next.js uses its inverse colors, and Django
   uses green `#44B78B` for contrast on the dark picker. Logo paths are unchanged.

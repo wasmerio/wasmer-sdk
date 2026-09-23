@@ -95,6 +95,41 @@ python3 swift/Examples/WasmerShell/build.py run --example node
 # Or: --example python
 ```
 
+### Richards.js benchmark
+
+Choose **Richards.js** under **Node.js** and run `node richards.js`. It runs the
+same dependency-free CPU benchmark as wasmer.sh, with an untimed warm-up, five
+timed samples, and correctness checks. Use `node richards.js 10000 7` for longer
+runs. The [shared example README](../../../wasmer-sh/workspace/node-richards/README.md)
+explains the timings and how to compare results. Simulator timings measure the
+Mac's CPU, not a physical iPhone.
+
+```sh
+python3 swift/Examples/WasmerShell/build.py run --example node-richards
+python3 swift/Examples/WasmerShell/build.py test --example node-richards
+```
+
+### Compile and run C
+
+Choose **Clang / C** under **Tools**. The `clang/clang` package includes the
+compiler, linker, and C library; no npm or pip installation is needed:
+
+```sh
+clang -resource-dir=/lib/clang/16 hello.c -o hello.wasm
+./hello.wasm
+./hello.wasm "C developer"
+```
+
+Both compilation and execution happen inside the SDK. The
+[shared example README](../../../wasmer-sh/workspace/clang/README.md) also
+includes Swift code that compiles a file, reads the resulting Wasm bytes,
+loads them with `sandbox.installPackage(.bytes(bytes))`, and runs the program.
+
+```sh
+python3 swift/Examples/WasmerShell/build.py run --example clang
+python3 swift/Examples/WasmerShell/build.py test --example clang
+```
+
 ### Next.js
 
 Choose **Next.js** in the picker to open the shared wasmer.sh example in
@@ -300,8 +335,9 @@ packaged by CI in the Swift release's runtime XCFramework.
 
 ## Example picker
 
-WasmerShell opens with a grid of Node.js, Express, Next.js, Python HTTP, Flask,
-Django, FastAPI, FFmpeg, and yt-dlp templates. The catalog and sources are shared with
+WasmerShell opens with a grid of Node.js, Express, Next.js, Richards.js, Python
+HTTP, Flask, Django, FastAPI, Clang / C, FFmpeg, and yt-dlp templates. The catalog
+and sources are shared with
 `wasmer-sh/examples.json` and `wasmer-sh/workspace`.
 
 Selecting an example starts a shell with only that example's runtime packages,

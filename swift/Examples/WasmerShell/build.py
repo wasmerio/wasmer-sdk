@@ -179,7 +179,7 @@ def main():
     parser.add_argument("action", choices=["build", "run", "test", "stress"])
     parser.add_argument("--platform", choices=["simulator", "device"], default="simulator")
     parser.add_argument("--device", help="iOS 27+ simulator UDID")
-    parser.add_argument("--example", choices=["node", "node-next", "python", "storage", "picker"], help="Start a server (run), or select the node-next/storage/picker integration test (test)")
+    parser.add_argument("--example", choices=["node", "node-next", "node-richards", "clang", "python", "storage", "picker"], help="Run an example, or select the node-next/node-richards/clang/storage/picker integration test (test)")
     parser.add_argument("--edgejs-webc", type=Path, help="Use a locally generated EdgeJS package instead of the registry release")
     parser.add_argument("--storage", choices=["native", "memory", "opfs"], help="Choose workspace storage; run preserves the app selection, tests default to native")
     parser.add_argument("--reuse-next-project", action="store_true", help="Test the existing node-next directory and pnpm cache, preserving files (test --example node-next only)")

@@ -297,6 +297,7 @@ async function readDirectory(sandbox: Sandbox, path: string): Promise<TreeEntry[
 function languageFor(path: string): string {
   const extension = path.split(".").at(-1)?.toLowerCase();
   return ({
+    c: "c", h: "c", cc: "cpp", cpp: "cpp", hpp: "cpp",
     cjs: "javascript", css: "css", htm: "html", html: "html", js: "javascript",
     json: "json", jsx: "javascript", md: "markdown", mjs: "javascript", php: "php",
     py: "python", sh: "shell", ts: "typescript", tsx: "typescript",

@@ -38,6 +38,14 @@ extension TerminalSession {
       await runNextSmokeTest(host)
       return
     }
+    if ProcessInfo.processInfo.arguments.contains("--example-node-richards") {
+      await runRichardsSmokeTest()
+      return
+    }
+    if ProcessInfo.processInfo.arguments.contains("--example-clang") {
+      await runClangSmokeTest(host)
+      return
+    }
     var report: [String: Any] = ["passed": false, "renderer": "libghostty-vt", "osVersion": ProcessInfo.processInfo.operatingSystemVersionString]
     do {
       try? FileManager.default.removeItem(at: directory.appendingPathComponent("terminal-test.txt"))
@@ -287,6 +295,99 @@ extension TerminalSession {
     report["transcript"] = text
     writeReport(report)
   }
+  private func runRichardsSmokeTest() async {
+    var report: [String: Any] = ["passed": false, "example": "node-richards", "storage": storage.rawValue]
+    do {
+      guard let example = ShellExample.all.first(where: { $0.id == "node-richards" }) else {
+        throw DemoError.failed("Missing Richards example")
+      }
+      await chooseExample(example)
+      guard let host = runtime else { throw DemoError.failed(status) }
+      try await waitFor("➜ ~ $ ")
+      try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
+      try await shellCheck(host, command: "test -f richards.js && command -v node && ! command -v python && ! command -v ffmpeg; printf '\\nRICHARDS_ISOLATION:%s\\n' \"$?\"", marker: "\nRICHARDS_ISOLATION:0\n")
+      let result = try await shellCheck(host, command: "node richards.js; printf '\\nRICHARDS_EXIT:%s\\n' \"$?\"", marker: "\nRICHARDS_EXIT:0\n", timeout: 180)
+      guard result.contains("1000 iterations/sample; 5 samples;"),
+            result.contains("Sample 5/5:"), result.contains("Median:"),
+            result.contains("PASS: every iteration checked queueCount=2322, holdCount=928.") else {
+        throw DemoError.failed("Missing Richards benchmark results")
+      }
+      report["benchmark"] = result
+      let repeated = try await shellCheck(host, command: "node richards.js 2000 2; printf '\\nRICHARDS_REPEAT:%s\\n' \"$?\"", marker: "\nRICHARDS_REPEAT:0\n")
+      guard repeated.contains("2000 iterations/sample; 2 samples;"), repeated.contains("Sample 2/2:") else {
+        throw DemoError.failed("Richards custom arguments were not applied")
+      }
+      try await shellCheck(host, command: "node richards.js 0; printf '\\nRICHARDS_INVALID:%s\\n' \"$?\"", marker: "\nRICHARDS_INVALID:1\n")
+      guard previews.isEmpty else { throw DemoError.failed("Richards unexpectedly opened a server preview") }
+      report["passed"] = true
+      status = "Richards benchmark tests passed"
+    } catch {
+      report["error"] = error.localizedDescription
+      status = "Richards benchmark test failed"
+    }
+    report["transcript"] = text
+    writeReport(report)
+  }
+
+  private func runClangSmokeTest(_ host: ShellRuntime) async {
+    var report: [String: Any] = ["passed": false, "example": "clang", "storage": storage.rawValue]
+    let workspace = "/workspace/.clang-smoke-" + UUID().uuidString
+    do {
+      guard let example = selectedExample, example.id == "clang" else {
+        throw DemoError.failed("Missing Clang example")
+      }
+      try await waitFor("➜ ~ $ ")
+      try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
+      try await shellCheck(host, command: "test -f hello.c && command -v clang && ! command -v node && ! command -v python; printf '\\nCLANG_ISOLATION:%s\\n' \"$?\"", marker: "\nCLANG_ISOLATION:0\n")
+      try await host.fs.writeText(workspace + "/hello.c", try await host.fs.readText("hello.c"))
+      try await shellCheck(host, command: "cd \(workspace) && printf '\\nCLANG_DIRECTORY\\n'", marker: "\nCLANG_DIRECTORY\n")
+      let output = try await shellCheck(host, command: example.run + "; printf '\\nCLANG_EXIT:%s\\n' \"$?\"", marker: "\nCLANG_EXIT:0\n", timeout: 180)
+      guard output.contains("Hello, Wasmer!"), output.contains("This C program was compiled to WebAssembly and run locally.") else {
+        throw DemoError.failed("Missing compiled C output")
+      }
+      try await shellCheck(host, command: "./hello.wasm 'C developer'", marker: "\nHello, C developer!\n")
+      try await host.fs.writeText(workspace + "/rebuilt.c", "#include <stdio.h>\nint main(void) { puts(\"Rebuilt C program\"); return 0; }\n")
+      try await shellCheck(host, command: "clang -resource-dir=/lib/clang/16 rebuilt.c -o hello.wasm && ./hello.wasm", marker: "\nRebuilt C program\n", timeout: 180)
+      try await host.fs.writeText(workspace + "/broken.c", "invalid C source\n")
+      try await shellCheck(host, command: "clang -resource-dir=/lib/clang/16 broken.c -o broken.wasm; printf '\\nCLANG_INVALID:%s\\n' \"$?\"", marker: "\nCLANG_INVALID:1\n")
+      guard previews.isEmpty else { throw DemoError.failed("Clang unexpectedly opened a server preview") }
+      try await host.fs.remove(workspace, recursive: true)
+      host.onTerminalExit = nil
+      host.onTerminalFailure = nil
+      await host.close()
+
+      // Exercise the public Swift API with a fresh client, without Bash or
+      // overlapping the terminal's compiler WebView in memory.
+      let client = try Wasmer()
+      do {
+        let sandbox = try await client.sandboxes.create(packages: example.packages.map { .registry($0) })
+        try await sandbox.fs.writeText("hello.c", "#include <stdio.h>\nint main(void) { puts(\"Hello from the Swift SDK!\"); return 0; }\n")
+        _ = try await sandbox.command("clang", ["-resource-dir=/lib/clang/16", "hello.c", "-o", "hello.wasm"]).run()
+        let bytes = try await sandbox.fs.read("hello.wasm")
+        let program = try await sandbox.installPackage(.bytes(bytes))
+        let result = try await sandbox.command(program).run()
+        guard try result.text() == "Hello from the Swift SDK!\n" else {
+          throw DemoError.failed("Swift SDK did not run the compiled module")
+        }
+        report["sdkOutput"] = try result.text()
+        report["wasmBytes"] = bytes.count
+        try await sandbox.close()
+      } catch {
+        try? await client.close()
+        throw error
+      }
+      try await client.close()
+      report["passed"] = true
+      status = "Clang compile and run tests passed"
+    } catch {
+      try? await host.fs.remove(workspace, recursive: true)
+      report["error"] = error.localizedDescription
+      status = "Clang test failed"
+    }
+    report["transcript"] = text
+    writeReport(report)
+  }
+
   private func runPickerSmokeTest() async {
     var checks: [String] = []
     let examples = ["node", "node-express", "python-flask", "python-django", "ffmpeg", "yt-dlp"]
