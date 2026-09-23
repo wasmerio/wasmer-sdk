@@ -13,6 +13,8 @@ final class ShellRuntime {
   private var outputTask: Task<Void, Never>?
   private var portTask: Task<Void, Never>?
   var onProgress: ((String) -> Void)?
+  var onPackageProgress: ((PackageLoadProgress?) -> Void)?
+  private var loadingPackages = false
   var onTerminalOutput: ((Data) -> Void)?
   var onTerminalExit: ((Output) -> Void)?
   var onTerminalFailure: ((Error) -> Void)?
@@ -35,15 +37,23 @@ final class ShellRuntime {
     var names = ["wasmer/bash"]
     let required = example?.packages ?? (ShellExample.all.flatMap(\.packages) + ["syrusakbary/cowsay@=0.3.0"])
     for name in required where !names.contains(name) { names.append(name) }
-    var packages: [Package] = []
-    for name in names {
-      onProgress?("Loading \(name)…")
-      if name == "wasmer/edge@=0.2.1", let url = Bundle.main.url(forResource: "edgejs", withExtension: "webc") {
-        packages.append(try await client.packages.load(.file(url)))
-      } else {
-        packages.append(try await client.packages.load(name))
+    let sources: [PackageSource] = names.map { name in
+      if name == "wasmer/edge@=0.2.1", let url = Bundle.main.url(forResource: "edgejs", withExtension: "webc") { return .file(url) }
+      return .registry(name)
+    }
+    loadingPackages = true
+    defer { loadingPackages = false; onPackageProgress?(nil) }
+    let packages = try await client.packages.loadMany(sources) { [weak self] progress in
+      Task { @MainActor in
+        guard let self, self.loadingPackages else { return }
+        self.onPackageProgress?(progress)
+        let label = progress.phase == .resolving ? "Resolving packages" : progress.phase == .downloading ? "Downloading packages" : "Preparing packages"
+        let detail = progress.download.percent.map { "\(Int($0))%" } ?? String(format: "%.1f MB", Double(progress.download.downloadedBytes) / 1_000_000)
+        self.onProgress?("\(label) · \(detail)")
       }
     }
+    loadingPackages = false
+    onPackageProgress?(nil)
     let pythonPath = example == nil ? "/workspace/wasix-packages" : "/workspace/.python-packages"
     sandbox = try await client.sandboxes.create(
       packages: packages.map { .package($0) },

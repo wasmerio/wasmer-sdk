@@ -9,6 +9,11 @@ mod command;
 mod error;
 mod fs;
 mod package;
+mod package_progress;
+pub use package_progress::{
+    DownloadProgress, PackageLoadCancellation, PackageLoadOptions, PackageLoadPhase,
+    PackageLoadProgress, PackageProgress,
+};
 mod process;
 mod provider_fs;
 mod sandbox;

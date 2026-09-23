@@ -15,11 +15,11 @@ const outputValue = value => {
 };
 
 export class SDKDispatcher {
-  #core; #initialize; #network; #storage; #ready; #next = 0;
+  #core; #initialize; #network; #storage; #progress; #cancellation; #ready; #next = 0;
   #packages = new Map(); #packageIDs = new Map(); #sandboxes = new Map(); #processes = new Map(); #jobs = new Map();
-  constructor(initialize, network, storage) { this.#initialize = initialize; this.#network = network; this.#storage = storage; }
+  constructor(initialize, network, storage, progress, cancellation) { this.#initialize = initialize; this.#network = network; this.#storage = storage; this.#progress = progress; this.#cancellation = cancellation; }
   async request(id, method, args) {
-    const job = { cancelled: false, process: undefined, sandbox: undefined };
+    const job = { id, cancelled: false, process: undefined, sandbox: undefined, loadCancellation: undefined };
     this.#jobs.set(id, job);
     try {
       if (method === "initialize") {
@@ -49,7 +49,7 @@ export class SDKDispatcher {
   }
   cancel(id) {
     const job = this.#jobs.get(id);
-    if (job) { job.cancelled = true; job.process?.kill(); }
+    if (job) { job.cancelled = true; job.process?.kill(); job.loadCancellation?.cancel(); }
   }
   #package(handle) {
     const value = this.#packages.get(handle);
@@ -94,6 +94,30 @@ export class SDKDispatcher {
   }
   async #dispatch(method, args, job) {
     switch (method) {
+      case "package.many": {
+        const cancellation = this.#cancellation();
+        job.loadCancellation = cancellation;
+        if (job.cancelled) cancellation.cancel();
+        const reused = args.sources.filter(s => s.package != null).map(s => this.#package(s.package));
+        const sources = args.sources.filter(s => s.package == null).map(s => s.registry ?? decode(s.bytes));
+        const onProgress = args.progress ? progress => {
+          const ids = new Set(progress.packages.map(p => p.id));
+          const packages = [...progress.packages];
+          for (const pkg of reused) {
+            if (ids.has(pkg.id)) continue;
+            ids.add(pkg.id);
+            packages.push({ id: pkg.id, phase: "ready", cached: true,
+              download: { downloadedBytes: 0, totalBytes: 0, percent: 100 } });
+          }
+          if (!job.cancelled) this.#progress({ kind: "packageProgress", id: job.id, progress: { ...progress, packages } });
+        } : undefined;
+        try {
+          const loaded = await this.#core.loadPackages(sources, onProgress, cancellation);
+          if (job.cancelled) { for (const pkg of loaded) pkg.free(); fail("CANCELLED", "Swift task cancelled"); }
+          let next = 0;
+          return args.sources.map(s => s.package != null ? this.#packageIDs.get(this.#package(s.package).id) : this.#retainPackage(loaded[next++]));
+        } finally { job.loadCancellation = undefined; cancellation.free(); }
+      }
       case "package.load": return this.#retainPackage(await this.#core.loadPackage(args.source));
       case "package.bytes": return this.#retainPackage(await this.#core.loadPackageBytes(decode(args.bytes)));
       case "package.create": {

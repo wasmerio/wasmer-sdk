@@ -26,8 +26,8 @@ use wasmer_wasix::{
 };
 
 use crate::{
-    Command, CommandSelector, Error, FileSystem, MountMode, Package, PackageSource, Result,
-    SandboxFileSystem, Wasmer, process::ProcessControl,
+    Command, CommandSelector, Error, FileSystem, MountMode, Package, PackageLoadOptions,
+    PackageLoadProgress, PackageSource, Result, SandboxFileSystem, Wasmer, process::ProcessControl,
 };
 
 /// Builds a process-free sandbox.
@@ -35,6 +35,7 @@ use crate::{
 pub struct SandboxBuilder {
     client: Wasmer,
     packages: Vec<PackageSource>,
+    package_load_options: PackageLoadOptions,
     files: Vec<(PathBuf, Vec<u8>)>,
     env: BTreeMap<String, String>,
     mounts: Vec<MountSpec>,
@@ -71,6 +72,7 @@ impl SandboxBuilder {
         Self {
             client,
             packages: Vec::new(),
+            package_load_options: PackageLoadOptions::default(),
             files: Vec::new(),
             env: BTreeMap::new(),
             mounts: Vec::new(),
@@ -84,6 +86,16 @@ impl SandboxBuilder {
     #[must_use]
     pub fn package(mut self, source: impl Into<PackageSource>) -> Self {
         self.packages.push(source.into());
+        self
+    }
+
+    /// Observe package acquisition performed before sandbox creation.
+    #[must_use]
+    pub fn on_package_progress(
+        mut self,
+        observer: impl Fn(PackageLoadProgress) + Send + Sync + 'static,
+    ) -> Self {
+        self.package_load_options = self.package_load_options.on_progress(observer);
         self
     }
 
@@ -183,8 +195,12 @@ impl SandboxBuilder {
         self.client.ensure_open()?;
 
         let mut packages = Vec::with_capacity(self.packages.len());
-        for source in self.packages {
-            let package = self.client.load_package_source(source).await?;
+        for package in self
+            .client
+            .packages()
+            .load_many_with_options(self.packages, self.package_load_options)
+            .await?
+        {
             if !packages
                 .iter()
                 .any(|installed: &Package| installed.same_as(&package))
@@ -340,8 +356,23 @@ impl Sandbox {
     /// Returns an error if the client or sandbox is closed, package resolution
     /// fails, or internal package state is unavailable.
     pub async fn install_package(&self, source: impl Into<PackageSource>) -> Result<Package> {
+        self.install_package_with_options(source, PackageLoadOptions::default())
+            .await
+    }
+
+    /// Load and install a package with optional acquisition progress.
+    pub async fn install_package_with_options(
+        &self,
+        source: impl Into<PackageSource>,
+        options: PackageLoadOptions,
+    ) -> Result<Package> {
         self.ensure_open()?;
-        let package = self.inner.client.packages().load(source).await?;
+        let package = self
+            .inner
+            .client
+            .packages()
+            .load_with_options(source, options)
+            .await?;
         self.ensure_open()?;
         let mut packages = self
             .inner

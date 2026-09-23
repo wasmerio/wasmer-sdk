@@ -17,6 +17,10 @@ struct WasmerShellApp: App {
                 .tracking(-1).foregroundStyle(ShellTheme.muted)
             }.fixedSize().accessibilityElement(children: .ignore).accessibilityLabel("Wasmer.iOS")
             Text(session.status).font(.caption).foregroundStyle(ShellTheme.muted).lineLimit(1)
+            if let progress = session.packageDownload {
+              ProgressView(value: progress.download.percent, total: 100)
+                .tint(Color(uiColor: ShellTheme.cursor)).accessibilityLabel("Package downloads")
+            }
           }.frame(minWidth: 134, alignment: .leading)
           Spacer(minLength: 4)
           Menu {
@@ -85,6 +89,7 @@ final class TerminalSession: ObservableObject {
   @Published var storage = ShellStorage.initial
   @Published var showingExamples = true
   @Published var selectedExample: ShellExample?
+  @Published var packageDownload: PackageLoadProgress?
   @Published var status = "Choose an example" {
     didSet {
       #if WASMER_SHELL_TESTS
@@ -142,6 +147,7 @@ final class TerminalSession: ObservableObject {
       let host = try ShellRuntime(directory: directory, storage: storage, example: selectedExample)
       runtime = host
       transcript.removeAll(); exit = nil
+      host.onPackageProgress = { [weak self] progress in self?.packageDownload = progress }
       host.onProgress = { [weak self] message in
         self?.status = message
       }
@@ -248,6 +254,8 @@ final class TerminalSession: ObservableObject {
     runtime?.onTerminalFailure = nil
     runtime?.onTerminalOutput = nil
     runtime?.onProgress = nil
+    runtime?.onPackageProgress = nil
+    packageDownload = nil
     await runtime?.close(); runtime = nil
     await inputTask?.value; inputTask = nil
     starting = false

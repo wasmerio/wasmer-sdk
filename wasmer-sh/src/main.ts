@@ -1,3 +1,4 @@
+import { loadExamplePackages, type PackageLoadProgress } from "./package-loading";
 import "./styles.css";
 
 import {
@@ -118,6 +119,8 @@ const elements = {
   packageName: requiredElement<HTMLSpanElement>("package-name"),
   bootTitle: requiredElement<HTMLHeadingElement>("boot-title"),
   bootDetail: requiredElement<HTMLParagraphElement>("boot-detail"),
+  bootProgress: requiredElement<HTMLProgressElement>("boot-progress"),
+  packageDownloads: requiredElement<HTMLUListElement>("package-downloads"),
   clear: requiredElement<HTMLButtonElement>("clear-button"),
   restart: requiredElement<HTMLButtonElement>("restart-button"),
   editorButton: requiredElement<HTMLButtonElement>("editor-button"),
@@ -220,6 +223,7 @@ const workspaceEditor = new WorkspaceEditor(
 
 let activeSession: ActiveSession | undefined;
 let generation = 0;
+let packageLoadAbort: AbortController | undefined;
 let inputQueue = Promise.resolve();
 let pendingProcessInput = "";
 let transcript = "";
@@ -370,9 +374,13 @@ function showExamples(show: boolean): void {
   else { fitTerminal(); terminal.focus(); }
 }
 
+
 async function start(): Promise<void> {
   showExamples(false);
   const currentGeneration = ++generation;
+  packageLoadAbort?.abort();
+  const loadAbort = new AbortController();
+  packageLoadAbort = loadAbort;
   setBusy(true);
   setState("booting", "Preparing runtime");
   setBootMessage(
@@ -399,18 +407,18 @@ async function start(): Promise<void> {
     const edgejsDevelopmentPackage = import.meta.env.DEV
       ? import.meta.env.VITE_EDGEJS_WEBC_URL?.trim()
       : undefined;
-    const [mainPackage, ...uses] = await Promise.all(
-      packageNames.map(async (name) => {
-        if (name !== EDGEJS_PACKAGE || !edgejsDevelopmentPackage) {
-          return wasmer.packages.load(name);
-        }
-        const response = await fetch(edgejsDevelopmentPackage);
-        if (!response.ok) {
-          throw new Error(`Unable to load the development Edge.js package (${response.status})`);
-        }
-        return wasmer.packages.load(new Uint8Array(await response.arrayBuffer()));
-      }),
-    );
+    const sources = await Promise.all(packageNames.map(async name => {
+      if (name !== EDGEJS_PACKAGE || !edgejsDevelopmentPackage) return name;
+      const response = await fetch(edgejsDevelopmentPackage, { signal: loadAbort.signal });
+      if (!response.ok) throw new Error(`Unable to load the development Edge.js package (${response.status})`);
+      return new Uint8Array(await response.arrayBuffer());
+    }));
+    const [mainPackage, ...uses] = await loadExamplePackages(wasmer, sources, {
+      signal: loadAbort.signal,
+      onProgress(progress) {
+        if (currentGeneration === generation) showPackageProgress(progress);
+      },
+    });
     ensureCurrent(currentGeneration);
     elements.packageName.textContent = mainPackage.id;
 
@@ -927,6 +935,7 @@ function getServiceWorkerOrigin(): string {
 
 async function dispose(): Promise<void> {
   generation += 1;
+  packageLoadAbort?.abort();
   try {
     await closeActiveSession();
   } finally {
@@ -1237,6 +1246,28 @@ function describePackageLoad(packageNames: string[]): string {
 function setBootMessage(title: string, detail: string): void {
   elements.bootTitle.textContent = title;
   elements.bootDetail.textContent = detail;
+  elements.bootProgress.hidden = true;
+  elements.packageDownloads.hidden = true;
+}
+
+function showPackageProgress(progress: PackageLoadProgress): void {
+  const { downloadedBytes, totalBytes, percent } = progress.download;
+  const title = progress.phase === "resolving" ? "Resolving packages" :
+    progress.phase === "downloading" ? "Downloading packages" : "Preparing packages";
+  const mb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
+  setState("loading", percent === null ? title : `${title} · ${Math.floor(percent)}%`);
+  setBootMessage(title, totalBytes === null ? `${mb(downloadedBytes)} received` : `${mb(downloadedBytes)} of ${mb(totalBytes)}`);
+  elements.bootProgress.hidden = false;
+  if (percent === null) elements.bootProgress.removeAttribute("value");
+  else elements.bootProgress.value = percent;
+  elements.packageDownloads.hidden = false;
+  elements.packageDownloads.replaceChildren(...progress.packages.map(pkg => {
+    const row = document.createElement("li");
+    const status = pkg.cached ? "Cached" : pkg.phase === "ready" ? "Ready" :
+      pkg.phase === "loading" ? "Preparing" : pkg.download.percent === null ? "Loading…" : `${Math.floor(pkg.download.percent)}%`;
+    row.textContent = `${pkg.id} · ${status}`;
+    return row;
+  }));
 }
 
 function setState(state: string, status: string): void {

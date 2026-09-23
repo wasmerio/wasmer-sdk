@@ -1199,3 +1199,17 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+
+#boot-progress {
+  width: 100%;
+  height: 8px;
+  accent-color: #00cdb5;
+}
+#package-downloads {
+  padding: 0;
+  list-style: none;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}

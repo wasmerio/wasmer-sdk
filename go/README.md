@@ -6,6 +6,46 @@ and a C toolchain are required. Released packages do not require Rust.
 The initial Go release and `go.wasmer.io` endpoint must be published before the
 release installation commands below become available. Source builds work today.
 
+## Package download progress
+
+```go
+packages, err := client.Packages.LoadMany(ctx,
+    []string{"wasmer/bash", "python/python"},
+    wasmer.PackageLoadOptions{OnProgress: func(p wasmer.PackageLoadProgress) {
+        if p.Download.Percent != nil {
+            fmt.Printf("%s: %.0f%%\n", p.Phase, *p.Download.Percent)
+        }
+    }},
+)
+```
+
+The existing `Load`, `LoadPath`, and `LoadBytes` signatures remain unchanged.
+Use `LoadWithOptions`, `LoadPathWithOptions`, or `LoadBytesWithOptions` for a
+single package. Go's batch method takes registry strings. Cancellation uses
+`context.Context` and returns `ctx.Err()`. Unknown totals and percentages are
+nil pointers. Observers may run on a delivery goroutine; protect shared UI
+state, and do not panic or close the owning client inside the callback.
+
+Progress is a snapshot, not a delta. `download` contains downloaded bytes, an
+optional total, and an optional percentage from 0 to 100. Totals include the
+unique required package artifacts and their dependencies, weighted by bytes.
+Unknown sizes stay indeterminate. Counts describe decoded package bodies;
+SDK cache hits and local sources add zero download bytes. An entirely cached
+or local load reports 0 bytes of 0 and 100%.
+
+The phases are `resolving`, `downloading`, `loading`, and `ready`. Downloading
+can overlap resolution. 100% means the transfer is complete; await the load
+before using the package. The callback does not cover SDK initialization,
+guest execution, or guest `npm`/`pip` downloads. The final `ready` snapshot is
+delivered before a successful load returns, with no callbacks after settlement.
+Errors use the existing load error channel and do not emit `ready`.
+
+Batch results preserve input order. Concurrent loads on the same client share
+in-flight downloads. Cancelling one caller does not interrupt other callers;
+cancelling the last subscriber stops its acquisition. Callbacks are serialized
+per operation, coalesced to about ten byte updates per second, with phase changes
+and completion delivered promptly. Keep callbacks short.
+
 ## Install a release
 
 ```sh

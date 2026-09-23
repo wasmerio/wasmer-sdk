@@ -4,6 +4,48 @@ Run Wasmer packages in Node.js or the browser with one package-first sandbox
 API. The runtime is Wasmer + WASIX compiled to WebAssembly with
 `wasm-bindgen`; Node.js does not load a native addon.
 
+## Package download progress
+
+```javascript
+const abort = new AbortController();
+const packages = await wasmer.packages.loadMany(
+  ["wasmer/bash", "python/python"],
+  {
+    signal: abort.signal,
+    onProgress({ phase, download, packages }) {
+      console.log(phase, download.percent ?? "unknown", download.downloadedBytes);
+      for (const pkg of packages) console.log(pkg.id, pkg.cached, pkg.download.percent);
+    },
+  },
+);
+```
+
+`packages.load(source, options)` accepts the same `onProgress` and `signal`.
+Use `onPackageProgress` in `sandboxes.create` or `onProgress` in
+`sandbox.installPackage`. Byte and existing-package sources work in `loadMany`.
+Abort uses the signal's reason. An observer exception is logged and detaches
+that observer without failing acquisition.
+
+Progress is a snapshot, not a delta. `download` contains downloaded bytes, an
+optional total, and an optional percentage from 0 to 100. Totals include the
+unique required package artifacts and their dependencies, weighted by bytes.
+Unknown sizes stay indeterminate. Counts describe decoded package bodies;
+SDK cache hits and local sources add zero download bytes. An entirely cached
+or local load reports 0 bytes of 0 and 100%.
+
+The phases are `resolving`, `downloading`, `loading`, and `ready`. Downloading
+can overlap resolution. 100% means the transfer is complete; await the load
+before using the package. The callback does not cover SDK initialization,
+guest execution, or guest `npm`/`pip` downloads. The final `ready` snapshot is
+delivered before a successful load returns, with no callbacks after settlement.
+Errors use the existing load error channel and do not emit `ready`.
+
+Batch results preserve input order. Concurrent loads on the same client share
+in-flight downloads. Cancelling one caller does not interrupt other callers;
+cancelling the last subscriber stops its acquisition. Callbacks are serialized
+per operation, coalesced to about ten byte updates per second, with phase changes
+and completion delivered promptly. Keep callbacks short.
+
 ## Install
 
 ```console

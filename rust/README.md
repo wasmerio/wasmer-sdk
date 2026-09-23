@@ -4,6 +4,47 @@ Build package-first WASIX sandboxes directly into a Rust application. The SDK
 owns package resolution, caching, sandbox filesystems, command execution, live
 process streams, networking, and termination on top of Wasmer.
 
+## Package download progress
+
+```rust
+use wasmer_sdk::{PackageLoadCancellation, PackageLoadOptions};
+
+let cancellation = PackageLoadCancellation::default();
+let packages = wasmer.packages().load_many_with_options(
+    ["wasmer/bash", "python/python"],
+    PackageLoadOptions::default()
+        .cancellation(cancellation.clone())
+        .on_progress(|p| println!("{:?}: {:?}%", p.phase, p.download.percent)),
+).await?;
+```
+
+The existing `load` remains unchanged. `load_with_options` reports a single
+load; `load_many` uses default options. A sandbox builder accepts
+`.on_package_progress(callback)`, and dynamic installation accepts
+`install_package_with_options`. Dropping a pending load future or calling the
+cancellation token cancels its interest. Callbacks run outside SDK locks on the
+polling task and must not block or panic.
+
+Progress is a snapshot, not a delta. `download` contains downloaded bytes, an
+optional total, and an optional percentage from 0 to 100. Totals include the
+unique required package artifacts and their dependencies, weighted by bytes.
+Unknown sizes stay indeterminate. Counts describe decoded package bodies;
+SDK cache hits and local sources add zero download bytes. An entirely cached
+or local load reports 0 bytes of 0 and 100%.
+
+The phases are `resolving`, `downloading`, `loading`, and `ready`. Downloading
+can overlap resolution. 100% means the transfer is complete; await the load
+before using the package. The callback does not cover SDK initialization,
+guest execution, or guest `npm`/`pip` downloads. The final `ready` snapshot is
+delivered before a successful load returns, with no callbacks after settlement.
+Errors use the existing load error channel and do not emit `ready`.
+
+Batch results preserve input order. Concurrent loads on the same client share
+in-flight downloads. Cancelling one caller does not interrupt other callers;
+cancelling the last subscriber stops its acquisition. Callbacks are serialized
+per operation, coalesced to about ten byte updates per second, with phase changes
+and completion delivered promptly. Keep callbacks short.
+
 ## Use the crate
 
 Crates.io publication is temporarily disabled while the SDK tracks Wasmer's

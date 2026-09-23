@@ -1,8 +1,43 @@
 import Foundation
+import CryptoKit
 import Testing
 @testable import WasmerWKSDK
 
 struct LoopbackServerTests {
+  @Test func streamsVerifiedPackagesAndMarksCacheHits() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let bytes = Data((0..<1_000_000).map { UInt8($0 % 251) })
+    let hash = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    try bytes.write(to: root.appendingPathComponent(hash + ".webc"))
+    let badHash = String(repeating: "0", count: 64)
+    try bytes.write(to: root.appendingPathComponent(badHash + ".webc"))
+    let origin = LoopbackServer(directory: root)
+    let originURL = try await origin.start()
+    defer { origin.stop() }
+    let cache = root.appendingPathComponent("cache")
+    let proxy = LoopbackServer(directory: root, cacheDirectory: cache, packageOrigin: originURL.deletingLastPathComponent())
+    let proxyURL = try await proxy.start()
+    defer { proxy.stop() }
+    let url = proxyURL.deletingLastPathComponent().appendingPathComponent("__packages/" + hash + ".webc")
+    let (cold, response) = try await URLSession.shared.data(from: url)
+    #expect(cold == bytes)
+    #expect((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Length") == nil)
+    #expect(try Data(contentsOf: cache.appendingPathComponent(hash + ".webc")) == bytes)
+    let (warm, cached) = try await URLSession.shared.data(from: url)
+    #expect(warm == bytes)
+    #expect((cached as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Wasmer-Package-Cache") == "hit")
+    try Data("corrupt cache".utf8).write(to: cache.appendingPathComponent(hash + ".webc"))
+    let (repaired, _) = try await URLSession.shared.data(from: url)
+    #expect(repaired == bytes)
+    #expect(try Data(contentsOf: cache.appendingPathComponent(hash + ".webc")) == bytes)
+    let badURL = url.deletingLastPathComponent().appendingPathComponent(badHash + ".webc")
+    await #expect(throws: (any Error).self) { try await URLSession.shared.data(from: badURL) }
+    #expect(!FileManager.default.fileExists(atPath: cache.appendingPathComponent(badHash + ".webc").path))
+    #expect(try FileManager.default.contentsOfDirectory(atPath: cache.path).allSatisfy { !$0.hasPrefix(".download-") })
+  }
+
   @Test func occupiedPersistentPortFailsInsteadOfChangingOrigin() async throws {
     let directory = FileManager.default.temporaryDirectory
     let first = LoopbackServer(directory: directory)

@@ -115,12 +115,13 @@ private actor WebKitClient {
     }
   }
   func call<T: Decodable & Sendable>(
-    _ method: String, _ args: [String: Wire] = [:], as: T.Type = T.self
+    _ method: String, _ args: [String: Wire] = [:], as: T.Type = T.self,
+    onProgress: (@Sendable (PackageLoadProgress) -> Void)? = nil
   ) async throws -> T {
     try Task.checkCancellation()
     let host = try await host()
     try Task.checkCancellation()
-    let data = try await host.request(method, payload: JSONEncoder().encode(args))
+    let data = try await host.request(method, payload: JSONEncoder().encode(args), onProgress: onProgress)
     let reply: Reply<T>
     do { reply = try JSONDecoder().decode(Reply<T>.self, from: data) } catch {
       throw SdkError.Failure(
@@ -230,6 +231,44 @@ public final class WasmerCore: Sendable {
     guard case .object(let args) = try Wire.encode(definition) else { preconditionFailure() }
     let value: PackageValue = try await client.call("package.create", args)
     return PackageCore(client: client, value: value, source: .definition(definition))
+  }
+  public func loadPackages(sources: [PackageLoadSource], observer: (any PackageLoadObserver)?, cancellation: PackageLoadCancellation?) async throws -> [PackageCore] {
+    var encoded: [Wire] = []
+    var origins: [Source] = []
+    for source in sources {
+      switch source {
+      case .registry(let specifier):
+        encoded.append(.object(["registry": .string(specifier)])); origins.append(.registry(specifier))
+      case .path(let path):
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &directory) else {
+          throw SdkError.Failure(code: "PACKAGE_LOAD_FAILED", message: "Package file does not exist: \(path)")
+        }
+        guard !directory.boolValue else {
+          throw SdkError.Failure(code: "CAPABILITY_UNAVAILABLE", message: "WebKit cannot load a local package directory. Pass a WEBC/Wasm file or use packages.create(PackageDefinition).")
+        }
+        let bytes: Data
+        do { bytes = try Data(contentsOf: URL(fileURLWithPath: path)) }
+        catch { throw SdkError.Failure(code: "PACKAGE_LOAD_FAILED", message: error.localizedDescription) }
+        encoded.append(.object(["bytes": .string(bytes.base64EncodedString())])); origins.append(.bytes(bytes))
+      case .bytes(let bytes):
+        encoded.append(.object(["bytes": .string(bytes.base64EncodedString())])); origins.append(.bytes(bytes))
+      case .package(let package):
+        let package = try await owned(package)
+        encoded.append(.object(["package": .handle(package.value.handle)])); origins.append(package.source)
+      }
+    }
+    let args: [String: Wire] = ["sources": .array(encoded), "progress": .bool(observer != nil)]
+    let task = Task { [client, origins] in
+      let callback: (@Sendable (PackageLoadProgress) -> Void)? = observer.map { observer in
+        { @Sendable progress in observer.onProgress(progress: progress) }
+      }
+      let values: [PackageValue] = try await client.call("package.many", args, onProgress: callback)
+      return zip(values, origins).map { value, source in PackageCore(client: client, value: value, source: source) }
+    }
+    cancellation?.attach { task.cancel() }
+    defer { cancellation?.detach() }
+    return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
   }
   public func loadPackageRegistry(specifier: String) async throws -> PackageCore {
     let value: PackageValue = try await client.call("package.load", ["source": .string(specifier)])

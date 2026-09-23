@@ -17,6 +17,7 @@ from typing import (
 )
 
 from . import _native
+from ._progress import PackageLoadProgress, _ProgressObserver
 
 BytesLike = Union[bytes, bytearray, memoryview]
 FileContents = Union[str, BytesLike]
@@ -148,30 +149,41 @@ class Packages:
         )
         return Package(await _async(self._wasmer._core.create_package(encoded)))
 
-    async def load(self, source: PackageSource) -> Package:
-        """Load a package or raw WASI/WASIX bytes.
+    async def load(
+        self, source: PackageSource, *,
+        on_progress: Optional[Callable[[PackageLoadProgress], None]] = None,
+    ) -> Package:
+        """Load a package with optional download progress on this asyncio loop."""
+        return (await self.load_many([source], on_progress=on_progress))[0]
 
-        Raw modules must export ``_start``; their command and entrypoint are
-        named ``main`` automatically.
-        """
-        if isinstance(source, Package):
-            return source
-        if isinstance(source, str):
-            core = await _async(self._wasmer._core.load_package_registry(source))
-        elif isinstance(source, os.PathLike):
-            core = await _async(
-                self._wasmer._core.load_package_path(os.fspath(source))
-            )
-        elif isinstance(source, (bytes, bytearray, memoryview)):
-            core = await _async(
-                self._wasmer._core.load_package_bytes(bytes(source))
-            )
-        else:
-            raise WasmerError(
-                "package source must be a registry string, pathlib path, bytes, or Package",
-                "INVALID_PACKAGE_SOURCE",
-            )
-        return Package(core)
+    async def load_many(
+        self, sources: Iterable[PackageSource], *,
+        on_progress: Optional[Callable[[PackageLoadProgress], None]] = None,
+    ) -> list[Package]:
+        """Load concurrently, sharing downloads and preserving input order."""
+        encoded = []
+        for source in sources:
+            if isinstance(source, Package):
+                encoded.append(_native.PackageLoadSource.PACKAGE(source._core))
+            elif isinstance(source, str):
+                encoded.append(_native.PackageLoadSource.REGISTRY(source))
+            elif isinstance(source, os.PathLike):
+                encoded.append(_native.PackageLoadSource.PATH(os.fspath(source)))
+            elif isinstance(source, (bytes, bytearray, memoryview)):
+                encoded.append(_native.PackageLoadSource.BYTES(bytes(source)))
+            else:
+                raise WasmerError("package source must be a registry string, pathlib path, bytes, or Package", "INVALID_PACKAGE_SOURCE")
+        cancellation = _native.PackageLoadCancellation()
+        observer = _ProgressObserver(on_progress) if on_progress is not None else None
+        try:
+            cores = await _async(self._wasmer._core.load_packages(encoded, observer, cancellation))
+            if observer is not None:
+                observer.flush()
+            return [Package(core) for core in cores]
+        finally:
+            cancellation.cancel()
+            if observer is not None:
+                observer.close()
 
 
 class Sandboxes:
@@ -188,8 +200,9 @@ class Sandboxes:
         env: Optional[Mapping[str, str]] = None,
         network: Union[NetworkPolicy, str] = NetworkPolicy.DISABLED,
         shell: Optional[CommandSelector] = None,
+        on_package_progress: Optional[Callable[[PackageLoadProgress], None]] = None,
     ) -> Sandbox:
-        resolved = [await self._wasmer.packages.load(source) for source in packages]
+        resolved = await self._wasmer.packages.load_many(packages, on_progress=on_package_progress)
         encoded_files = {
             path: _bytes(contents) for path, contents in (files or {}).items()
         }
@@ -344,24 +357,10 @@ class Sandbox:
         source: PackageSource,
         *,
         as_shell: Optional[str] = None,
+        on_progress: Optional[Callable[[PackageLoadProgress], None]] = None,
     ) -> Package:
-        if isinstance(source, Package):
-            core = await _async(self._core.install_package_ref(source._core))
-        elif isinstance(source, str):
-            core = await _async(self._core.install_package_registry(source))
-        elif isinstance(source, os.PathLike):
-            core = await _async(
-                self._core.install_package_path(os.fspath(source))
-            )
-        elif isinstance(source, (bytes, bytearray, memoryview)):
-            core = await _async(
-                self._core.install_package_bytes(bytes(source))
-            )
-        else:
-            raise WasmerError(
-                "package source must be a registry string, pathlib path, bytes, or Package",
-                "INVALID_PACKAGE_SOURCE",
-            )
+        loaded = await self.wasmer.packages.load(source, on_progress=on_progress)
+        core = await _async(self._core.install_package_ref(loaded._core))
         package = Package(core)
         if as_shell is not None:
             self._shell = package.command(as_shell)

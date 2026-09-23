@@ -10,15 +10,18 @@ final class LoopbackServer: @unchecked Sendable {
   private var cancelled = false
   private let directory: URL
   private let cacheDirectory: URL
+  private let packageOrigin: URL
   private let token = UUID().uuidString
   private let queue = DispatchQueue(label: "io.wasmer.webkit.assets")
   private var listener: NWListener?
   private var connections: [UUID: NWConnection] = [:]
   private var startupCompleted = false
   private let downloads = URLSession(configuration: .ephemeral)
+  private var packageDownloads: [UUID: PackageDownload] = [:]
 
-  init(directory: URL, cacheDirectory: URL? = nil, port: UInt16 = 0) {
+  init(directory: URL, cacheDirectory: URL? = nil, port: UInt16 = 0, packageOrigin: URL = URL(string: "https://cdn.wasmer.io/webcimages/")!) {
     self.port = port
+    self.packageOrigin = packageOrigin
     self.directory = directory.standardizedFileURL
     self.cacheDirectory = cacheDirectory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("WasmerWKSDKPackages")
@@ -73,6 +76,7 @@ final class LoopbackServer: @unchecked Sendable {
       self.downloads.invalidateAndCancel()
       for connection in self.connections.values { connection.cancel() }
       self.connections.removeAll()
+      self.packageDownloads.removeAll()
     }
   }
 
@@ -128,7 +132,7 @@ final class LoopbackServer: @unchecked Sendable {
   }
 
   /// Only content-addressed public Wasmer packages are downloadable. Verify
-  /// SHA-256 before caching or exposing any bytes to the WebView.
+  /// SHA-256 before completing the response or publishing a cache entry.
   private func downloadPackage(_ filename: String, connection: NWConnection, id: UUID) {
     let hash = String(filename.prefix(64))
     guard filename == hash + ".webc", hash.count == 64,
@@ -141,33 +145,35 @@ final class LoopbackServer: @unchecked Sendable {
       SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() == hash
     }
     if let bytes = try? Data(contentsOf: destination), valid(bytes) {
-      send(connection, id: id, status: 200, contentType: "application/webc", body: bytes)
+      send(connection, id: id, status: 200, contentType: "application/webc", body: bytes, cached: true)
       return
     }
-    let url = URL(string: "https://cdn.wasmer.io/webcimages/\(filename)")!
-    downloads.downloadTask(with: URLRequest(url: url, timeoutInterval: 60)) { temporary, response, error in
-      var bytes: Data?
-      if error == nil, (response as? HTTPURLResponse)?.statusCode == 200, let temporary,
-        let size = try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-        // Edge.js 0.2.0 is approximately 74 MiB, including its Node libraries.
-        size <= 128 * 1024 * 1024,
-        let downloaded = try? Data(contentsOf: temporary), valid(downloaded) {
-        bytes = downloaded
-        try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
-        try? downloaded.write(to: destination, options: .atomic)
+    // A corrupt entry must not prevent the verified replacement from being
+    // atomically moved into the content-addressed cache.
+    try? FileManager.default.removeItem(at: destination)
+    let url = packageOrigin.appendingPathComponent(filename)
+    let download = PackageDownload(session: downloads, url: url, hash: hash, destination: destination,
+      connection: connection) { [weak self] in
+        guard let self else { return }
+        self.queue.async {
+          self.connections.removeValue(forKey: id)?.cancel()
+          self.packageDownloads.removeValue(forKey: id)
+        }
       }
-      let result = bytes
-      self.queue.async {
-        self.send(connection, id: id, status: result == nil ? 502 : 200,
-          contentType: "application/webc", body: result ?? Data("Package download or hash verification failed".utf8))
-      }
-    }.resume()
+    packageDownloads[id] = download
+    // An aborted Fetch closes its connection. Stop native acquisition too.
+    connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak self] _, _, _, _ in
+      self?.packageDownloads.removeValue(forKey: id)?.cancel()
+      self?.connections.removeValue(forKey: id)?.cancel()
+    }
+    download.start()
   }
 
-  private func send(_ connection: NWConnection, id: UUID, status: Int, contentType: String, body: Data) {
+  private func send(_ connection: NWConnection, id: UUID, status: Int, contentType: String, body: Data, cached: Bool = false) {
     let headers = [
       "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Error")",
       "Content-Type: \(contentType)", "Content-Length: \(body.count)",
+      "X-Wasmer-Package-Cache: \(cached ? "hit" : "miss")",
       "Cross-Origin-Opener-Policy: same-origin",
       "Cross-Origin-Embedder-Policy: require-corp",
       "Cross-Origin-Resource-Policy: same-origin",
