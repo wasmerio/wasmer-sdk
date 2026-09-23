@@ -53,6 +53,7 @@ jobs:
             exit 1
           fi
       - uses: googleapis/release-please-action@v4
+        id: release-please
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
@@ -61,7 +62,14 @@ jobs:
       - name: Validate the release PRs and prepare Swift binaries
         env:
           GH_TOKEN: ${{ github.token }}
+          CREATED_RELEASE_PRS: ${{ steps.release-please.outputs.prs || '[]' }}
         run: |
+          # Newly created PRs may not appear in GitHub search immediately.
+          # Keep the existing-PR lookup for manual retries of preparation.
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \
+            --label 'autorelease: pending' --json number,headRefName)"
+          prs="$(jq -cn --argjson created "$CREATED_RELEASE_PRS" --argjson existing "$existing" \
+            '($created | map({number, headRefName: .headBranchName})) + $existing | unique_by(.number)')"
           while IFS=$'\t' read -r pr branch; do
             case "$branch" in
               release-please--branches--main--components--wasmer-sdk-swift)
@@ -71,8 +79,7 @@ jobs:
                 gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
                 ;;
             esac
-          done < <(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \
-            --label 'autorelease: pending' --json number,headRefName --jq '.[] | [.number, .headRefName] | @tsv')
+          done < <(jq -r '.[] | [.number, .headRefName] | @tsv' <<< "$prs")
 
   select:
     if: >-

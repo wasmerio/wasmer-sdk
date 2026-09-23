@@ -22,7 +22,9 @@ not part of this matrix.
    Release Please opens or updates component PRs from conventional commits.
    You can also run it manually on `main` with `tag` empty, including after
    direct pushes. Merging a component release PR follows the publication path
-   in step 3 instead. Pending JS/Python PRs get explicit CI runs because PRs created with
+   in step 3 instead. Preparation uses the action's returned PRs immediately and
+   also finds existing pending PRs for retries, so GitHub search indexing cannot
+   omit a newly opened release. Pending JS/Python PRs get explicit CI runs because PRs created with
    `GITHUB_TOKEN` do not trigger another workflow automatically.
 2. If a Swift PR exists, **Prepare Swift release** builds the native macOS
    XCFramework for both architectures and the WebKit runtime XCFramework from
