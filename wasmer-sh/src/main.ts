@@ -1,3 +1,5 @@
+import { loadExamplePackages, type PackageLoadProgress } from "./package-loading";
+import { LoadingScreen } from "./loading-screen";
 import "./styles.css";
 
 import {
@@ -116,8 +118,8 @@ const elements = {
   liveHttpBadge: requiredElement<HTMLButtonElement>("live-http-badge"),
   liveHttpLabel: requiredElement<HTMLSpanElement>("live-http-label"),
   packageName: requiredElement<HTMLSpanElement>("package-name"),
-  bootTitle: requiredElement<HTMLHeadingElement>("boot-title"),
   bootDetail: requiredElement<HTMLParagraphElement>("boot-detail"),
+  packageDownloads: requiredElement<HTMLUListElement>("package-downloads"),
   clear: requiredElement<HTMLButtonElement>("clear-button"),
   restart: requiredElement<HTMLButtonElement>("restart-button"),
   editorButton: requiredElement<HTMLButtonElement>("editor-button"),
@@ -219,7 +221,9 @@ const workspaceEditor = new WorkspaceEditor(
 );
 
 let activeSession: ActiveSession | undefined;
+const loadingScreen = new LoadingScreen(elements.packageDownloads);
 let generation = 0;
+let packageLoadAbort: AbortController | undefined;
 let inputQueue = Promise.resolve();
 let pendingProcessInput = "";
 let transcript = "";
@@ -370,15 +374,17 @@ function showExamples(show: boolean): void {
   else { fitTerminal(); terminal.focus(); }
 }
 
+
 async function start(): Promise<void> {
   showExamples(false);
   const currentGeneration = ++generation;
+  packageLoadAbort?.abort();
+  const loadAbort = new AbortController();
+  packageLoadAbort = loadAbort;
   setBusy(true);
   setState("booting", "Preparing runtime");
-  setBootMessage(
-    "Starting your shell",
-    "Initializing the Wasmer runtime in this browser.",
-  );
+  loadingScreen.reset([config.packageName, ...config.uses]);
+  setBootMessage("Initializing the SDK…");
   elements.retry.hidden = true;
   elements.packageName.textContent = config.packageName;
 
@@ -393,32 +399,31 @@ async function start(): Promise<void> {
     await wasmer.ready();
     ensureCurrent(currentGeneration);
 
+    loadingScreen.sdkReady();
     const packageNames = [config.packageName, ...config.uses];
     setState("loading", "Loading packages");
-    setBootMessage("Loading the shell", describePackageLoad(packageNames));
+    setBootMessage("Loading packages…");
     const edgejsDevelopmentPackage = import.meta.env.DEV
       ? import.meta.env.VITE_EDGEJS_WEBC_URL?.trim()
       : undefined;
-    const [mainPackage, ...uses] = await Promise.all(
-      packageNames.map(async (name) => {
-        if (name !== EDGEJS_PACKAGE || !edgejsDevelopmentPackage) {
-          return wasmer.packages.load(name);
-        }
-        const response = await fetch(edgejsDevelopmentPackage);
-        if (!response.ok) {
-          throw new Error(`Unable to load the development Edge.js package (${response.status})`);
-        }
-        return wasmer.packages.load(new Uint8Array(await response.arrayBuffer()));
-      }),
-    );
+    const sources = await Promise.all(packageNames.map(async name => {
+      if (name !== EDGEJS_PACKAGE || !edgejsDevelopmentPackage) return name;
+      const response = await fetch(edgejsDevelopmentPackage, { signal: loadAbort.signal });
+      if (!response.ok) throw new Error(`Unable to load the development Edge.js package (${response.status})`);
+      return new Uint8Array(await response.arrayBuffer());
+    }));
+    const [mainPackage, ...uses] = await loadExamplePackages(wasmer, sources, {
+      signal: loadAbort.signal,
+      onProgress(progress) {
+        if (currentGeneration === generation) showPackageProgress(progress);
+      },
+    });
     ensureCurrent(currentGeneration);
+    loadingScreen.complete([mainPackage.id, ...uses.map(pkg => pkg.id)]);
     elements.packageName.textContent = mainPackage.id;
 
     setState("loading", "Creating sandbox");
-    setBootMessage(
-      "Creating your sandbox",
-      "Composing the packages and workspace entirely inside this tab.",
-    );
+    setBootMessage("Preparing your workspace…");
     const sandbox = await wasmer.sandboxes.create({
       packages: [mainPackage, ...uses],
       files: workspaceFiles(),
@@ -504,7 +509,8 @@ async function runInteractiveShell(
   if (!session) return;
 
   writeWelcome();
-  setState("running", "Starting Bash");
+  setState("loading", "Starting Bash");
+  setBootMessage("Starting Bash…");
   const process = await sandbox
     .command(
       mainPackage,
@@ -574,7 +580,8 @@ async function runPassthrough(
 ): Promise<void> {
   const session = activeSession;
   if (!session) return;
-  setState("running", "Running");
+  setState("loading", "Starting program");
+  setBootMessage("Starting program…");
   const process = await sandbox
     .command(selectCommand(mainPackage), config.args, {
       cwd: "/workspace",
@@ -589,6 +596,7 @@ async function runPassthrough(
     await process.kill();
     throw new Error("The process did not expose its requested streams.");
   }
+  setState("running", "Running");
   session.process = process;
   session.stdin = process.stdin;
   const streams = Promise.allSettled([
@@ -927,6 +935,7 @@ function getServiceWorkerOrigin(): string {
 
 async function dispose(): Promise<void> {
   generation += 1;
+  packageLoadAbort?.abort();
   try {
     await closeActiveSession();
   } finally {
@@ -1227,16 +1236,16 @@ function showBrowserCompatibilityWarning(): void {
   elements.browserWarning.hidden = false;
 }
 
-function describePackageLoad(packageNames: string[]): string {
-  if (packageNames.length === 1) {
-    return `Resolving ${packageNames[0]} and its cached package data.`;
-  }
-  return `Resolving ${packageNames[0]} with ${packageNames.length - 1} supporting package${packageNames.length === 2 ? "" : "s"}.`;
+function setBootMessage(detail: string): void {
+  elements.bootDetail.textContent = detail;
 }
 
-function setBootMessage(title: string, detail: string): void {
-  elements.bootTitle.textContent = title;
-  elements.bootDetail.textContent = detail;
+function showPackageProgress(progress: PackageLoadProgress): void {
+  loadingScreen.update(progress);
+  const label = progress.phase === "resolving" ? "Resolving packages…" :
+    progress.phase === "downloading" ? "Downloading packages…" : "Preparing packages…";
+  setState("loading", label);
+  setBootMessage(label);
 }
 
 function setState(state: string, status: string): void {
@@ -1251,8 +1260,9 @@ function setBusy(busy: boolean): void {
 }
 
 function showStartupError(error: unknown): void {
+  loadingScreen.fail();
   setState("error", "Unable to start");
-  setBootMessage("The shell could not start", describeError(error));
+  setBootMessage(describeError(error));
   elements.retry.hidden = false;
   showTerminalError(error);
 }

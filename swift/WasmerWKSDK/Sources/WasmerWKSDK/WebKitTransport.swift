@@ -30,6 +30,7 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
   private var readyTimeout: Task<Void, Never>?
   private var closed = false
   private var pending: [String: CheckedContinuation<Data, Error>] = [:]
+  private var progressObservers: [String: @Sendable (PackageLoadProgress) -> Void] = [:]
 
   init(cacheDirectory: URL) {
     self.cacheDirectory = cacheDirectory
@@ -104,12 +105,14 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
     }
   }
 
-  func request(_ method: String, payload: Data) async throws -> Data {
+  func request(_ method: String, payload: Data, onProgress: (@Sendable (PackageLoadProgress) -> Void)? = nil) async throws -> Data {
     try Task.checkCancellation()
     guard let view = webView, !closed else {
       throw SdkError.Failure(code: "CLIENT_CLOSED", message: "Client is closed")
     }
     let id = UUID().uuidString
+    if let onProgress { progressObservers[id] = onProgress }
+    defer { progressObservers.removeValue(forKey: id) }
     // JSON data crosses actors; untyped Foundation objects remain on this actor.
     let args = try JSONSerialization.jsonObject(with: payload, options: [.fragmentsAllowed])
     let command = try JSONSerialization.data(withJSONObject: [
@@ -270,6 +273,13 @@ final class WebKitTransport: NSObject, WKNavigationDelegate {
       let reason = body["message"] as? String ?? "Worker failed"
       reply(true, nil)
       Task { await close(error: SdkError.Failure(code: "WORKER_FAILED", message: reason)) }
+    case "packageProgress":
+      if let id = body["id"] as? String, let observer = progressObservers[id], pending[id] != nil,
+         let value = body["progress"], let data = try? JSONSerialization.data(withJSONObject: value),
+         let progress = try? JSONDecoder().decode(PackageLoadProgress.self, from: data) {
+        observer(progress)
+      }
+      reply(true, nil)
     case "progress": reply(true, nil)
     default: reply(nil, "Unknown runtime message")
     }

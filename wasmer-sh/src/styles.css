@@ -782,12 +782,9 @@ button {
   display: grid;
   place-items: center;
   padding: 24px;
-  background:
-    radial-gradient(circle at 50% 48%, rgba(167, 139, 250, 0.08), transparent 26%),
-    rgba(12, 12, 18, 0.97);
-  transition:
-    opacity 260ms ease,
-    visibility 260ms ease;
+  overflow: auto;
+  background: var(--panel);
+  transition: opacity 160ms ease, visibility 160ms ease;
 }
 
 [data-state="running"] .boot-screen,
@@ -798,42 +795,8 @@ button {
 }
 
 .boot-card {
-  display: flex;
-  align-items: center;
-  flex-direction: column;
-  max-width: 440px;
-  text-align: center;
-}
-
-.runtime-glyph {
-  position: relative;
-  width: 48px;
-  height: 48px;
-  margin-bottom: 22px;
-}
-
-.runtime-glyph span {
-  position: absolute;
-  inset: 0;
-  border: 1px solid rgba(167, 139, 250, 0.48);
-  border-radius: 12px;
-  animation: orbit 2.4s ease-in-out infinite;
-}
-
-.runtime-glyph span:nth-child(2) {
-  border-color: rgba(103, 232, 249, 0.42);
-  animation-delay: -0.8s;
-}
-
-.runtime-glyph span:nth-child(3) {
-  border-color: rgba(94, 230, 168, 0.35);
-  animation-delay: -1.6s;
-}
-
-[data-state="error"] .runtime-glyph span {
-  border-color: rgba(251, 113, 133, 0.65);
-  animation: none;
-  transform: rotate(45deg) scale(0.72);
+  width: min(100%, 320px);
+  margin: auto;
 }
 
 .eyebrow {
@@ -847,20 +810,101 @@ button {
   text-transform: uppercase;
 }
 
-.boot-card h1 {
-  margin: 0;
-  font-size: clamp(25px, 4vw, 36px);
-  font-weight: 590;
-  letter-spacing: -0.045em;
+/* Announce overall startup without adding another visible loading label. */
+#boot-detail {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 
-.boot-card p:last-of-type {
-  max-width: 390px;
-  margin: 12px 0 0;
+[data-state="error"] #boot-detail {
+  position: static;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  margin: 0 0 16px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.6;
+  overflow-wrap: anywhere;
 }
+
+#package-downloads {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.loading-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 0;
+  color: var(--text);
+}
+
+.loading-row-name { min-width: 0; font-size: 15px; overflow-wrap: anywhere; }
+.loading-row-status { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.loading-row[data-waiting="true"],
+.loading-row[data-ready="true"],
+.loading-row[data-failed="true"] { color: var(--muted); }
+
+.loading-ring {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.loading-ring progress {
+  --value: 0;
+  display: block;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid transparent;
+  border-radius: 50%;
+  background: conic-gradient(var(--text) calc(var(--value) * 1%), var(--line-strong) 0);
+  background-clip: border-area;
+  background-origin: border-box;
+}
+
+.loading-ring progress::-webkit-progress-bar,
+.loading-ring progress::-webkit-progress-value { background: transparent; }
+.loading-ring progress::-moz-progress-bar { background: transparent; }
+
+@supports not (background-clip: border-area) {
+  .loading-ring progress {
+    border: 0;
+    mask-image: radial-gradient(farthest-side, transparent calc(100% - 1.5px), black 0);
+  }
+}
+
+.loading-ring progress:indeterminate {
+  background-image: conic-gradient(var(--text) 25%, var(--line-strong) 0);
+  animation: loading-spin 1s linear infinite;
+}
+
+.loading-row[data-waiting="true"] progress:indeterminate {
+  background: var(--line-strong);
+  animation: none;
+}
+
+.loading-check {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.loading-row[data-failed="true"] .loading-check { color: var(--muted); }
+.loading-ring [hidden] { display: none; }
+
+@keyframes loading-spin { to { transform: rotate(1turn); } }
 
 .primary-button {
   min-height: 38px;
@@ -1112,18 +1156,6 @@ button {
   background: var(--page);
   color: var(--text);
   text-align: center;
-}
-
-@keyframes orbit {
-  0%,
-  100% {
-    transform: rotate(0deg) scale(0.72);
-    opacity: 0.42;
-  }
-  50% {
-    transform: rotate(135deg) scale(1);
-    opacity: 1;
-  }
 }
 
 @keyframes breathe {

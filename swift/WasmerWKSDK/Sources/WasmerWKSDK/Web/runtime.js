@@ -17,17 +17,19 @@ const browserFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (input, options) => {
   const url = new URL(input instanceof Request ? input.url : String(input), import.meta.url);
   const match = /^https:\/\/cdn\.wasmer\.io\/webcimages\/([a-f0-9]{64}\.webc)$/.exec(url.href);
-  return match ? browserFetch(new URL(`./__packages/${match[1]}`, import.meta.url)) : browserFetch(input, options);
+  return match ? browserFetch(input instanceof Request ? new Request(new URL(`./__packages/${match[1]}`, import.meta.url), input) : new URL(`./__packages/${match[1]}`, import.meta.url), options) : browserFetch(input, options);
 };
 const capabilities = probeJSPI();
 void capabilities.then(jspi => postMessage({ kind: "ready", workerIsolated: crossOriginIsolated,
   sharedArrayBuffer: typeof SharedArrayBuffer === "function", ...jspi }));
+let createLoadCancellation;
 const dispatcher = new SDKDispatcher(async options => {
   const support = await capabilities;
   if (!crossOriginIsolated || typeof SharedArrayBuffer !== "function" || !support.jspi) {
     throw Object.assign(new Error(support.jspiError ?? "WebKit requires cross-origin isolation and SharedArrayBuffer"), { code: "CAPABILITY_UNAVAILABLE" });
   }
   const sdk = await import("./sdk/pkg/wasmer_sdk_js.js");
+  createLoadCancellation = () => new sdk.PackageLoadCancellation();
   await sdk.default({ memory: createRuntimeMemory() });
   sdk.setSDKUrl(new URL("./sdk/pkg/wasmer_sdk_js.js", import.meta.url).href);
   sdk.setWorkerUrl(new URL("./guest-worker.js", import.meta.url).href);
@@ -36,7 +38,7 @@ const dispatcher = new SDKDispatcher(async options => {
   const network = new NativeNetworkBridge();
   installNativeNetworkGlobals(network);
   return network;
-}, storage);
+}, storage, progress => postMessage(progress), () => createLoadCancellation());
 onmessage = async ({ data }) => {
   if (data.kind === "storage-close") {
     try { await storage.closeAll(); postMessage({id:data.id, value:true}); }

@@ -13,6 +13,7 @@ mod host_filesystem;
 mod module_cache;
 mod node_network;
 mod package_cache;
+mod package_progress;
 mod task_manager;
 mod tasks;
 mod worker_utils;

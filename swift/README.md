@@ -40,6 +40,44 @@ libghostty-vt terminal, Bash, Node.js via Edge.js, Python, cowsay, and `pnpm i r
 Guest HTTP servers open in a separate browser view. The iOS implementation has been
 tested in the simulator and cross-compiled for devices; physical-device testing remains.
 
+## Package download progress
+
+```swift
+let packages = try await wasmer.packages.loadMany(
+    ["wasmer/bash", "python/python"],
+    onProgress: { progress in
+        print(progress.phase, progress.download.percent as Any)
+    }
+)
+```
+
+Every `packages.load` overload and `sandbox.installPackage` accepts optional
+`onProgress`. `sandboxes.create` accepts `onPackageProgress`. These use the same
+`PackageLoadProgress` type on native macOS and iOS WebKit. The callback is
+`@Sendable` and has no main-actor guarantee; dispatch UI changes to `MainActor`.
+Cancellation follows the enclosing Swift task. iOS forwards only progress
+metadata across the bridge; package bytes stream through its loopback transport.
+
+Progress is a snapshot, not a delta. `download` contains downloaded bytes, an
+optional total, and an optional percentage from 0 to 100. Totals include the
+unique required package artifacts and their dependencies, weighted by bytes.
+Unknown sizes stay indeterminate. Counts describe decoded package bodies;
+SDK cache hits and local sources add zero download bytes. An entirely cached
+or local load reports 0 bytes of 0 and 100%.
+
+The phases are `resolving`, `downloading`, `loading`, and `ready`. Downloading
+can overlap resolution. 100% means the transfer is complete; await the load
+before using the package. The callback does not cover SDK initialization,
+guest execution, or guest `npm`/`pip` downloads. The final `ready` snapshot is
+delivered before a successful load returns, with no callbacks after settlement.
+Errors use the existing load error channel and do not emit `ready`.
+
+Batch results preserve input order. Concurrent loads on the same client share
+in-flight downloads. Cancelling one caller does not interrupt other callers;
+cancelling the last subscriber stops its acquisition. Callbacks are serialized
+per operation, coalesced to about ten byte updates per second, with phase changes
+and completion delivered promptly. Keep callbacks short.
+
 ## Workspace storage
 
 On iOS, choose the storage backend when creating a sandbox:
