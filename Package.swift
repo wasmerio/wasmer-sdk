@@ -4,7 +4,11 @@ import PackageDescription
 
 // Maintainer builds stage Web/sdk locally; release consumers use the CI archive.
 let useLocalWebRuntime = Context.environment["WASMER_SDK_LOCAL_WEB_RUNTIME"] == "1"
-let webRuntimeTargets: [Target] = []
+let webRuntimeTargets: [Target] = useLocalWebRuntime ? [] : [
+    .binaryTarget(name: "WasmerWKRuntime",
+      url: "https://github.com/wasmerio/wasmer-sdk/releases/download/wasmer-sdk-swift-v0.4.0/WasmerWKRuntime-0.4.0.zip",
+      checksum: "ef3f510715117a26758f86134afd935408ecb5c248b681b1541d964cf4a58999"),
+  ]
 
 let package = Package(
   name: "WasmerSDK",
@@ -13,8 +17,8 @@ let package = Package(
     .library(name: "WasmerSDK", type: .static, targets: ["WasmerSDK"]),
   ],
   targets: [
-    .binaryTarget(name: "WasmerSDKFFI", url: "https://github.com/wasmerio/wasmer-sdk/releases/download/wasmer-sdk-swift-v0.2.1/WasmerSDKFFI-0.2.1-macos-universal.zip",
-      checksum: "80dc53820844b55f52a3888f97dc67a0f547189584560e9b705e3e509f1cb5fa"),
+    .binaryTarget(name: "WasmerSDKFFI", url: "https://github.com/wasmerio/wasmer-sdk/releases/download/wasmer-sdk-swift-v0.4.0/WasmerSDKFFI-0.4.0-macos-universal.zip",
+      checksum: "f51caa20a57f5e0cbc1a76e4d5c664066f68e75ef125c3f8935d44779e905c6d"),
     .target(
       name: "WasmerSDKCore", dependencies: [.target(name: "WasmerSDKFFI", condition: .when(platforms: [.macOS]))],
       path: "swift/Sources/WasmerSDKCore",
@@ -29,7 +33,7 @@ let package = Package(
       .target(name: "WasmerWKSDK", condition: .when(platforms: [.iOS])),
     ], path: "swift/Sources/WasmerSDK"),
     .target(
-      name: "WasmerWKSDK", dependencies: [],
+      name: "WasmerWKSDK", dependencies: useLocalWebRuntime ? [] : ["WasmerWKRuntime"],
       path: "swift/WasmerWKSDK/Sources/WasmerWKSDK",
       resources: [.copy("Web")]
     ),
