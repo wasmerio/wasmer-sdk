@@ -185,10 +185,26 @@ try {
         "command -v python && ! command -v node && ! command -v php",
       );
     if (example.id === "node") {
-      await command("echo KEEP_SESSION");
+      await command("export PICKER_SESSION=kept; echo KEEP_SESSION");
+      const terminalUrl = page.url();
+      const homepage = new URL(terminalUrl);
+      homepage.searchParams.delete("example");
       await page.locator("#examples-button").click();
+      assert.equal(page.url(), homepage.href);
+      assert.equal(await page.locator("#example-picker").isVisible(), true);
+      assert.equal(await page.locator(".shell-stage").isVisible(), false);
+      assert.equal(await page.evaluate(() => document.activeElement.id), "examples-title");
+      assert.equal(await page.locator("#resume-button").getAttribute("href"), terminalUrl);
+      await page.goBack();
+      assert.equal(page.url(), terminalUrl);
+      assert.equal(await page.locator(".shell-stage").isVisible(), true);
+      await command('test "$PICKER_SESSION" = kept && test -f .picker-example');
+      await page.goForward();
+      assert.equal(page.url(), homepage.href);
+      assert.equal(await page.locator("#example-picker").isVisible(), true);
       await page.locator("#resume-button").click();
-      await command("test -f server.js");
+      assert.equal(page.url(), terminalUrl);
+      await command('test "$PICKER_SESSION" = kept && test -f server.js');
     }
     if (example.install) {
       console.log(`INSTALL ${example.id}`);
@@ -332,6 +348,16 @@ try {
         .locator("#preview-panel")
         .waitFor({ state: "hidden", timeout: 30_000 });
       await command("echo INPUT_RECOVERED");
+    }
+    if (example.id === "node") {
+      await page.locator("#examples-button").click();
+      const requestsBeforeReload = packages.length;
+      await page.reload();
+      await page.locator(".example-card").last().waitFor();
+      assert.equal(new URL(page.url()).searchParams.has("example"), false);
+      assert.equal(await page.locator("#example-picker").isVisible(), true);
+      assert.equal(await page.locator("#resume-button").isVisible(), false);
+      assert.equal(packages.length, requestsBeforeReload, "Reloading the homepage must not start a runtime");
     }
     console.log(`PASS ${example.id}`);
   }
