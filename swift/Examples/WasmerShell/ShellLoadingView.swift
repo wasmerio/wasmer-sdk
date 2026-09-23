@@ -39,7 +39,6 @@ struct LoadingPackage: Identifiable {
   var progress: PackageProgress?
   var loaded = false
   var name: String { String(id.split(separator: "@").first ?? Substring(id)) }
-  var version: String { id.split(separator: "@").dropFirst().first.map { String($0).replacingOccurrences(of: "=", with: "") } ?? "" }
   var ready: Bool { loaded || progress?.phase == .ready }
   var percent: Double? { progress?.phase == .downloading ? progress?.download.percent : nil }
   var status: String {
@@ -51,43 +50,30 @@ struct LoadingPackage: Identifiable {
     default: return "Waiting"
     }
   }
-  var detail: String {
-    if ready { return progress?.cached == true ? "Cached" : version }
-    guard let download = progress?.download,
-      download.downloadedBytes > 0 || (download.totalBytes ?? 0) > 0 else { return version }
-    let received = Double(download.downloadedBytes) / 1_000_000
-    if let total = download.totalBytes { return String(format: "%.1f / %.1f MB", received, Double(total) / 1_000_000) }
-    return String(format: "%.1f MB", received)
-  }
 }
 
 struct ShellLoadingView: View {
   let state: ShellLoadingState
-  let status: String
   let retry: () -> Void
 
   var body: some View {
     GeometryReader { geometry in
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
-          Text(state.error == nil ? "Starting your shell" : "The shell could not start")
-            .font(.system(size: 22, weight: .medium)).tracking(-0.7)
-          Text(state.error ?? status)
-            .font(.system(size: 13)).foregroundStyle(ShellTheme.muted)
-            .padding(.top, 8).padding(.bottom, 24)
-          LoadingRow(name: "Wasmer SDK", detail: "", status: state.sdkLoaded ? "Loaded" : "Initializing",
+          if let error = state.error {
+            Text(error).font(.system(size: 13)).foregroundStyle(ShellTheme.muted).padding(.bottom, 16)
+          }
+          LoadingRow(name: "Wasmer SDK", status: state.sdkLoaded ? "Loaded" : "Initializing",
             ready: state.sdkLoaded, percent: nil, waiting: false, stopped: state.error != nil)
-          Divider().padding(.top, 6).padding(.bottom, 8)
           ForEach(state.packages) { package in
-            LoadingRow(name: package.name, detail: package.detail, status: package.status,
+            LoadingRow(name: package.name, status: package.status,
               ready: package.ready, percent: package.percent, waiting: package.progress == nil, stopped: state.error != nil)
-              .frame(minHeight: 64)
           }
           if state.error != nil {
             Button("Try again", action: retry).buttonStyle(ShellButtonStyle(isSelected: true)).padding(.top, 20)
           }
         }
-        .frame(maxWidth: 400)
+        .frame(maxWidth: 320)
         .padding(24)
         .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .center)
       }
@@ -98,42 +84,41 @@ struct ShellLoadingView: View {
 
 private struct LoadingRow: View {
   let name: String
-  let detail: String
   let status: String
   let ready: Bool
   let percent: Double?
   let waiting: Bool
   let stopped: Bool
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  private let green = Color(red: 94 / 255, green: 230 / 255, blue: 168 / 255)
 
   var body: some View {
-    HStack(spacing: 14) {
+    HStack(spacing: 10) {
       ZStack {
         if ready {
-          Image(systemName: "checkmark").font(.system(size: 15, weight: .medium)).foregroundStyle(green)
+          Image(systemName: "checkmark").font(.system(size: 11, weight: .medium)).foregroundStyle(ShellTheme.muted)
         } else if stopped {
           Image(systemName: "minus").foregroundStyle(ShellTheme.muted)
         } else if let percent {
-          Circle().stroke(.white.opacity(0.15), lineWidth: 2)
+          Circle().stroke(.white.opacity(0.15), lineWidth: 1.5)
           Circle().trim(from: 0, to: min(1, max(0, percent / 100)))
-            .stroke(Color(uiColor: ShellTheme.cursor), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .stroke(ShellTheme.text, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
             .rotationEffect(.degrees(-90))
         } else if waiting || reduceMotion {
           Circle().trim(from: 0, to: waiting ? 1 : 0.75)
-            .stroke(waiting ? ShellTheme.muted.opacity(0.3) : Color(uiColor: ShellTheme.cursor), lineWidth: 2)
+            .stroke(waiting ? ShellTheme.muted.opacity(0.3) : ShellTheme.text, lineWidth: 1.5)
         } else {
-          ProgressView().tint(Color(uiColor: ShellTheme.cursor))
+          ProgressView().controlSize(.mini).tint(ShellTheme.text)
         }
-      }.frame(width: 28, height: 28).accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 4) {
-        Text(name).font(.system(size: 14))
-        if !detail.isEmpty { Text(detail).font(.system(size: 12)).foregroundStyle(ShellTheme.muted).monospacedDigit() }
-      }.frame(maxWidth: .infinity, alignment: .leading)
-      Text(stopped && !ready ? "Stopped" : status).font(.system(size: 12))
-        .foregroundStyle(ready ? green : ShellTheme.muted).monospacedDigit().fixedSize()
+      }.frame(width: 16, height: 16).accessibilityHidden(true)
+      Text(name).font(.system(size: 15))
+        .foregroundStyle(ready || waiting || stopped ? ShellTheme.muted : ShellTheme.text)
+      if let percent, !ready, !stopped {
+        Text("\(Int(percent))%").font(.system(size: 12)).foregroundStyle(ShellTheme.muted).monospacedDigit().fixedSize()
+      }
     }
-    .padding(.vertical, 10)
-    .accessibilityElement(children: .combine)
+    .frame(minHeight: 34, alignment: .leading)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(name)
+    .accessibilityValue(stopped && !ready ? "Stopped" : status)
   }
 }

@@ -1,6 +1,5 @@
 import type { PackageLoadProgress } from "./package-loading";
 
-type PackageProgress = PackageLoadProgress["packages"][number];
 type Row = ReturnType<typeof createRow>;
 
 /** Keep rows mounted so indeterminate rings don't restart on each SDK update. */
@@ -14,13 +13,12 @@ export class LoadingScreen {
     this.packages.clear();
     this.list.replaceChildren();
     this.sdk = createRow("Wasmer SDK");
-    this.sdk.element.classList.add("sdk-loading-row");
     this.list.append(this.sdk.element);
-    renderRow(this.sdk, "Initializing", "", null);
+    renderRow(this.sdk, "Initializing", null);
     for (const name of new Set(names)) this.packageRow(name);
   }
 
-  sdkReady(): void { renderRow(this.sdk, "Loaded", "", 100, true); }
+  sdkReady(): void { renderRow(this.sdk, "Loaded", 100, true); }
 
   update(progress: PackageLoadProgress): void {
     for (const pkg of progress.packages) {
@@ -31,18 +29,14 @@ export class LoadingScreen {
       const percent = pkg.download.percent;
       const status = ready ? "Loaded" : pkg.phase === "loading" ? "Preparing" :
         pkg.phase === "resolving" ? "Resolving" : percent === null ? "Downloading" : `${Math.floor(percent)}%`;
-      const version = packageVersion(pkg.id);
-      const detail = ready ? (pkg.cached ? "Cached" : version) : downloadDetail(pkg) || version;
-      renderRow(row, status, detail, ready ? 100 : pkg.phase === "downloading" ? percent : null, ready);
+      renderRow(row, status, ready ? 100 : pkg.phase === "downloading" ? percent : null, ready);
     }
   }
 
   complete(ids: readonly string[]): void {
     // Also covers older SDKs without progress callbacks and local package sources.
     for (const id of ids) this.packageRow(id);
-    for (const [id, row] of this.packages) {
-      renderRow(row, "Loaded", row.element.dataset.ready === "true" ? row.detail.textContent! : packageVersion(id), 100, true);
-    }
+    for (const row of this.packages.values()) renderRow(row, "Loaded", 100, true);
   }
 
   fail(): void {
@@ -50,6 +44,7 @@ export class LoadingScreen {
       if (row.element.dataset.ready === "true") continue;
       row.element.dataset.failed = "true";
       row.status.textContent = "Stopped";
+      row.element.setAttribute("aria-label", `${row.title.textContent}: Stopped`);
       row.progress.hidden = true;
       row.check.textContent = "–";
       row.check.hidden = false;
@@ -70,10 +65,11 @@ export class LoadingScreen {
       row = createRow(packageName(id));
       row.element.dataset.pending = "true";
       row.element.dataset.waiting = "true";
-      renderRow(row, "Waiting", packageVersion(id), null);
+      renderRow(row, "Waiting", null);
       this.list.append(row.element);
     }
     row.element.dataset.package = id;
+    row.element.title = id;
     row.progress.setAttribute("aria-label", `${id} download`);
     this.packages.set(id, row);
     return row;
@@ -94,25 +90,19 @@ function createRow(name: string) {
   check.setAttribute("aria-hidden", "true");
   check.hidden = true;
   ring.append(progress, check);
-  const body = document.createElement("span");
-  body.className = "loading-row-body";
   const title = document.createElement("span");
   title.className = "loading-row-name";
   title.textContent = name;
-  const detail = document.createElement("span");
-  detail.className = "loading-row-detail";
-  body.append(title, detail);
   const status = document.createElement("span");
   status.className = "loading-row-status";
-  element.append(ring, body, status);
-  return { element, progress, check, detail, status };
+  element.append(ring, title, status);
+  return { element, progress, check, title, status };
 }
 
-function renderRow(row: Row, status: string, detail: string, percent: number | null, ready = false): void {
+function renderRow(row: Row, status: string, percent: number | null, ready = false): void {
   row.element.dataset.ready = String(ready);
-  row.status.textContent = status;
-  row.detail.textContent = detail;
-  row.detail.hidden = !detail;
+  row.status.textContent = percent !== null && !ready ? `${Math.floor(percent)}%` : "";
+  row.element.setAttribute("aria-label", `${row.title.textContent}: ${status}`);
   row.progress.hidden = ready;
   row.check.hidden = !ready;
   if (percent === null) row.progress.removeAttribute("value");
@@ -121,10 +111,3 @@ function renderRow(row: Row, status: string, detail: string, percent: number | n
 }
 
 function packageName(id: string): string { return id.split("@")[0]; }
-function packageVersion(id: string): string { return id.split("@")[1]?.replace(/^=/, "") ?? ""; }
-function downloadDetail(pkg: PackageProgress): string {
-  if (!pkg.download.downloadedBytes && !pkg.download.totalBytes) return "";
-  const mb = (bytes: number) => (bytes / 1_000_000).toFixed(1);
-  return pkg.download.totalBytes === null ? `${mb(pkg.download.downloadedBytes)} MB` :
-    `${mb(pkg.download.downloadedBytes)} / ${mb(pkg.download.totalBytes)} MB`;
-}

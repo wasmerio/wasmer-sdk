@@ -795,7 +795,7 @@ button {
 }
 
 .boot-card {
-  width: min(100%, 400px);
+  width: min(100%, 320px);
   margin: auto;
 }
 
@@ -810,15 +810,21 @@ button {
   text-transform: uppercase;
 }
 
-.boot-card h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 550;
-  letter-spacing: -0.035em;
+/* Announce overall startup without adding another visible loading label. */
+#boot-detail {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 
-#boot-detail {
-  margin: 8px 0 24px;
+[data-state="error"] #boot-detail {
+  position: static;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  margin: 0 0 16px;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.6;
@@ -834,48 +840,36 @@ button {
 .loading-row {
   display: flex;
   align-items: center;
-  gap: 14px;
-  min-height: 64px;
-  padding: 10px 0;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 0;
+  color: var(--text);
 }
 
-.sdk-loading-row {
-  min-height: 52px;
-  margin-bottom: 8px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--line);
-}
-
-.loading-row-body {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
-}
-
-.loading-row-name { font-size: 14px; overflow-wrap: anywhere; }
-.loading-row-detail { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.loading-row-name { min-width: 0; font-size: 15px; overflow-wrap: anywhere; }
 .loading-row-status { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.loading-row[data-ready="true"] .loading-row-status { color: var(--green); }
+.loading-row[data-waiting="true"],
+.loading-row[data-ready="true"],
+.loading-row[data-failed="true"] { color: var(--muted); }
 
 .loading-ring {
   position: relative;
   display: grid;
   place-items: center;
-  flex: 0 0 28px;
-  width: 28px;
-  height: 28px;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
 }
 
 .loading-ring progress {
   --value: 0;
   display: block;
   appearance: none;
-  width: 28px;
-  height: 28px;
-  border: 2px solid transparent;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid transparent;
   border-radius: 50%;
-  background: conic-gradient(var(--violet) calc(var(--value) * 1%), var(--line-strong) 0);
+  background: conic-gradient(var(--text) calc(var(--value) * 1%), var(--line-strong) 0);
   background-clip: border-area;
   background-origin: border-box;
 }
@@ -887,12 +881,12 @@ button {
 @supports not (background-clip: border-area) {
   .loading-ring progress {
     border: 0;
-    mask-image: radial-gradient(farthest-side, transparent calc(100% - 2px), black 0);
+    mask-image: radial-gradient(farthest-side, transparent calc(100% - 1.5px), black 0);
   }
 }
 
 .loading-ring progress:indeterminate {
-  background-image: conic-gradient(var(--violet) 25%, var(--line-strong) 0);
+  background-image: conic-gradient(var(--text) 25%, var(--line-strong) 0);
   animation: loading-spin 1s linear infinite;
 }
 
@@ -902,13 +896,13 @@ button {
 }
 
 .loading-check {
-  color: var(--green);
-  font-size: 17px;
+  color: var(--muted);
+  font-size: 12px;
   line-height: 1;
 }
 
 .loading-row[data-failed="true"] .loading-check { color: var(--muted); }
-.loading-ring [hidden], .loading-row-detail[hidden] { display: none; }
+.loading-ring [hidden] { display: none; }
 
 @keyframes loading-spin { to { transform: rotate(1turn); } }
 

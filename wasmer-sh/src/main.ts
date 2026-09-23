@@ -118,7 +118,6 @@ const elements = {
   liveHttpBadge: requiredElement<HTMLButtonElement>("live-http-badge"),
   liveHttpLabel: requiredElement<HTMLSpanElement>("live-http-label"),
   packageName: requiredElement<HTMLSpanElement>("package-name"),
-  bootTitle: requiredElement<HTMLHeadingElement>("boot-title"),
   bootDetail: requiredElement<HTMLParagraphElement>("boot-detail"),
   packageDownloads: requiredElement<HTMLUListElement>("package-downloads"),
   clear: requiredElement<HTMLButtonElement>("clear-button"),
@@ -385,7 +384,7 @@ async function start(): Promise<void> {
   setBusy(true);
   setState("booting", "Preparing runtime");
   loadingScreen.reset([config.packageName, ...config.uses]);
-  setBootMessage("Starting your shell", "Initializing the SDK…");
+  setBootMessage("Initializing the SDK…");
   elements.retry.hidden = true;
   elements.packageName.textContent = config.packageName;
 
@@ -403,7 +402,7 @@ async function start(): Promise<void> {
     loadingScreen.sdkReady();
     const packageNames = [config.packageName, ...config.uses];
     setState("loading", "Loading packages");
-    setBootMessage("Starting your shell", "Loading packages…");
+    setBootMessage("Loading packages…");
     const edgejsDevelopmentPackage = import.meta.env.DEV
       ? import.meta.env.VITE_EDGEJS_WEBC_URL?.trim()
       : undefined;
@@ -424,7 +423,7 @@ async function start(): Promise<void> {
     elements.packageName.textContent = mainPackage.id;
 
     setState("loading", "Creating sandbox");
-    setBootMessage("Starting your shell", "Preparing your workspace…");
+    setBootMessage("Preparing your workspace…");
     const sandbox = await wasmer.sandboxes.create({
       packages: [mainPackage, ...uses],
       files: workspaceFiles(),
@@ -511,7 +510,7 @@ async function runInteractiveShell(
 
   writeWelcome();
   setState("loading", "Starting Bash");
-  setBootMessage("Starting your shell", "Starting Bash…");
+  setBootMessage("Starting Bash…");
   const process = await sandbox
     .command(
       mainPackage,
@@ -582,7 +581,7 @@ async function runPassthrough(
   const session = activeSession;
   if (!session) return;
   setState("loading", "Starting program");
-  setBootMessage("Starting your program", "Starting program…");
+  setBootMessage("Starting program…");
   const process = await sandbox
     .command(selectCommand(mainPackage), config.args, {
       cwd: "/workspace",
@@ -1237,8 +1236,7 @@ function showBrowserCompatibilityWarning(): void {
   elements.browserWarning.hidden = false;
 }
 
-function setBootMessage(title: string, detail: string): void {
-  elements.bootTitle.textContent = title;
+function setBootMessage(detail: string): void {
   elements.bootDetail.textContent = detail;
 }
 
@@ -1247,7 +1245,7 @@ function showPackageProgress(progress: PackageLoadProgress): void {
   const label = progress.phase === "resolving" ? "Resolving packages…" :
     progress.phase === "downloading" ? "Downloading packages…" : "Preparing packages…";
   setState("loading", label);
-  setBootMessage("Starting your shell", label);
+  setBootMessage(label);
 }
 
 function setState(state: string, status: string): void {
@@ -1264,7 +1262,7 @@ function setBusy(busy: boolean): void {
 function showStartupError(error: unknown): void {
   loadingScreen.fail();
   setState("error", "Unable to start");
-  setBootMessage("The shell could not start", describeError(error));
+  setBootMessage(describeError(error));
   elements.retry.hidden = false;
   showTerminalError(error);
 }

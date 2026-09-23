@@ -59,7 +59,7 @@ struct WasmerShellApp: App {
             NativeTerminal(view: session.view).frame(maxWidth: .infinity, maxHeight: .infinity)
               .accessibilityHidden(session.starting || session.loading.error != nil)
             if session.starting || session.loading.error != nil {
-              ShellLoadingView(state: session.loading, status: session.status) {
+              ShellLoadingView(state: session.loading) {
                 Task { await session.restart() }
               }
             }
