@@ -33,6 +33,25 @@ jobs:
       pull-requests: write
       actions: write
     steps:
+      - name: Check for blocked release preparation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Release Please otherwise warns and exits successfully without
+          # opening any component PRs when an older release remains untagged.
+          pending="$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state merged \
+            --label 'autorelease: pending' --limit 200 --json number,url)"
+          if [ "$(jq 'length' <<< "$pending")" -gt 0 ]; then
+            echo '::error::Merged release PRs are still pending publication. Recover or supersede them before preparing new releases.'
+            {
+              echo '### Release preparation is blocked'
+              echo
+              jq -r '.[] | "- [Release PR #\(.number)](\(.url))"' <<< "$pending"
+              echo
+              echo 'Recover the failed release, or explicitly supersede an unpublished attempt as described in docs/releases.md. Do not mark it tagged without a real release.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
       - uses: googleapis/release-please-action@v4
         with:
           config-file: release-please-config.json
