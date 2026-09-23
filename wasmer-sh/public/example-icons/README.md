@@ -21,4 +21,7 @@ runtime download is required.
   fill for contrast on the dark picker. The logo path is unchanged.
   See `SIMPLE-ICONS-LICENSE.txt` (CC0 1.0).
 
+`benchmark.svg` is an original speedometer illustration for the Richards.js
+performance example, shared under the repository license.
+
 Project names and logos belong to their respective owners.

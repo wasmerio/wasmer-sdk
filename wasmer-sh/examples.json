@@ -41,7 +41,7 @@
     "title": "Richards.js",
     "group": "Node.js",
     "description": "Measure JavaScript speed with the Richards benchmark.",
-    "icon": "node.svg",
+    "icon": "benchmark.svg",
     "dependencies": "No npm dependencies",
     "packages": ["wasmer/edge@=0.2.1"],
     "install": null,
