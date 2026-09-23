@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.15.0...wasmer-sdk-js-v0.16.0) (2026-09-23)
+
+
+### Features
+
+* add package loading progress and compact shell loaders ([#519](https://github.com/wasmerio/wasmer-sdk/issues/519)) ([7575413](https://github.com/wasmerio/wasmer-sdk/commit/757541364b16fb2d9fc4eb84f29e0e8224442fdf))
+
+
+### Bug Fixes
+
+* **shell:** include worker imports in production builds ([#514](https://github.com/wasmerio/wasmer-sdk/issues/514)) ([842f774](https://github.com/wasmerio/wasmer-sdk/commit/842f77425753005a27f18ae21a99a541d5215b86))
+
 ## [0.15.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.14.0...wasmer-sdk-js-v0.15.0) (2026-09-19)
 
 

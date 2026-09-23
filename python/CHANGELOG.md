@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-python-v0.3.0...wasmer-sdk-python-v0.4.0) (2026-09-23)
+
+
+### Features
+
+* add package loading progress and compact shell loaders ([#519](https://github.com/wasmerio/wasmer-sdk/issues/519)) ([7575413](https://github.com/wasmerio/wasmer-sdk/commit/757541364b16fb2d9fc4eb84f29e0e8224442fdf))
+
 ## [0.3.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-python-v0.2.1...wasmer-sdk-python-v0.3.0) (2026-09-17)
 
 
