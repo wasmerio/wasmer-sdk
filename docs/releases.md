@@ -22,7 +22,9 @@ not part of this matrix.
    Release Please opens or updates component PRs from conventional commits.
    You can also run it manually on `main` with `tag` empty, including after
    direct pushes. Merging a component release PR follows the publication path
-   in step 3 instead. Pending JS/Python PRs get explicit CI runs because PRs created with
+   in step 3 instead. Preparation uses the action's returned PRs immediately and
+   also finds existing pending PRs for retries, so GitHub search indexing cannot
+   omit a newly opened release. Pending JS/Python PRs get explicit CI runs because PRs created with
    `GITHUB_TOKEN` do not trigger another workflow automatically.
 2. If a Swift PR exists, **Prepare Swift release** builds the native macOS
    XCFramework for both architectures and the WebKit runtime XCFramework from
@@ -59,6 +61,27 @@ to tag stale or missing Swift binaries. Published tags are never moved to add
 checksums or generated source.
 
 ## Retry a failed publication
+
+### Release PRs are missing after a merge
+
+An older merged PR with `autorelease: pending` blocks Release Please from opening
+new PRs for **every** component. The preparation workflow fails with links to
+those PRs so the block cannot look like a successful run with nothing to release.
+
+Inspect the failed component release and its preparation run first. If a tag or
+release already exists, recover that exact release using the retry procedure
+below. Never remove its pending marker merely to bypass a failed publication.
+
+If an unpublished attempt is intentionally superseded by current `main`, first
+confirm that its component tag and GitHub release do not exist. Replace its
+`autorelease: pending` label with `autorelease: superseded`, then dispatch
+**Release SDK** on `main` with `tag` empty. The new PR advances from the version
+already recorded in the manifest and includes the outstanding changes. This
+prepares release PRs; it does not publish the superseded version or fabricate its
+tag. In particular, wait for Swift binary preparation and the **Release metadata**
+check before merging the new Swift release PR.
+
+### Retry publication of an existing release
 
 For a build failure or a partially uploaded draft, rerun the failed jobs in the
 original workflow run. Completed build jobs and their uploaded artifacts are

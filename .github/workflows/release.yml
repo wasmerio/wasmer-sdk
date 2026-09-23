@@ -33,7 +33,27 @@ jobs:
       pull-requests: write
       actions: write
     steps:
+      - name: Check for blocked release preparation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Release Please otherwise warns and exits successfully without
+          # opening any component PRs when an older release remains untagged.
+          pending="$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state merged \
+            --label 'autorelease: pending' --limit 200 --json number,url)"
+          if [ "$(jq 'length' <<< "$pending")" -gt 0 ]; then
+            echo '::error::Merged release PRs are still pending publication. Recover or supersede them before preparing new releases.'
+            {
+              echo '### Release preparation is blocked'
+              echo
+              jq -r '.[] | "- [Release PR #\(.number)](\(.url))"' <<< "$pending"
+              echo
+              echo 'Recover the failed release, or explicitly supersede an unpublished attempt as described in docs/releases.md. Do not mark it tagged without a real release.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
       - uses: googleapis/release-please-action@v4
+        id: release-please
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
@@ -42,7 +62,14 @@ jobs:
       - name: Validate the release PRs and prepare Swift binaries
         env:
           GH_TOKEN: ${{ github.token }}
+          CREATED_RELEASE_PRS: ${{ steps.release-please.outputs.prs || '[]' }}
         run: |
+          # Newly created PRs may not appear in GitHub search immediately.
+          # Keep the existing-PR lookup for manual retries of preparation.
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \
+            --label 'autorelease: pending' --json number,headRefName)"
+          prs="$(jq -cn --argjson created "$CREATED_RELEASE_PRS" --argjson existing "$existing" \
+            '($created | map({number, headRefName: .headBranchName})) + $existing | unique_by(.number)')"
           while IFS=$'\t' read -r pr branch; do
             case "$branch" in
               release-please--branches--main--components--wasmer-sdk-swift)
@@ -52,8 +79,7 @@ jobs:
                 gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
                 ;;
             esac
-          done < <(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \
-            --label 'autorelease: pending' --json number,headRefName --jq '.[] | [.number, .headRefName] | @tsv')
+          done < <(jq -r '.[] | [.number, .headRefName] | @tsv' <<< "$prs")
 
   select:
     if: >-
