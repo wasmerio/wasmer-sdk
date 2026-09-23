@@ -7,7 +7,7 @@ let useLocalWebRuntime = Context.environment["WASMER_SDK_LOCAL_WEB_RUNTIME"] == 
 let webRuntimeTargets: [Target] = useLocalWebRuntime ? [] : [
     .binaryTarget(name: "WasmerWKRuntime",
       url: "https://github.com/wasmerio/wasmer-sdk/releases/download/wasmer-sdk-swift-v0.4.0/WasmerWKRuntime-0.4.0.zip",
-      checksum: "ef3f510715117a26758f86134afd935408ecb5c248b681b1541d964cf4a58999"),
+      checksum: "5c40620066108d132744aa6740813b12d7c5d5265e7be8ec70be2276b753b2c8"),
   ]
 
 let package = Package(
