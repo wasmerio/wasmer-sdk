@@ -16,10 +16,8 @@ struct WasmerShellApp: App {
               Text(".iOS").font(.system(size: 14, weight: .semibold, design: .monospaced))
                 .tracking(-1).foregroundStyle(ShellTheme.muted)
             }.fixedSize().accessibilityElement(children: .ignore).accessibilityLabel("Wasmer.iOS")
-            Text(session.status).font(.caption).foregroundStyle(ShellTheme.muted).lineLimit(1)
-            if let progress = session.packageDownload {
-              ProgressView(value: progress.download.percent, total: 100)
-                .tint(Color(uiColor: ShellTheme.cursor)).accessibilityLabel("Package downloads")
+            if !session.starting {
+              Text(session.status).font(.caption).foregroundStyle(ShellTheme.muted).lineLimit(1)
             }
           }.frame(minWidth: 134, alignment: .leading)
           Spacer(minLength: 4)
@@ -57,17 +55,27 @@ struct WasmerShellApp: App {
         if session.showingExamples {
           ExamplePicker(session: session)
         } else {
-          NativeTerminal(view: session.view).frame(maxWidth: .infinity, maxHeight: .infinity)
-          Divider()
-          ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-              key("Esc", 7); key("Tab", 6)
-              Button("Ctrl-C") { session.view.sendControl(3) }
-              Button("Ctrl-D") { session.view.sendControl(4) }
-              key("↑", 0); key("↓", 1); key("←", 2); key("→", 3)
-            }.font(.system(.callout, design: .monospaced))
-              .buttonStyle(ShellButtonStyle(isSelected: true)).padding(10)
-          }.disabled(!session.ready)
+          ZStack {
+            NativeTerminal(view: session.view).frame(maxWidth: .infinity, maxHeight: .infinity)
+              .accessibilityHidden(session.starting || session.loading.error != nil)
+            if session.starting || session.loading.error != nil {
+              ShellLoadingView(state: session.loading, status: session.status) {
+                Task { await session.restart() }
+              }
+            }
+          }
+          if !session.starting && session.loading.error == nil {
+            Divider()
+            ScrollView(.horizontal, showsIndicators: false) {
+              HStack(spacing: 8) {
+                key("Esc", 7); key("Tab", 6)
+                Button("Ctrl-C") { session.view.sendControl(3) }
+                Button("Ctrl-D") { session.view.sendControl(4) }
+                key("↑", 0); key("↓", 1); key("←", 2); key("→", 3)
+              }.font(.system(.callout, design: .monospaced))
+                .buttonStyle(ShellButtonStyle(isSelected: true)).padding(10)
+            }.disabled(!session.ready)
+          }
         }
       }
       .foregroundStyle(ShellTheme.text)
@@ -89,7 +97,7 @@ final class TerminalSession: ObservableObject {
   @Published var storage = ShellStorage.initial
   @Published var showingExamples = true
   @Published var selectedExample: ShellExample?
-  @Published var packageDownload: PackageLoadProgress?
+  @Published var loading = ShellLoadingState()
   @Published var status = "Choose an example" {
     didSet {
       #if WASMER_SHELL_TESTS
@@ -147,7 +155,9 @@ final class TerminalSession: ObservableObject {
       let host = try ShellRuntime(directory: directory, storage: storage, example: selectedExample)
       runtime = host
       transcript.removeAll(); exit = nil
-      host.onPackageProgress = { [weak self] progress in self?.packageDownload = progress }
+      loading = ShellLoadingState(names: host.packageNames)
+      host.onPackageProgress = { [weak self] progress in self?.loading.update(progress) }
+      host.onPackagesLoaded = { [weak self] ids in self?.loading.complete(ids) }
       host.onProgress = { [weak self] message in
         self?.status = message
       }
@@ -206,6 +216,7 @@ final class TerminalSession: ObservableObject {
         welcome += "Type \u{1b}[38;5;81mls\u{1b}[0m to explore the workspace.\r\n"
       }
       view.feed(Data((welcome + "\r\n").utf8))
+      status = "Starting Bash…"
       try await host.startTerminal(columns: view.columns, rows: view.rows)
       ready = true; status = "\(storage.label) · \(selectedExample?.title ?? "Bash · Node.js · Python")"
       #if WASMER_SHELL_TESTS
@@ -218,6 +229,7 @@ final class TerminalSession: ObservableObject {
         }
       }
     } catch {
+      loading.error = error.localizedDescription
       status = error.localizedDescription
       view.feed(Data("\r\nError: \(error.localizedDescription)\r\n".utf8))
       #if WASMER_SHELL_TESTS
@@ -255,7 +267,8 @@ final class TerminalSession: ObservableObject {
     runtime?.onTerminalOutput = nil
     runtime?.onProgress = nil
     runtime?.onPackageProgress = nil
-    packageDownload = nil
+    runtime?.onPackagesLoaded = nil
+    loading = ShellLoadingState()
     await runtime?.close(); runtime = nil
     await inputTask?.value; inputTask = nil
     starting = false

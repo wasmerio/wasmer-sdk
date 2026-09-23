@@ -1,4 +1,5 @@
 import { loadExamplePackages, type PackageLoadProgress } from "./package-loading";
+import { LoadingScreen } from "./loading-screen";
 import "./styles.css";
 
 import {
@@ -119,7 +120,6 @@ const elements = {
   packageName: requiredElement<HTMLSpanElement>("package-name"),
   bootTitle: requiredElement<HTMLHeadingElement>("boot-title"),
   bootDetail: requiredElement<HTMLParagraphElement>("boot-detail"),
-  bootProgress: requiredElement<HTMLProgressElement>("boot-progress"),
   packageDownloads: requiredElement<HTMLUListElement>("package-downloads"),
   clear: requiredElement<HTMLButtonElement>("clear-button"),
   restart: requiredElement<HTMLButtonElement>("restart-button"),
@@ -222,6 +222,7 @@ const workspaceEditor = new WorkspaceEditor(
 );
 
 let activeSession: ActiveSession | undefined;
+const loadingScreen = new LoadingScreen(elements.packageDownloads);
 let generation = 0;
 let packageLoadAbort: AbortController | undefined;
 let inputQueue = Promise.resolve();
@@ -383,10 +384,8 @@ async function start(): Promise<void> {
   packageLoadAbort = loadAbort;
   setBusy(true);
   setState("booting", "Preparing runtime");
-  setBootMessage(
-    "Starting your shell",
-    "Initializing the Wasmer runtime in this browser.",
-  );
+  loadingScreen.reset([config.packageName, ...config.uses]);
+  setBootMessage("Starting your shell", "Initializing the SDK…");
   elements.retry.hidden = true;
   elements.packageName.textContent = config.packageName;
 
@@ -401,9 +400,10 @@ async function start(): Promise<void> {
     await wasmer.ready();
     ensureCurrent(currentGeneration);
 
+    loadingScreen.sdkReady();
     const packageNames = [config.packageName, ...config.uses];
     setState("loading", "Loading packages");
-    setBootMessage("Loading the shell", describePackageLoad(packageNames));
+    setBootMessage("Starting your shell", "Loading packages…");
     const edgejsDevelopmentPackage = import.meta.env.DEV
       ? import.meta.env.VITE_EDGEJS_WEBC_URL?.trim()
       : undefined;
@@ -420,13 +420,11 @@ async function start(): Promise<void> {
       },
     });
     ensureCurrent(currentGeneration);
+    loadingScreen.complete([mainPackage.id, ...uses.map(pkg => pkg.id)]);
     elements.packageName.textContent = mainPackage.id;
 
     setState("loading", "Creating sandbox");
-    setBootMessage(
-      "Creating your sandbox",
-      "Composing the packages and workspace entirely inside this tab.",
-    );
+    setBootMessage("Starting your shell", "Preparing your workspace…");
     const sandbox = await wasmer.sandboxes.create({
       packages: [mainPackage, ...uses],
       files: workspaceFiles(),
@@ -512,7 +510,8 @@ async function runInteractiveShell(
   if (!session) return;
 
   writeWelcome();
-  setState("running", "Starting Bash");
+  setState("loading", "Starting Bash");
+  setBootMessage("Starting your shell", "Starting Bash…");
   const process = await sandbox
     .command(
       mainPackage,
@@ -582,7 +581,8 @@ async function runPassthrough(
 ): Promise<void> {
   const session = activeSession;
   if (!session) return;
-  setState("running", "Running");
+  setState("loading", "Starting program");
+  setBootMessage("Starting your program", "Starting program…");
   const process = await sandbox
     .command(selectCommand(mainPackage), config.args, {
       cwd: "/workspace",
@@ -597,6 +597,7 @@ async function runPassthrough(
     await process.kill();
     throw new Error("The process did not expose its requested streams.");
   }
+  setState("running", "Running");
   session.process = process;
   session.stdin = process.stdin;
   const streams = Promise.allSettled([
@@ -1236,38 +1237,17 @@ function showBrowserCompatibilityWarning(): void {
   elements.browserWarning.hidden = false;
 }
 
-function describePackageLoad(packageNames: string[]): string {
-  if (packageNames.length === 1) {
-    return `Resolving ${packageNames[0]} and its cached package data.`;
-  }
-  return `Resolving ${packageNames[0]} with ${packageNames.length - 1} supporting package${packageNames.length === 2 ? "" : "s"}.`;
-}
-
 function setBootMessage(title: string, detail: string): void {
   elements.bootTitle.textContent = title;
   elements.bootDetail.textContent = detail;
-  elements.bootProgress.hidden = true;
-  elements.packageDownloads.hidden = true;
 }
 
 function showPackageProgress(progress: PackageLoadProgress): void {
-  const { downloadedBytes, totalBytes, percent } = progress.download;
-  const title = progress.phase === "resolving" ? "Resolving packages" :
-    progress.phase === "downloading" ? "Downloading packages" : "Preparing packages";
-  const mb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
-  setState("loading", percent === null ? title : `${title} · ${Math.floor(percent)}%`);
-  setBootMessage(title, totalBytes === null ? `${mb(downloadedBytes)} received` : `${mb(downloadedBytes)} of ${mb(totalBytes)}`);
-  elements.bootProgress.hidden = false;
-  if (percent === null) elements.bootProgress.removeAttribute("value");
-  else elements.bootProgress.value = percent;
-  elements.packageDownloads.hidden = false;
-  elements.packageDownloads.replaceChildren(...progress.packages.map(pkg => {
-    const row = document.createElement("li");
-    const status = pkg.cached ? "Cached" : pkg.phase === "ready" ? "Ready" :
-      pkg.phase === "loading" ? "Preparing" : pkg.download.percent === null ? "Loading…" : `${Math.floor(pkg.download.percent)}%`;
-    row.textContent = `${pkg.id} · ${status}`;
-    return row;
-  }));
+  loadingScreen.update(progress);
+  const label = progress.phase === "resolving" ? "Resolving packages…" :
+    progress.phase === "downloading" ? "Downloading packages…" : "Preparing packages…";
+  setState("loading", label);
+  setBootMessage("Starting your shell", label);
 }
 
 function setState(state: string, status: string): void {
@@ -1282,6 +1262,7 @@ function setBusy(busy: boolean): void {
 }
 
 function showStartupError(error: unknown): void {
+  loadingScreen.fail();
   setState("error", "Unable to start");
   setBootMessage("The shell could not start", describeError(error));
   elements.retry.hidden = false;

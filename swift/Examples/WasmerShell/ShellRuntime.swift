@@ -13,7 +13,8 @@ final class ShellRuntime {
   private var outputTask: Task<Void, Never>?
   private var portTask: Task<Void, Never>?
   var onProgress: ((String) -> Void)?
-  var onPackageProgress: ((PackageLoadProgress?) -> Void)?
+  var onPackageProgress: ((PackageLoadProgress) -> Void)?
+  var onPackagesLoaded: (([String]) -> Void)?
   private var loadingPackages = false
   var onTerminalOutput: ((Data) -> Void)?
   var onTerminalExit: ((Output) -> Void)?
@@ -31,29 +32,34 @@ final class ShellRuntime {
   var nativeOperationCount: Int { get async { await client.diagnostics().nativeOperations } }
   var nativeNetworkStats: NetworkDiagnostics { get async { await client.diagnostics().network } }
 
-  func start() async throws {
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    // Startup is lazy. Package loading performs the runtime's JSPI check.
+  var packageNames: [String] {
     var names = ["wasmer/bash"]
     let required = example?.packages ?? (ShellExample.all.flatMap(\.packages) + ["syrusakbary/cowsay@=0.3.0"])
     for name in required where !names.contains(name) { names.append(name) }
+    return names
+  }
+
+  func start() async throws {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    onProgress?("Initializing the SDK…")
+    let names = packageNames
     let sources: [PackageSource] = names.map { name in
       if name == "wasmer/edge@=0.2.1", let url = Bundle.main.url(forResource: "edgejs", withExtension: "webc") { return .file(url) }
       return .registry(name)
     }
     loadingPackages = true
-    defer { loadingPackages = false; onPackageProgress?(nil) }
+    defer { loadingPackages = false }
     let packages = try await client.packages.loadMany(sources) { [weak self] progress in
       Task { @MainActor in
         guard let self, self.loadingPackages else { return }
         self.onPackageProgress?(progress)
         let label = progress.phase == .resolving ? "Resolving packages" : progress.phase == .downloading ? "Downloading packages" : "Preparing packages"
-        let detail = progress.download.percent.map { "\(Int($0))%" } ?? String(format: "%.1f MB", Double(progress.download.downloadedBytes) / 1_000_000)
-        self.onProgress?("\(label) · \(detail)")
+        self.onProgress?(label + "…")
       }
     }
     loadingPackages = false
-    onPackageProgress?(nil)
+    onPackagesLoaded?(packages.map(\.id))
+    onProgress?("Preparing your workspace…")
     let pythonPath = example == nil ? "/workspace/wasix-packages" : "/workspace/.python-packages"
     sandbox = try await client.sandboxes.create(
       packages: packages.map { .package($0) },

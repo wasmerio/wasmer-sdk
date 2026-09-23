@@ -35,9 +35,31 @@ export async function loadExamplePackages(
   if ("loadMany" in client.packages && typeof client.packages.loadMany === "function") {
     return (client.packages as unknown as ProgressivePackages).loadMany(sources, options);
   }
-  // An older SDK keeps its existing indeterminate loading screen. All package
-  // resolution and caching still use the SDK, without a second download path.
-  const packages = await Promise.all(sources.map(source => client.packages.load(source)));
-  options.signal.throwIfAborted();
-  return packages;
+  // Older releases can report completion, but don't expose byte counts.
+  const packages: Package[] = [];
+  const progress: PackageLoadProgress = {
+    phase: "resolving", download: { downloadedBytes: 0, totalBytes: null, percent: null },
+    packages: sources.map((source, index) => ({
+      id: typeof source === "string" ? source : `Local package ${index + 1}`,
+      phase: "resolving", cached: false,
+      download: { downloadedBytes: 0, totalBytes: null, percent: null },
+    })),
+  };
+  let failed = false;
+  try {
+    options.onProgress(progress);
+    await Promise.all(sources.map(async (source, index) => {
+      const pkg = await client.packages.load(source);
+      packages[index] = pkg;
+      if (failed || options.signal.aborted) return;
+      progress.packages = progress.packages.map((entry, i) => i === index ? { ...entry, id: pkg.id, phase: "ready" } : entry);
+      if (progress.packages.every(entry => entry.phase === "ready")) progress.phase = "ready";
+      options.onProgress({ ...progress });
+    }));
+    options.signal.throwIfAborted();
+    return packages;
+  } catch (error) {
+    failed = true;
+    throw error;
+  }
 }

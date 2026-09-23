@@ -782,12 +782,9 @@ button {
   display: grid;
   place-items: center;
   padding: 24px;
-  background:
-    radial-gradient(circle at 50% 48%, rgba(167, 139, 250, 0.08), transparent 26%),
-    rgba(12, 12, 18, 0.97);
-  transition:
-    opacity 260ms ease,
-    visibility 260ms ease;
+  overflow: auto;
+  background: var(--panel);
+  transition: opacity 160ms ease, visibility 160ms ease;
 }
 
 [data-state="running"] .boot-screen,
@@ -798,42 +795,8 @@ button {
 }
 
 .boot-card {
-  display: flex;
-  align-items: center;
-  flex-direction: column;
-  max-width: 440px;
-  text-align: center;
-}
-
-.runtime-glyph {
-  position: relative;
-  width: 48px;
-  height: 48px;
-  margin-bottom: 22px;
-}
-
-.runtime-glyph span {
-  position: absolute;
-  inset: 0;
-  border: 1px solid rgba(167, 139, 250, 0.48);
-  border-radius: 12px;
-  animation: orbit 2.4s ease-in-out infinite;
-}
-
-.runtime-glyph span:nth-child(2) {
-  border-color: rgba(103, 232, 249, 0.42);
-  animation-delay: -0.8s;
-}
-
-.runtime-glyph span:nth-child(3) {
-  border-color: rgba(94, 230, 168, 0.35);
-  animation-delay: -1.6s;
-}
-
-[data-state="error"] .runtime-glyph span {
-  border-color: rgba(251, 113, 133, 0.65);
-  animation: none;
-  transform: rotate(45deg) scale(0.72);
+  width: min(100%, 400px);
+  margin: auto;
 }
 
 .eyebrow {
@@ -849,18 +812,105 @@ button {
 
 .boot-card h1 {
   margin: 0;
-  font-size: clamp(25px, 4vw, 36px);
-  font-weight: 590;
-  letter-spacing: -0.045em;
+  font-size: 22px;
+  font-weight: 550;
+  letter-spacing: -0.035em;
 }
 
-.boot-card p:last-of-type {
-  max-width: 390px;
-  margin: 12px 0 0;
+#boot-detail {
+  margin: 8px 0 24px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.6;
+  overflow-wrap: anywhere;
 }
+
+#package-downloads {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.loading-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  padding: 10px 0;
+}
+
+.sdk-loading-row {
+  min-height: 52px;
+  margin-bottom: 8px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.loading-row-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.loading-row-name { font-size: 14px; overflow-wrap: anywhere; }
+.loading-row-detail { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.loading-row-status { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.loading-row[data-ready="true"] .loading-row-status { color: var(--green); }
+
+.loading-ring {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+}
+
+.loading-ring progress {
+  --value: 0;
+  display: block;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: conic-gradient(var(--violet) calc(var(--value) * 1%), var(--line-strong) 0);
+  background-clip: border-area;
+  background-origin: border-box;
+}
+
+.loading-ring progress::-webkit-progress-bar,
+.loading-ring progress::-webkit-progress-value { background: transparent; }
+.loading-ring progress::-moz-progress-bar { background: transparent; }
+
+@supports not (background-clip: border-area) {
+  .loading-ring progress {
+    border: 0;
+    mask-image: radial-gradient(farthest-side, transparent calc(100% - 2px), black 0);
+  }
+}
+
+.loading-ring progress:indeterminate {
+  background-image: conic-gradient(var(--violet) 25%, var(--line-strong) 0);
+  animation: loading-spin 1s linear infinite;
+}
+
+.loading-row[data-waiting="true"] progress:indeterminate {
+  background: var(--line-strong);
+  animation: none;
+}
+
+.loading-check {
+  color: var(--green);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.loading-row[data-failed="true"] .loading-check { color: var(--muted); }
+.loading-ring [hidden], .loading-row-detail[hidden] { display: none; }
+
+@keyframes loading-spin { to { transform: rotate(1turn); } }
 
 .primary-button {
   min-height: 38px;
@@ -1114,18 +1164,6 @@ button {
   text-align: center;
 }
 
-@keyframes orbit {
-  0%,
-  100% {
-    transform: rotate(0deg) scale(0.72);
-    opacity: 0.42;
-  }
-  50% {
-    transform: rotate(135deg) scale(1);
-    opacity: 1;
-  }
-}
-
 @keyframes breathe {
   0%,
   100% {
@@ -1198,18 +1236,4 @@ button {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-#boot-progress {
-  width: 100%;
-  height: 8px;
-  accent-color: #00cdb5;
-}
-#package-downloads {
-  padding: 0;
-  list-style: none;
-  text-align: left;
-  font-size: 12px;
-  line-height: 1.8;
-  overflow-wrap: anywhere;
 }
