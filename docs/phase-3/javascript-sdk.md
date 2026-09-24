@@ -253,7 +253,7 @@ PSQL=/absolute/path/psql \
 npm run test:workers
 ```
 
-The test resolves `wasmer/pglite@0.1.0` directly, starts its entrypoint without
+The test resolves `wasmer/pglite@0.1.3` directly, starts its entrypoint without
 recreating its PostgreSQL arguments or environment, and connects through the
 wasm-bindgen SDK's Node network bridge with the host's standard `psql`. It
 contains no PostgreSQL protocol proxy.

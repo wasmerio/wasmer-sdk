@@ -170,7 +170,7 @@ PYTHONPATH=python/src \
   python3 python/examples/postgres_psql.py
 ```
 
-The PostgreSQL example loads `wasmer/pglite@0.1.0`, enables host networking,
+The PostgreSQL example loads `wasmer/pglite@0.1.3`, enables host networking,
 starts its package entrypoint without custom arguments or environment, and
 uses the standard native `psql` client to connect to port 5432.
 

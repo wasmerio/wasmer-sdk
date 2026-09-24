@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     let sandbox = wasmer
         .sandboxes()
         .create()
-        .package("wasmer/pglite@0.1.0")
+        .package("wasmer/pglite@0.1.3")
         .network(NetworkPolicy::Host)
         .await?;
 

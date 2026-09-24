@@ -439,13 +439,14 @@ public struct Capabilities: Sendable {
   public let opfsStorage: Bool
   public let terminal: Bool
   public let httpExposure: Bool
+  public let tcpForwarding: Bool
 }
 extension Wasmer {
   public var capabilities: Capabilities {
     #if os(iOS)
-    return Capabilities(localPackageDirectories: false, directoryMounts: true, nativeStorage: true, opfsStorage: true, terminal: true, httpExposure: true)
+    return Capabilities(localPackageDirectories: false, directoryMounts: true, nativeStorage: true, opfsStorage: true, terminal: true, httpExposure: true, tcpForwarding: true)
     #else
-    return Capabilities(localPackageDirectories: true, directoryMounts: false, nativeStorage: false, opfsStorage: false, terminal: false, httpExposure: false)
+    return Capabilities(localPackageDirectories: true, directoryMounts: false, nativeStorage: false, opfsStorage: false, terminal: false, httpExposure: false, tcpForwarding: false)
     #endif
   }
   /// Diagnostic counters for integration tests, independent of the selected backend.
@@ -490,6 +491,15 @@ extension Ports {
     throw unavailable("HTTP listener discovery")
     #endif
   }
+  /// Forward a guest TCP listener to an ephemeral, app-local loopback port.
+  /// Keep the returned handle alive for the duration of the connection.
+  public func forwardTCP(_ port: UInt16) async throws -> TCPPortForward {
+    #if os(iOS)
+    return TCPPortForward(core: try await core.forwardTCP(port: port))
+    #else
+    throw unavailable("TCP forwarding")
+    #endif
+  }
   /// Expose a guest HTTP server through an authenticated app-local URL.
   public func expose(_ port: UInt16) async throws -> ExposedPort {
     #if os(iOS)
@@ -508,6 +518,19 @@ public final class ExposedPort: Sendable {
   #else
   private init(url: URL) { self.url = url }
   public let url: URL
+  public func close() {}
+  #endif
+}
+public final class TCPPortForward: Sendable {
+  public let host = "127.0.0.1"
+  #if os(iOS)
+  private let core: TCPPortForwardCore
+  fileprivate init(core: TCPPortForwardCore) { self.core = core }
+  public var port: UInt16 { core.port }
+  public func close() { core.close() }
+  #else
+  private init(port: UInt16) { self.port = port }
+  public let port: UInt16
   public func close() {}
   #endif
 }

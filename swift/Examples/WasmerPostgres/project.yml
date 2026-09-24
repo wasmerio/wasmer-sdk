@@ -1,0 +1,37 @@
+name: WasmerPostgres
+options:
+  deploymentTarget:
+    iOS: '27.0'
+packages:
+  WasmerSDK:
+    path: ../../..
+  PostgresNIO:
+    url: https://github.com/vapor/postgres-nio.git
+    exactVersion: 1.33.1
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    TARGETED_DEVICE_FAMILY: '1,2'
+targets:
+  WasmerPostgres:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: WasmerSDK
+      - package: PostgresNIO
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.wasmer.sdk.postgres
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Wasmer Postgres
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+schemes:
+  WasmerPostgres:
+    build:
+      targets:
+        WasmerPostgres: all
+    run:
+      config: Debug
