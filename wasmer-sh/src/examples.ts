@@ -10,6 +10,10 @@ export interface ShellExample {
   icon: string;
   dependencies: string;
   packages: string[];
+  /** Non-HTTP listeners that must not open a browser preview. */
+  tcpPorts?: number[];
+  /** An SDK-managed companion that runs alongside the interactive shell. */
+  server?: { command: string; args: string[]; port: number };
   env?: Record<string, string>;
   install: string | null;
   run: string;

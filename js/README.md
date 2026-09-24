@@ -211,9 +211,65 @@ browser can use `SharedArrayBuffer`. Serve the page with
 Browser package data is persisted with browser storage rather than the Node
 filesystem cache.
 
-### Outbound networking through WISP
+### Local TCP between browser sandboxes
 
-Browsers cannot open TCP sockets directly. Give a browser sandbox a WISP
+Browser sandboxes with `network: { mode: "http" }` or `"wisp"` share virtual
+localhost automatically within one `Wasmer` client. `localhost` resolves
+locally; connections to `127.0.0.1` and `::1` reach guest listeners through
+bounded in-memory TCP sockets. Local traffic never opens a WebSocket or uses
+WISP. Missing listeners fail locally rather than reaching the real host.
+Different `Wasmer` clients are isolated.
+
+For explicit links, set `peers: [databaseSandbox]`. Set `peers: []` for an
+isolated sandbox. Restricted sandboxes are excluded from automatic discovery,
+but can still be selected explicitly as peers. Links are directional, and do
+not grant access to the peer's peers or its external network. A sandbox's own
+listener takes priority; if several automatic peers own the same address and
+port, the connection fails rather than choosing one arbitrarily. Use an
+explicit peer to select the intended server.
+
+### PostgreSQL and psql in the browser
+
+```javascript
+const wasmer = new Wasmer();
+const database = await wasmer.sandboxes.create({
+  packages: ["wasmer/pglite@=0.1.3"],
+  network: { mode: "http" },
+});
+const postgres = await database.command("pglite").spawn({
+  stdout: "capture", stderr: "capture",
+});
+// Browser readiness observes the listener without consuming a connection.
+await database.ports.wait(5432);
+
+const client = await wasmer.sandboxes.create({
+  packages: ["wasmer/psql@=18.4.0"],
+  network: { mode: "http" }, // Or { mode: "http", peers: [database] }
+});
+const result = await client.command("psql", [
+  "-h", "localhost", "-U", "postgres", "-d", "postgres", "-Atc", "SELECT 6 * 7",
+]).run();
+console.log(result.text());
+await wasmer.close();
+```
+
+`wasmer/pglite` accepts one connection per process. Keep an interactive psql
+session open for multiple queries, or restart the server to reconnect. Data
+lives in the sandbox's in-memory filesystem. The real WASIX psql client is
+built from PostgreSQL 18.4; its package and build script are in
+[`packages/psql`](../packages/psql/README.md).
+
+Run the interactive browser example against a local SDK build:
+
+```sh
+npm run build
+node examples/serve-postgres.mjs
+# Open the printed URL. Start the database, then enter SQL or psql commands.
+```
+
+### External browser connections
+
+Browsers cannot open external TCP sockets directly. Give a browser sandbox a WISP
 endpoint to multiplex its WASIX TCP and DNS traffic over one WebSocket:
 
 ```javascript
@@ -310,8 +366,9 @@ const server = await sandbox.ports.expose(8080);
 document.body.append(server.createIframe({ title: "PHP preview" }));
 ```
 
-Shell-style applications can discover ports instead of knowing them in
-advance:
+Applications whose listeners speak HTTP can discover ports instead of knowing
+them in advance. Other protocols, such as PostgreSQL, use the local TCP network
+directly and must not be exposed as HTTP previews:
 
 ```javascript
 const stopWatching = sandbox.ports.onListen((port) => {
@@ -399,6 +456,7 @@ npx playwright install chromium firefox webkit
 npm run test:browser
 npm run test:browser-http
 npm run test:browser-node
+npm run test:browser-postgres
 ```
 
 `npm run check` type-checks the handwritten TypeScript API without rebuilding

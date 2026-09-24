@@ -46,6 +46,10 @@ extension TerminalSession {
       await runClangSmokeTest(host)
       return
     }
+    if ProcessInfo.processInfo.arguments.contains("--example-postgres") {
+      await runPostgresSmokeTest(host)
+      return
+    }
     var report: [String: Any] = ["passed": false, "renderer": "libghostty-vt", "osVersion": ProcessInfo.processInfo.operatingSystemVersionString]
     do {
       try? FileManager.default.removeItem(at: directory.appendingPathComponent("terminal-test.txt"))
@@ -324,6 +328,44 @@ extension TerminalSession {
     } catch {
       report["error"] = error.localizedDescription
       status = "Richards benchmark test failed"
+    }
+    report["transcript"] = text
+    writeReport(report)
+  }
+
+  private func runPostgresSmokeTest(_ host: ShellRuntime) async {
+    var report: [String: Any] = ["passed": false, "example": "postgres", "storage": storage.rawValue]
+    do {
+      try await waitFor("➜ ~ $ ")
+      try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
+      try await shellCheck(host, command: "command -v pglite && command -v psql && ! command -v node && ! command -v python; printf '\\nPG_ISOLATION:%s\\n' \"$?\"", marker: "\nPG_ISOLATION:0\n")
+      let batch = try await shellCheck(host, command: "psql -At -v ON_ERROR_STOP=1 -f demo.sql; printf '\\nPG_BATCH:%s\\n' \"$?\"", marker: "\nPG_BATCH:0\n")
+      guard batch.contains("Hello from PostgreSQL in Wasmer!"), batch.contains("PostgreSQL 18.4") else {
+        throw DemoError.failed("Missing PostgreSQL query results")
+      }
+      try await host.waitForPort(5432)
+      let before = text.count
+      try await host.writeTerminal(Data("psql -At\r".utf8))
+      try await waitFor("postgres=#", after: before)
+      guard previews.isEmpty else { throw DemoError.failed("PostgreSQL opened an HTTP preview") }
+      try await host.writeTerminal(Data("SELECT 1 / 0;\rSELECT 'PG_' || 'RECOVERED';\r".utf8))
+      try await waitFor("division by zero", after: before)
+      try await waitFor("PG_RECOVERED", after: before)
+      let beforeQuit = text.count
+      try await host.writeTerminal(Data("\\q\r".utf8))
+      try await waitFor("wasmer: $ ", after: beforeQuit)
+      try await host.waitForPort(5432)
+      let reconnect = try await shellCheck(host, command: "psql -Atc 'SELECT count(*) > 0 FROM notes'; printf '\\nPG_RECONNECT:%s\\n' \"$?\"", marker: "\nPG_RECONNECT:0\n")
+      guard reconnect.contains("\nt\n"), previews.isEmpty else { throw DemoError.failed("PostgreSQL reconnect failed") }
+      try await Task.sleep(for: .seconds(32))
+      try await host.waitForPort(5432)
+      let idle = try await shellCheck(host, command: "psql -Atc 'SELECT count(*) > 0 FROM notes'; printf '\\nPG_IDLE:%s\\n' \"$?\"", marker: "\nPG_IDLE:0\n")
+      guard idle.contains("\nt\n") else { throw DemoError.failed("PostgreSQL idle reconnect lost data") }
+      report["passed"] = true
+      status = "PostgreSQL server and psql tests passed"
+    } catch {
+      report["error"] = error.localizedDescription
+      status = "PostgreSQL test failed"
     }
     report["transcript"] = text
     writeReport(report)

@@ -60,6 +60,7 @@ interface ActiveSession {
   preview?: PreviewSession;
   listeningPorts: Set<number>;
   pendingPreviewPorts: Set<number>;
+  backgroundTasks: Promise<void>[];
 }
 
 interface PreviewSession {
@@ -91,6 +92,7 @@ interface WispAutoconfigureMessage {
 
 interface DevelopmentShellApi {
   send(data: string): Promise<void>;
+  waitForPort(port: number): Promise<void>;
   snapshot(): string;
   state(): string;
 }
@@ -163,6 +165,7 @@ showBrowserCompatibilityWarning();
 
 const params = new URLSearchParams(window.location.search);
 const selectedExample = examples.find(example => example.id === params.get("example"));
+const tcpPorts = new Set((selectedExample ? [selectedExample] : examples).flatMap(example => example.tcpPorts ?? []));
 const terminalUrl = new URL(window.location.href);
 const startsInTerminal = Boolean(selectedExample || params.get("example") === "shell" ||
   ["package", "command", "use", "arg"].some(key => params.has(key)));
@@ -353,6 +356,7 @@ if (import.meta.env.DEV) {
       await inputQueue;
     },
     snapshot: () => transcript,
+    waitForPort: async port => { await activeSession?.sandbox.ports.wait(port); },
     state: () => document.documentElement.dataset.state ?? "unknown",
   };
 }
@@ -457,11 +461,21 @@ async function start(): Promise<void> {
       sandbox,
       listeningPorts: new Set(),
       pendingPreviewPorts: new Set(),
+      backgroundTasks: [],
     };
     activeSession = session;
+    if (selectedExample?.server) {
+      const server = selectedExample.server;
+      session.backgroundTasks.push(runBackgroundServer(session, server.command, server.args).catch(error => {
+        if (activeSession === session) showTerminalError(error);
+      }));
+      await sandbox.ports.wait(server.port);
+      ensureCurrent(currentGeneration);
+    }
     elements.resume.hidden = false;
     session.stopWatchingPorts = sandbox.ports.onListen(
       (port) => {
+        if (tcpPorts.has(port)) return;
         session.listeningPorts.add(port);
         updateLiveHttpBadge(session);
         void openPreview(session, port).catch(showTerminalError);
@@ -643,6 +657,15 @@ async function closeActiveSession(): Promise<void> {
     }
   }
   await session.sandbox.close();
+  await Promise.all(session.backgroundTasks);
+}
+
+async function runBackgroundServer(session: ActiveSession, command: string, args: string[]): Promise<void> {
+  const server = await session.sandbox.command(command, args).spawn({ stdout: "capture", stderr: "capture" });
+  if (activeSession !== session) { await server.kill(); return; }
+  const output = await server.wait();
+  if (activeSession === session && !output.ok)
+    throw new Error(`Background server exited (${output.exitCode}): ${output.stderr.text()}`);
 }
 
 async function openPreview(session: ActiveSession, port: number): Promise<void> {

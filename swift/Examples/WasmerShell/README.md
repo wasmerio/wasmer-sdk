@@ -9,6 +9,24 @@ The header reuses wasmer.sh's Wasmer wordmark with an `.iOS` suffix. Controls,
 terminal colors, and the Bash prompt follow the web shell's theme; the welcome
 message uses the same format with iOS and Swift wording.
 
+## PostgreSQL
+
+Choose **PostgreSQL** under **Databases**. The SDK starts PGlite alongside Bash;
+run `psql`, then `\i demo.sql` to create a table and query it. Use `\q` to return
+to Bash. The shared startup script restarts the server after a clean disconnect, so you
+can run `psql` again against the same database. Port 5432 stays inside the virtual
+network and does not open a browser preview.
+
+Only Bash, PGlite, and psql are loaded. The database is stored in
+`/workspace/.postgres`: native and OPFS storage retain it across shell restarts,
+while memory storage starts fresh.
+See the [shared example README](../../../wasmer-sh/workspace/postgres/README.md).
+
+```sh
+python3 swift/Examples/WasmerShell/build.py run --example postgres
+python3 swift/Examples/WasmerShell/build.py test --example postgres --storage memory
+```
+
 ## Run
 
 Requires an Apple Silicon Mac, Xcode 27 with an iOS 27 simulator, Zig **0.16.0**,

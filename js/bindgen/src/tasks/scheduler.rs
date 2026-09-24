@@ -60,7 +60,7 @@ impl Scheduler {
                         if let Some(completion) = completion {
                             close_completions.push(completion);
                         }
-                        if !drain || scheduler.wasm_tasks_are_idle() {
+                        if !drain || scheduler.blocking_tasks_are_idle() {
                             break;
                         }
                         scheduler_diag(format!(
@@ -73,7 +73,7 @@ impl Scheduler {
                     if let Err(e) = scheduler.execute(msg) {
                         tracing::error!(error = &*e, "An error occurred while handling a message");
                     }
-                    if !close_completions.is_empty() && scheduler.wasm_tasks_are_idle() {
+                    if !close_completions.is_empty() && scheduler.blocking_tasks_are_idle() {
                         break;
                     }
                 }
@@ -636,8 +636,11 @@ impl SchedulerState {
         });
     }
 
-    fn wasm_tasks_are_idle(&self) -> bool {
-        self.wasm_workers.is_empty()
+    fn blocking_tasks_are_idle(&self) -> bool {
+        // Guest PIDs/TIDs can repeat across sandboxes sharing this pool. The
+        // process map can therefore be empty while another worker is still
+        // unwinding; wait for every blocking worker's Idle/Retired message.
+        self.busy.is_empty()
     }
 }
 

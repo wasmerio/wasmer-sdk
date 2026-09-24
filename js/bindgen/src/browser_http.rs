@@ -1,4 +1,4 @@
-//! An in-memory HTTP ingress network for browser sandboxes.
+//! An in-memory TCP network and HTTP ingress for browser sandboxes.
 //!
 //! A service worker cannot open a TCP connection to a WASIX process. This
 //! adapter presents HTTP requests as accepted TCP sockets instead: the guest
@@ -36,13 +36,49 @@ struct NetworkState {
     listeners: HashMap<SocketAddr, Weak<Mutex<ListenerState>>>,
     bound: HashSet<SocketAddr>,
     ip_addresses: Vec<IpCidr>,
+    peers: Option<Vec<Weak<Mutex<NetworkState>>>>,
+    closed: bool,
+    next_port: u16,
+}
+
+/// Only sandboxes owned by the same SDK client discover each other.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct BrowserNetworkGroup(Arc<Mutex<Vec<Weak<Mutex<NetworkState>>>>>);
+
+impl BrowserNetworkGroup {
+    pub(crate) fn create(&self, egress: Option<NodeNetworking>) -> BrowserHttpNetworking {
+        let state = Arc::new(Mutex::new(NetworkState {
+            next_port: 49_152,
+            ..NetworkState::default()
+        }));
+        let mut networks = self.0.lock().expect("browser network group poisoned");
+        networks.retain(|network| network.strong_count() > 0);
+        networks.push(Arc::downgrade(&state));
+        BrowserHttpNetworking {
+            state,
+            group: self.clone(),
+            egress,
+        }
+    }
+
+    pub(crate) fn close(&self) {
+        let networks = self
+            .0
+            .lock()
+            .expect("browser network group poisoned")
+            .clone();
+        for state in networks.into_iter().filter_map(|state| state.upgrade()) {
+            BrowserHttpRequestHandler { state }.close();
+        }
+    }
 }
 
 /// Virtual network installed into sandboxes configured with `network: http`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct BrowserHttpNetworking {
     state: Arc<Mutex<NetworkState>>,
     egress: Option<NodeNetworking>,
+    group: BrowserNetworkGroup,
 }
 
 /// Main-thread handle used by the service-worker transport.
@@ -52,8 +88,9 @@ pub(crate) struct BrowserHttpRequestHandler {
 }
 
 impl BrowserHttpNetworking {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
-        Self::default()
+        BrowserNetworkGroup::default().create(None)
     }
 
     pub(crate) fn request_handler(&self) -> BrowserHttpRequestHandler {
@@ -62,15 +99,131 @@ impl BrowserHttpNetworking {
         }
     }
 
-    pub(crate) fn with_egress(egress: NodeNetworking) -> Self {
-        Self {
-            state: Arc::default(),
-            egress: Some(egress),
+    fn connect_local(
+        &self,
+        mut local: SocketAddr,
+        peer: SocketAddr,
+    ) -> NetworkResult<virtual_net::tcp_pair::TcpSocketHalf> {
+        let (own_listener, peers) = {
+            let mut state = self.state.lock().expect("browser TCP network poisoned");
+            if state.closed {
+                return Err(NetworkError::ConnectionRefused);
+            }
+            if local.port() == 0 {
+                local.set_port(state.next_port);
+                state.next_port = if state.next_port == u16::MAX {
+                    49_152
+                } else {
+                    state.next_port + 1
+                };
+            }
+            if local.ip().is_unspecified() {
+                local.set_ip(if peer.is_ipv4() {
+                    Ipv4Addr::LOCALHOST.into()
+                } else {
+                    Ipv6Addr::LOCALHOST.into()
+                });
+            }
+            (
+                state.listeners.get(&peer).and_then(Weak::upgrade),
+                state.peers.clone(),
+            )
+        };
+        let listener = if let Some(listener) = own_listener {
+            listener
+        } else {
+            let explicit = peers.is_some();
+            let peers = peers.unwrap_or_else(|| {
+                self.group
+                    .0
+                    .lock()
+                    .expect("browser network group poisoned")
+                    .clone()
+            });
+            let mut found = None;
+            for state in peers.into_iter().filter_map(|state| state.upgrade()) {
+                if Arc::ptr_eq(&state, &self.state) {
+                    continue;
+                }
+                let state = state.lock().expect("browser TCP network poisoned");
+                if state.closed || (!explicit && state.peers.is_some()) {
+                    continue;
+                }
+                if let Some(listener) = state.listeners.get(&peer).and_then(Weak::upgrade) {
+                    // Never choose an arbitrary database when two peers use the same port.
+                    if found.is_some() {
+                        return Err(NetworkError::AddressInUse);
+                    }
+                    found = Some(listener);
+                }
+            }
+            found.ok_or(NetworkError::ConnectionRefused)?
+        };
+        let (client, server) =
+            virtual_net::tcp_pair::TcpSocketHalf::channel(256 * 1024, local, peer);
+        BrowserHttpListener {
+            state: listener,
+            local_addr: peer,
         }
+        .push(Box::new(server), local)?;
+        Ok(client)
     }
 }
 
 impl BrowserHttpRequestHandler {
+    pub(crate) fn restrict_peers(&self) -> NetworkResult<()> {
+        let mut state = self.state.lock().expect("browser TCP network poisoned");
+        if state.closed {
+            return Err(NetworkError::NotConnected);
+        }
+        state.peers = Some(Vec::new());
+        Ok(())
+    }
+
+    pub(crate) fn add_peer(&self, peer: &Self) -> NetworkResult<()> {
+        if peer
+            .state
+            .lock()
+            .expect("browser TCP network poisoned")
+            .closed
+        {
+            return Err(NetworkError::NotConnected);
+        }
+        self.state
+            .lock()
+            .expect("browser TCP network poisoned")
+            .peers
+            .get_or_insert_with(Vec::new)
+            .push(Arc::downgrade(&peer.state));
+        Ok(())
+    }
+
+    pub(crate) fn close(&self) {
+        let mut state = self.state.lock().expect("browser TCP network poisoned");
+        state.closed = true;
+        let listeners: Vec<_> = state
+            .listeners
+            .drain()
+            .filter_map(|(_, listener)| listener.upgrade())
+            .collect();
+        state.bound.clear();
+        state.peers = Some(Vec::new());
+        drop(state);
+        // Closing a sandbox must also release guests waiting in accept().
+        for listener in listeners {
+            let mut listener = listener.lock().expect("browser HTTP listener poisoned");
+            listener.closed = true;
+            listener.backlog.clear();
+            if let Some(handler) = listener.handler.as_mut() {
+                handler.push_interest(InterestType::Readable);
+                handler.push_interest(InterestType::Closed);
+            }
+            for waiter in listener.wakers.drain(..) {
+                waiter.wake();
+            }
+        }
+    }
+
     pub(crate) fn has_listener(&self, port: u16) -> bool {
         let mut state = match self.state.try_lock() {
             Ok(state) => state,
@@ -122,7 +275,7 @@ impl BrowserHttpRequestHandler {
             state: listener,
             local_addr: address,
         }
-        .push(Box::new(guest), peer);
+        .push(Box::new(guest), peer)?;
         Ok(host)
     }
 
@@ -162,7 +315,7 @@ impl BrowserHttpRequestHandler {
                     },
                 )),
                 peer_addr,
-            );
+            )?;
             receiver
         };
 
@@ -233,6 +386,9 @@ impl VirtualNetworking for BrowserHttpNetworking {
         let address = normalize_listener_address(address);
         let listener = BrowserHttpListener::new(address);
         let mut state = self.state.lock().expect("browser HTTP network poisoned");
+        if state.closed {
+            return Err(NetworkError::NotConnected);
+        }
         if state.bound.contains(&address)
             || state
                 .listeners
@@ -256,6 +412,9 @@ impl VirtualNetworking for BrowserHttpNetworking {
     ) -> NetworkResult<Box<dyn VirtualTcpBoundSocket + Sync>> {
         let address = normalize_listener_address(address);
         let mut state = self.state.lock().expect("browser HTTP network poisoned");
+        if state.closed {
+            return Err(NetworkError::NotConnected);
+        }
         if state.bound.contains(&address)
             || state
                 .listeners
@@ -278,6 +437,12 @@ impl VirtualNetworking for BrowserHttpNetworking {
         local: SocketAddr,
         peer: SocketAddr,
     ) -> NetworkResult<Box<dyn VirtualTcpSocket + Sync>> {
+        if peer.ip().is_loopback() {
+            // Missing localhost routes must never escape to WISP or the host.
+            return self
+                .connect_local(local, peer)
+                .map(|socket| Box::new(socket) as _);
+        }
         let egress = self.egress.as_ref().ok_or(NetworkError::Unsupported)?;
         egress.connect_tcp(local, peer).await
     }
@@ -288,6 +453,12 @@ impl VirtualNetworking for BrowserHttpNetworking {
         port: Option<u16>,
         dns_server: Option<IpAddr>,
     ) -> NetworkResult<Vec<IpAddr>> {
+        if host.trim_end_matches('.').eq_ignore_ascii_case("localhost") {
+            return Ok(vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()]);
+        }
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            return Ok(vec![ip]);
+        }
         let egress = self.egress.as_ref().ok_or(NetworkError::Unsupported)?;
         egress.resolve(host, port, dns_server).await
     }
@@ -307,6 +478,7 @@ fn normalize_listener_address(address: SocketAddr) -> SocketAddr {
 
 #[derive(Debug, Default)]
 struct ListenerState {
+    closed: bool,
     backlog: VecDeque<(Box<dyn VirtualTcpSocket + Sync>, SocketAddr)>,
     handler: Option<Box<dyn InterestHandler + Send + Sync>>,
     wakers: Vec<Waker>,
@@ -371,8 +543,16 @@ impl VirtualTcpBoundSocket for BrowserHttpBoundSocket {
         Ok(Box::new(listener))
     }
 
-    fn connect(&mut self, _peer: SocketAddr) -> NetworkResult<Box<dyn VirtualTcpSocket + Sync>> {
-        Err(NetworkError::Unsupported)
+    fn connect(&mut self, peer: SocketAddr) -> NetworkResult<Box<dyn VirtualTcpSocket + Sync>> {
+        if !self.reserved {
+            return Err(NetworkError::InvalidFd);
+        }
+        if !peer.ip().is_loopback() {
+            return Err(NetworkError::Unsupported);
+        }
+        let socket = self.networking.connect_local(self.address, peer)?;
+        self.release();
+        Ok(Box::new(socket))
     }
 
     fn set_ttl(&mut self, ttl: u32) -> NetworkResult<()> {
@@ -393,8 +573,15 @@ impl BrowserHttpListener {
         }
     }
 
-    fn push(&mut self, socket: Box<dyn VirtualTcpSocket + Sync>, peer: SocketAddr) {
+    fn push(
+        &mut self,
+        socket: Box<dyn VirtualTcpSocket + Sync>,
+        peer: SocketAddr,
+    ) -> NetworkResult<()> {
         let mut state = self.state.lock().expect("browser HTTP listener poisoned");
+        if state.closed {
+            return Err(NetworkError::ConnectionRefused);
+        }
         state.backlog.push_back((socket, peer));
         if let Some(handler) = state.handler.as_mut() {
             handler.push_interest(InterestType::Readable);
@@ -402,6 +589,7 @@ impl BrowserHttpListener {
         for waiter in state.wakers.drain(..) {
             waiter.wake();
         }
+        Ok(())
     }
 }
 
@@ -416,6 +604,9 @@ impl VirtualIoSource for BrowserHttpListener {
 
     fn poll_read_ready(&mut self, context: &mut Context<'_>) -> Poll<NetworkResult<usize>> {
         let mut state = self.state.lock().expect("browser HTTP listener poisoned");
+        if state.closed {
+            return Poll::Ready(Err(NetworkError::ConnectionAborted));
+        }
         if !state.backlog.is_empty() {
             return Poll::Ready(Ok(state.backlog.len()));
         }
@@ -436,12 +627,11 @@ impl VirtualIoSource for BrowserHttpListener {
 
 impl VirtualTcpListener for BrowserHttpListener {
     fn try_accept(&mut self) -> NetworkResult<(Box<dyn VirtualTcpSocket + Sync>, SocketAddr)> {
-        self.state
-            .lock()
-            .expect("browser HTTP listener poisoned")
-            .backlog
-            .pop_front()
-            .ok_or(NetworkError::WouldBlock)
+        let mut state = self.state.lock().expect("browser HTTP listener poisoned");
+        if state.closed {
+            return Err(NetworkError::ConnectionAborted);
+        }
+        state.backlog.pop_front().ok_or(NetworkError::WouldBlock)
     }
 
     fn set_handler(
@@ -449,8 +639,11 @@ impl VirtualTcpListener for BrowserHttpListener {
         mut handler: Box<dyn InterestHandler + Send + Sync>,
     ) -> NetworkResult<()> {
         let mut state = self.state.lock().expect("browser HTTP listener poisoned");
-        if !state.backlog.is_empty() {
+        if state.closed || !state.backlog.is_empty() {
             handler.push_interest(InterestType::Readable);
+        }
+        if state.closed {
+            handler.push_interest(InterestType::Closed);
         }
         state.handler = Some(handler);
         Ok(())
@@ -885,6 +1078,117 @@ mod tests {
     use std::{mem::MaybeUninit, task::Waker};
 
     use super::*;
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn shared_loopback_preserves_addresses_and_half_close() {
+        for ip in [Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()] {
+            let group = BrowserNetworkGroup::default();
+            let server = group.create(None);
+            let client = group.create(None);
+            let address = SocketAddr::new(ip, 5432);
+            let mut listener = server
+                .listen_tcp(address, false, false, false)
+                .await
+                .unwrap();
+            let mut socket = client
+                .connect_tcp(SocketAddr::new(ip, 0), address)
+                .await
+                .unwrap();
+            let (mut accepted, peer) = listener.try_accept().unwrap();
+            assert_eq!(socket.addr_peer().unwrap(), address);
+            assert_eq!(socket.addr_local().unwrap(), peer);
+            assert_ne!(peer.port(), 0);
+            socket.try_send(b"hello").unwrap();
+            socket.shutdown(Shutdown::Write).unwrap();
+            let mut bytes = [MaybeUninit::uninit(); 8];
+            assert_eq!(accepted.try_recv(&mut bytes, false).unwrap(), 5);
+            assert_eq!(accepted.try_recv(&mut bytes, false).unwrap(), 0);
+            assert_eq!(accepted.try_send(b"reply").unwrap(), 5);
+            assert_eq!(socket.try_recv(&mut bytes, false).unwrap(), 5);
+            drop(listener);
+            assert!(matches!(
+                client.connect_tcp(SocketAddr::new(ip, 0), address).await,
+                Err(NetworkError::ConnectionRefused)
+            ));
+        }
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn bound_sockets_can_connect_locally_and_release_their_reservation() {
+        let network = BrowserHttpNetworking::new();
+        let address = "127.0.0.1:5432".parse().unwrap();
+        let source = "127.0.0.1:49152".parse().unwrap();
+        let mut listener = network
+            .listen_tcp(address, false, false, false)
+            .await
+            .unwrap();
+        let mut bound = network.bind_tcp(source, false, false, false).await.unwrap();
+        let socket = bound.connect(address).unwrap();
+        assert_eq!(socket.addr_local().unwrap(), source);
+        assert_eq!(listener.try_accept().unwrap().1, source);
+        assert!(network.bind_tcp(source, false, false, false).await.is_ok());
+        network.request_handler().close();
+        assert!(
+            network
+                .listen_tcp(address, false, false, false)
+                .await
+                .is_err()
+        );
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn closing_network_wakes_pending_accept() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct WakeCount(AtomicUsize);
+        impl std::task::Wake for WakeCount {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let network = BrowserHttpNetworking::new();
+        let mut listener = network
+            .listen_tcp("127.0.0.1:5432".parse().unwrap(), false, false, false)
+            .await
+            .unwrap();
+        let wakes = Arc::new(WakeCount(AtomicUsize::new(0)));
+        let waker = Waker::from(wakes.clone());
+        let mut context = Context::from_waker(&waker);
+        assert!(listener.poll_read_ready(&mut context).is_pending());
+        listener
+            .set_handler(virtual_mio::WakerInterestHandler::new(&waker))
+            .unwrap();
+
+        network.request_handler().close();
+        // Both readiness mechanisms must wake, then report closure rather
+        // than putting the guest back to sleep with WouldBlock.
+        assert!(wakes.0.load(Ordering::SeqCst) >= 2);
+        assert!(matches!(
+            listener.poll_read_ready(&mut context),
+            Poll::Ready(Err(NetworkError::ConnectionAborted))
+        ));
+        assert!(matches!(
+            listener.try_accept(),
+            Err(NetworkError::ConnectionAborted)
+        ));
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn localhost_dns_does_not_need_an_egress_provider() {
+        let network = BrowserHttpNetworking::new();
+        let expected: Vec<IpAddr> = vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()];
+        assert_eq!(
+            network.resolve("LOCALHOST.", None, None).await.unwrap(),
+            expected
+        );
+        assert_eq!(
+            network.resolve("::1", None, None).await.unwrap(),
+            vec![IpAddr::V6(Ipv6Addr::LOCALHOST)]
+        );
+        assert!(matches!(
+            network.resolve("example.com", None, None).await,
+            Err(NetworkError::Unsupported)
+        ));
+    }
 
     #[test]
     fn listener_observers_never_block_on_network_mutation() {

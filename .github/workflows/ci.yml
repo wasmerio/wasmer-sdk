@@ -247,6 +247,14 @@ jobs:
         working-directory: js
         run: npm run test:browser
 
+      - name: Test PostgreSQL shell example with the built SDK
+        working-directory: wasmer-sh
+        run: |
+          npm ci
+          npm install --no-save --package-lock=false ../js
+          npx playwright install --with-deps chromium
+          WASMER_EXAMPLE=postgres npm run test:examples
+
   python:
     name: Python
     needs: rust

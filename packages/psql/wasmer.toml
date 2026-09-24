@@ -1,0 +1,22 @@
+[package]
+name = "wasmer/psql"
+version = "18.4.0"
+description = "PostgreSQL 18.4 command-line client for WASIX"
+license = "PostgreSQL"
+readme = "README.md"
+repository = "https://github.com/wasmerio/wasmer-sdk"
+entrypoint = "psql"
+
+[[module]]
+name = "psql"
+source = "psql.wasm"
+abi = "wasi"
+
+[[command]]
+name = "psql"
+module = "psql"
+runner = "wasi"
+
+[command.annotations.wasi]
+exec-name = "/bin/psql"
+env = ["PGHOST=localhost", "PGUSER=postgres", "PGDATABASE=postgres", "PGSSLMODE=disable", "PGCONNECT_TIMEOUT=10", "PSQL_PAGER="]

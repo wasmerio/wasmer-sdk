@@ -96,6 +96,20 @@
     "run": "python server.py"
   },
   {
+    "id": "postgres",
+    "source": "postgres",
+    "title": "PostgreSQL",
+    "group": "Databases",
+    "description": "Run PostgreSQL locally and query it with psql.",
+    "icon": "postgresql.svg",
+    "dependencies": "PGlite · psql",
+    "packages": ["wasmer/pglite@=0.1.3", "wasmer/psql@=18.4.0"],
+    "tcpPorts": [5432],
+    "server": { "command": "bash", "args": ["start-postgres.sh"], "port": 5432 },
+    "install": null,
+    "run": "psql"
+  },
+  {
     "id": "clang",
     "source": "clang",
     "title": "Clang / C",

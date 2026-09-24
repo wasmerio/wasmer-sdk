@@ -128,7 +128,7 @@ final class TerminalSession: ObservableObject {
     guard arguments.contains("--smoke-test") || arguments.contains("--stress-test") ||
           arguments.contains(where: { $0.hasPrefix("--example-") }) else { return }
     showingExamples = false
-    let focusedTemplateTest = ["node-richards", "clang"].contains { arguments.contains("--example-" + $0) }
+    let focusedTemplateTest = ["node-richards", "clang", "postgres"].contains { arguments.contains("--example-" + $0) }
     if focusedTemplateTest || (!arguments.contains("--smoke-test") && !arguments.contains("--stress-test")) {
       selectedExample = ShellExample.all.first { arguments.contains("--example-" + $0.id) }
     }
@@ -222,7 +222,7 @@ final class TerminalSession: ObservableObject {
       #if WASMER_SHELL_TESTS
       if startIntegrationTests(host) { return }
       #endif
-      if let name = ["node", "node-next", "node-richards", "clang", "python"].first(where: { ProcessInfo.processInfo.arguments.contains("--example-" + $0) }) {
+      if let name = ["node", "node-next", "node-richards", "clang", "python", "postgres"].first(where: { ProcessInfo.processInfo.arguments.contains("--example-" + $0) }) {
         Task {
           do { try await waitFor("➜ ~ $ "); runExample(name) }
           catch { status = error.localizedDescription }
@@ -288,6 +288,8 @@ final class TerminalSession: ObservableObject {
   }
 
   private func updatePorts(_ ports: [UInt16], host: ShellRuntime) {
+    let tcpPorts = Set((selectedExample.map { [$0] } ?? ShellExample.all).flatMap { $0.tcpPorts ?? [] })
+    let ports = ports.filter { !tcpPorts.contains($0) }
     listeningPorts = Set(ports)
     for preview in previews where !listeningPorts.contains(preview.port) {
       if presentedPreview?.id == preview.id { presentedPreview = nil }
