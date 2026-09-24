@@ -4,7 +4,7 @@ A fast, browser-native command shell powered by Wasmer, WASIX, and the new
 [`@wasmer/sdk`](https://www.npmjs.com/package/@wasmer/sdk) sandbox API.
 
 The opening screen offers Node.js, Express, Next.js, Richards.js, Python HTTP, Flask, Django,
-FastAPI, Clang / C, FFmpeg, and yt-dlp templates. Selecting a template opens Bash at
+FastAPI, PostgreSQL, Clang / C, FFmpeg, and yt-dlp templates. Selecting a template opens Bash at
 `/workspace`, with that example's source files directly in the root and only its
 required runtime packages. The terminal shows the install and run commands;
 nothing is installed automatically. Python dependencies are isolated in each
@@ -15,6 +15,25 @@ Use **Examples** to browse templates and **Resume terminal** to return without
 interrupting the current session. Selecting another template opens a fresh
 workspace. A template can also be linked directly, for example `?example=node-next`.
 The catalog in `examples.json` is shared with the native Swift WasmerShell app.
+
+Choose **PostgreSQL** under **Databases** (`?example=postgres`) to run PGlite and
+psql together. The SDK starts the database alongside the shell; run `psql`,
+then `\i demo.sql` at the `postgres=#` prompt. Quit with `\q` and run `psql`
+again to reconnect. The database uses virtual localhost without Wisp or an
+HTTP preview. See the [example README](workspace/postgres/README.md).
+
+Before the virtual-network SDK changes are released to npm, test this example
+from `wasmer-sh/` using the SDK built from the same checkout:
+
+```sh
+npm --prefix ../js run build
+npm install --no-save --package-lock=false ../js
+WASMER_EXAMPLE=postgres npm run test:examples
+npm run dev
+```
+
+The published SDK dependency must include those changes before deploying the
+PostgreSQL example in production.
 
 Choose **Richards.js** (`?example=node-richards`) to compare JavaScript CPU speed.
 Run `node richards.js` for a warm-up and five timed samples, or

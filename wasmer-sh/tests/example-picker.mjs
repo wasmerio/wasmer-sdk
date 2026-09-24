@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { chromium, firefox, webkit } from "playwright";
 import { createServer } from "vite";
 import { server as wisp } from "@mercuryworkshop/wisp-js/server";
 
@@ -11,9 +11,11 @@ const catalog = JSON.parse(
   await readFile(new URL("../examples.json", import.meta.url)),
 );
 const proxy = http.createServer();
-proxy.on("upgrade", (request, socket, head) =>
-  wisp.routeRequest(request, socket, head),
-);
+let proxyConnections = 0;
+proxy.on("upgrade", (request, socket, head) => {
+  proxyConnections++;
+  wisp.routeRequest(request, socket, head);
+});
 let app, host, browser, page, monitor;
 const diagnostics = [];
 let commandNumber = 0;
@@ -61,7 +63,9 @@ try {
     server: { host: "127.0.0.1", port: 0, watch: null, hmr: false },
   });
   await app.listen();
-  browser = await chromium.launch({ headless: true });
+  const browserType = { chromium, firefox, webkit }[process.env.WASMER_BROWSER ?? "chromium"];
+  assert(browserType, "WASMER_BROWSER must be chromium, firefox, or webkit");
+  browser = await browserType.launch({ headless: true });
   page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
   page.on("pageerror", (error) => diagnostics.push(error.stack));
   page.on("console", (message) => {
@@ -95,7 +99,7 @@ try {
   for (const path of [
     "node/server.js", "python/server.py", "python-django/manage.py",
     "python-django/mysite/settings.py", "next/pages/index.js", "yt-dlp/yt-dlp.conf",
-    "node-richards/richards.js", "clang/hello.c",
+    "node-richards/richards.js", "clang/hello.c", "postgres/demo.sql",
   ])
     assert(fullShellPaths.includes(path), `Missing full-shell source: ${path}`);
   assert.equal(
@@ -125,7 +129,7 @@ try {
     ),
     true,
   );
-  for (const id of ["clang", "ffmpeg", "yt-dlp"]) {
+  for (const id of ["postgres", "clang", "ffmpeg", "yt-dlp"]) {
     const tool = page.locator(`[data-example="${id}"]`);
     await tool.scrollIntoViewIfNeeded();
     assert.equal(await tool.isVisible(), true);
@@ -172,6 +176,8 @@ try {
       await command(
         "command -v node && ! command -v python && ! command -v php && ! command -v ffmpeg",
       );
+    else if (example.id === "postgres")
+      await command("command -v pglite && command -v psql && ! command -v node && ! command -v python && ! command -v ffmpeg");
     else if (example.id === "clang")
       await command(
         "command -v clang && ! command -v node && ! command -v python && ! command -v ffmpeg",
@@ -235,6 +241,28 @@ try {
           "python -c \"from pathlib import Path; files = list(Path('downloads').glob('*.mp4')); assert files and all(p.stat().st_size > 0 for p in files)\"",
         );
       }
+    } else if (example.id === "postgres") {
+      const connections = proxyConnections;
+      const batch = await command("psql -At -v ON_ERROR_STOP=1 -f demo.sql");
+      assert(batch.includes("Hello from PostgreSQL in Wasmer!"));
+      assert(batch.includes("PostgreSQL 18.4"));
+      await page.evaluate(() => window.__wasmerShell.waitForPort(5432));
+      await page.evaluate(() => window.__wasmerShell.send("psql -At\r"));
+      await page.waitForFunction(() => window.__wasmerShell.snapshot().includes("postgres=#"));
+      assert.equal(await page.locator("#preview-panel").isVisible(), false);
+      await page.evaluate(() => window.__wasmerShell.send("SELECT 1 / 0;\rSELECT 'PG_' || 'RECOVERED';\r"));
+      await page.waitForFunction(() => window.__wasmerShell.snapshot().includes("PG_RECOVERED"));
+      const beforeQuit = await page.evaluate(() => window.__wasmerShell.snapshot().length);
+      await page.evaluate(() => window.__wasmerShell.send("\\q\r"));
+      await waitForPrompt(beforeQuit);
+      await page.evaluate(() => window.__wasmerShell.waitForPort(5432));
+      assert((await command("psql -Atc 'SELECT count(*) AS saved_notes FROM notes'")).includes("\n1\n"));
+      // A server with no client reaches WASIX's accept timeout after 30 seconds.
+      await new Promise(resolve => setTimeout(resolve, 32_000));
+      await page.evaluate(() => window.__wasmerShell.waitForPort(5432));
+      assert((await command("psql -Atc 'SELECT count(*) FROM notes'")).includes("\n1\n"));
+      assert.equal(await page.locator("#preview-panel").isVisible(), false);
+      assert.equal(proxyConnections, connections, "PostgreSQL must not connect to Wisp");
     } else if (example.id === "node-richards") {
       const output = await command(example.run);
       assert(output.includes("1000 iterations/sample; 5 samples;"));

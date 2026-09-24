@@ -12,6 +12,7 @@ final class ShellRuntime {
   private var process: WasmerSDK.Process?
   private var outputTask: Task<Void, Never>?
   private var portTask: Task<Void, Never>?
+  private var backgroundTasks: [Task<Void, Never>] = []
   var onProgress: ((String) -> Void)?
   var onPackageProgress: ((PackageLoadProgress) -> Void)?
   var onPackagesLoaded: (([String]) -> Void)?
@@ -89,6 +90,15 @@ final class ShellRuntime {
       return sandbox.fs
     }
   }
+  func waitForPort(_ port: UInt16) async throws {
+    guard let sandbox else { throw DemoError.failed("Shell is closed") }
+    let deadline = ContinuousClock.now + .seconds(30)
+    // PGlite accepts one connection: observe, never connect to probe readiness.
+    while !(try await sandbox.ports.listening() ?? []).contains(port) {
+      guard ContinuousClock.now < deadline else { throw DemoError.failed("Timed out waiting for port \(port)") }
+      try await Task.sleep(for: .milliseconds(25))
+    }
+  }
   func seedExamples(_ name: String? = nil, at destination: String = ".") async throws {
     let root = Bundle.main.resourceURL!.appendingPathComponent("Examples")
     let source = name.map { root.appendingPathComponent($0) } ?? root
@@ -111,6 +121,27 @@ final class ShellRuntime {
 
   func startTerminal(columns: Int, rows: Int) async throws {
     guard let sandbox, let shell else { throw DemoError.failed("Shell is not initialized") }
+    // This app owns the example's storage and closes the previous runtime before
+    // reopening it. A PID left by an interrupted app belongs to that old runtime.
+    if example?.id == "postgres",
+       (try? await sandbox.fs.readDir(".postgres"))?.contains(where: { $0.name == "postmaster.pid" }) == true {
+      try await sandbox.fs.remove(".postgres/postmaster.pid")
+    }
+    if let server = example?.server {
+      let process = try await sandbox.command(server.command, server.args, cwd: "/workspace")
+        .spawn(stdout: .capture, stderr: .capture)
+      backgroundTasks.append(Task { [weak self] in
+        do {
+          let output = try await process.wait()
+          if !Task.isCancelled && !output.ok {
+            throw DemoError.failed("Background server exited (\(output.exitCode)): \(String(decoding: output.stderr, as: UTF8.self))")
+          }
+        } catch {
+          if !Task.isCancelled { self?.onTerminalFailure?(error) }
+        }
+      })
+      try await waitForPort(server.port)
+    }
     let process = try await sandbox.command(
       shell,
       ["--noprofile", "--norc", "-c", "exec bash --noprofile --norc -i 2>&1"], cwd: "/workspace",
@@ -166,12 +197,15 @@ final class ShellRuntime {
     return try await sandbox.ports.expose(port)
   }
   func close() async {
+    backgroundTasks.forEach { $0.cancel() }
     portTask?.cancel()
     process?.kill()
     // The entire client belongs to this terminal. Closing its transport releases
     // pending reads/writes even if the guest or its worker has stopped responding.
     // Waiting for a sandbox RPC first would also hang the Restart button.
     try? await client.close()
+    for task in backgroundTasks { await task.value }
+    backgroundTasks.removeAll()
     await outputTask?.value
     process = nil
     sandbox = nil

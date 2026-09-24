@@ -11,6 +11,13 @@ struct ShellExample: Decodable, Identifiable, Sendable {
   let icon: String
   let dependencies: String
   let packages: [String]
+  let tcpPorts: [UInt16]?
+  let server: Server?
+  struct Server: Decodable, Sendable {
+    let command: String
+    let args: [String]
+    let port: UInt16
+  }
   let env: [String: String]?
   let install: String?
   let run: String
@@ -47,7 +54,7 @@ struct ExamplePicker: View {
               .padding(.top, 6)
           }
         }
-        ForEach(["Node.js", "Python", "Tools"], id: \.self) { group in
+        ForEach(["Node.js", "Python", "Databases", "Tools"], id: \.self) { group in
           VStack(alignment: .leading, spacing: 12) {
             Text(group.uppercased()).font(.caption.weight(.semibold)).tracking(1)
               .foregroundStyle(ShellTheme.muted).accessibilityAddTraits(.isHeader)
