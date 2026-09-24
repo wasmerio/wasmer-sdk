@@ -53,6 +53,8 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - uses: mlugg/setup-zig@v2
         with:
           version: '0.16.0'
