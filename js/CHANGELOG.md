@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.17.0...wasmer-sdk-js-v0.18.0) (2026-09-24)
+
+
+### Features
+
+* **js:** connect browser sandboxes over local TCP and run PostgreSQL ([#530](https://github.com/wasmerio/wasmer-sdk/issues/530)) ([2478d31](https://github.com/wasmerio/wasmer-sdk/commit/2478d3175abe0dd2827be0901ebd80a0a8812050))
+
 ## [0.17.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.16.0...wasmer-sdk-js-v0.17.0) (2026-09-24)
 
 
