@@ -30,7 +30,8 @@ async function command(input, timeout = 120_000) {
   );
   const output = await page.evaluate(() => window.__wasmerShell.snapshot());
   assert(output.includes(`__EXAMPLE_${number}__:0`), output.slice(-5000));
-  await waitForPrompt(output.indexOf(`__EXAMPLE_${number}__:0`));
+  // Bash writes its prompt to stderr, which can arrive before stdout. The
+  // stdout completion marker is enough to submit the next command safely.
   return output;
 }
 async function waitForPrompt(after) {
@@ -179,6 +180,7 @@ try {
       undefined,
       { timeout: 180_000 },
     );
+    await waitForPrompt(0);
     await command(
       `test "$PWD" = /workspace && test -f README.md && test ! -d node_modules && test ! -d .python-packages && test ! -d /workspace/${example.source} && test ! -e .picker-example && test "$PIP_TARGET" = /workspace/.python-packages && test "$PYTHONPATH" = /workspace/.python-packages`,
     );
