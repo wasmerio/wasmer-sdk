@@ -4,19 +4,16 @@ import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { chromium, firefox, webkit } from "playwright";
 import { createServer } from "vite";
-import { server as wisp } from "@mercuryworkshop/wisp-js/server";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const catalog = JSON.parse(
   await readFile(new URL("../examples.json", import.meta.url)),
 );
-const proxy = http.createServer();
+const selectedExamples = catalog.filter(
+  (example) => !process.env.WASMER_EXAMPLE || process.env.WASMER_EXAMPLE.split(",").includes(example.id),
+);
 let proxyConnections = 0;
-proxy.on("upgrade", (request, socket, head) => {
-  proxyConnections++;
-  wisp.routeRequest(request, socket, head);
-});
-let app, host, browser, page, monitor;
+let proxy, app, host, browser, page, monitor;
 const diagnostics = [];
 let commandNumber = 0;
 async function command(input, timeout = 120_000) {
@@ -48,7 +45,18 @@ async function waitForPrompt(after) {
   );
 }
 try {
-  await new Promise((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  // PostgreSQL needs only virtual localhost. Other examples install packages
+  // through Wisp; do not start that proxy for the standalone PostgreSQL check.
+  if (selectedExamples.some(example => example.id !== "postgres")) {
+    const { server: wisp } = await import("@mercuryworkshop/wisp-js/server");
+    proxy = http.createServer();
+    proxy.on("upgrade", (request, socket, head) => {
+      proxyConnections++;
+      wisp.routeRequest(request, socket, head);
+    });
+    await new Promise((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  }
+  process.env.VITE_WISP_URL = "";
   host = await createServer({
     configFile: `${root}/service-worker/vite.config.ts`,
     logLevel: "warn",
@@ -77,7 +85,7 @@ try {
     )
       diagnostics.push(message.text());
   });
-  const url = `http://127.0.0.1:${app.httpServer.address().port}/?wisp=ws://127.0.0.1:${proxy.address().port}/`;
+  const url = `http://127.0.0.1:${app.httpServer.address().port}/`;
   const packages = [];
   page.on("request", (request) => {
     if (
@@ -153,13 +161,16 @@ try {
       );
     }
   }, 30_000);
-  for (const example of catalog.filter(
-    (example) =>
-      !process.env.WASMER_EXAMPLE ||
-      process.env.WASMER_EXAMPLE.split(",").includes(example.id),
-  )) {
+  for (const example of selectedExamples) {
     console.log(`START ${example.id}`);
-    await page.goto(url);
+    const connections = proxyConnections;
+    const exampleUrl = new URL(url);
+    if (example.id === "postgres") {
+      await page.evaluate(() => localStorage.removeItem("wasmer.sh:wisp-url"));
+    } else {
+      exampleUrl.searchParams.set("wisp", `ws://127.0.0.1:${proxy.address().port}/`);
+    }
+    await page.goto(exampleUrl.href);
     const link = page.locator(`[data-example="${example.id}"]`);
     await link.focus();
     await page.keyboard.press("Enter");
@@ -242,7 +253,8 @@ try {
         );
       }
     } else if (example.id === "postgres") {
-      const connections = proxyConnections;
+      assert.equal(new URL(page.url()).searchParams.has("wisp"), false);
+      assert.equal(await page.locator("#wisp-dialog").isVisible(), false);
       const batch = await command("psql -At -v ON_ERROR_STOP=1 -f demo.sql");
       assert(batch.includes("Hello from PostgreSQL in Wasmer!"));
       assert(batch.includes("PostgreSQL 18.4"));
@@ -263,6 +275,7 @@ try {
       assert((await command("psql -Atc 'SELECT count(*) FROM notes'")).includes("\n1\n"));
       assert.equal(await page.locator("#preview-panel").isVisible(), false);
       assert.equal(proxyConnections, connections, "PostgreSQL must not connect to Wisp");
+      assert.equal(await page.locator("#wisp-dialog").isVisible(), false);
     } else if (example.id === "node-richards") {
       const output = await command(example.run);
       assert(output.includes("1000 iterations/sample; 5 samples;"));
@@ -411,5 +424,5 @@ try {
   await browser?.close();
   await app?.close();
   await host?.close();
-  await new Promise((resolve) => proxy.close(resolve));
+  if (proxy) await new Promise((resolve) => proxy.close(resolve));
 }

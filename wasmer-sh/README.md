@@ -32,6 +32,7 @@ WASMER_EXAMPLE=postgres npm run test:examples
 npm run dev
 ```
 
+The PostgreSQL check runs without a Wisp server or configured endpoint.
 The published SDK dependency must include those changes before deploying the
 PostgreSQL example in production.
 
