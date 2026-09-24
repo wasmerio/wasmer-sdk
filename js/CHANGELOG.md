@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.16.0...wasmer-sdk-js-v0.17.0) (2026-09-24)
+
+
+### Features
+
+* **swift:** run PostgreSQL on iOS with a native Swift client ([#526](https://github.com/wasmerio/wasmer-sdk/issues/526)) ([654f71e](https://github.com/wasmerio/wasmer-sdk/commit/654f71e388fc35870440dc96b4cc9f5b2d5ba9f8))
+
 ## [0.16.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.15.0...wasmer-sdk-js-v0.16.0) (2026-09-23)
 
 
