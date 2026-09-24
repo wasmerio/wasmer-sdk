@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@wasmer/sdk':
-        specifier: 0.17.0
-        version: 0.17.0
+        specifier: 0.18.0
+        version: 0.18.0
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -168,8 +168,8 @@ packages:
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
-  '@wasmer/sdk@0.17.0':
-    resolution: {integrity: sha512-rSCqMxGykqwmtalDGabrrCGOQjX4dYDzs8iYIPi9WC/YBAOh0FW78IT2AWzpdmq4TrO9hOBaor/OzJYP4awoJw==}
+  '@wasmer/sdk@0.18.0':
+    resolution: {integrity: sha512-umeaf9asTL5xS6Sp6D3tDiO4v/B3Z7gLsLWra0BDKkThX0+XTZWhb5nl77sqlfTUjTSxOLpBN7xQivNSsBLQBQ==}
     engines: {node: '>=20'}
 
   '@xterm/addon-fit@0.11.0':
@@ -506,7 +506,7 @@ snapshots:
   '@types/trusted-types@2.0.7':
     optional: true
 
-  '@wasmer/sdk@0.17.0':
+  '@wasmer/sdk@0.18.0':
     dependencies:
       '@mercuryworkshop/wisp-js': 0.4.1
     transitivePeerDependencies:
