@@ -9,10 +9,12 @@
 )]
 
 mod browser_http;
+mod browser_tcp;
 mod host_filesystem;
 mod module_cache;
 mod node_network;
 mod package_cache;
+mod package_progress;
 mod task_manager;
 mod tasks;
 mod worker_utils;
@@ -581,6 +583,21 @@ impl JsSandbox {
             )
         })?;
         Ok(handler.listening_ports())
+    }
+
+    /// Open a protocol-independent byte stream to a guest listener.
+    #[wasm_bindgen(js_name = connectTcp)]
+    pub fn connect_tcp(&self, port: f64) -> Result<browser_tcp::JsTcpConnection, JsValue> {
+        let port = validate_integer("port", port, 1, u64::from(u16::MAX))? as u16;
+        let handler = self.browser_http.as_ref().ok_or_else(|| {
+            custom_error(
+                "CAPABILITY_UNAVAILABLE",
+                "the sandbox has no browser ingress network",
+            )
+        })?;
+        Ok(browser_tcp::JsTcpConnection::new(
+            handler.connect(port).map_err(js_error)?,
+        ))
     }
 
     /// Forward one structured HTTP request into a guest TCP listener.

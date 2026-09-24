@@ -1029,7 +1029,7 @@ Long-running and multi-package behavior uses the same model:
 ```text
 await sandbox.install_package(bash)
 await sandbox.install_package(coreutils)
-pglite = await sandbox.install_package("wasmer/pglite@0.1.0")
+pglite = await sandbox.install_package("wasmer/pglite@0.1.3")
 postgres = await sandbox.command(pglite).spawn()
 ```
 

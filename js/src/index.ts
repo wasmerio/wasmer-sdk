@@ -3,6 +3,7 @@ import init, {
   setSDKUrl,
   setWorkerUrl,
   WasmerCore,
+  PackageLoadCancellation as CorePackageLoadCancellation,
   type CommandCore,
   type PackageCore,
   type ProcessCore,
@@ -79,7 +80,40 @@ export type NetworkPolicy =
       requestUrl?: WispUrlProvider;
     };
 
+export type PackageLoadPhase = "resolving" | "downloading" | "loading" | "ready";
+
+/** Decoded package bytes; cache hits and local sources add zero download bytes. */
+export interface DownloadProgress {
+  readonly downloadedBytes: number;
+  readonly totalBytes: number | null;
+  /** Download completion from 0–100, or null while indeterminate. */
+  readonly percent: number | null;
+}
+
+export interface PackageProgress {
+  readonly id: string;
+  readonly phase: PackageLoadPhase;
+  readonly cached: boolean;
+  readonly download: DownloadProgress;
+}
+
+/** A snapshot, not a delta. Download completion does not imply load readiness. */
+export interface PackageLoadProgress {
+  readonly phase: PackageLoadPhase;
+  readonly download: DownloadProgress;
+  readonly packages: readonly PackageProgress[];
+}
+
+export interface PackageLoadOptions {
+  /** Short synchronous observer. Exceptions detach it without failing the load. */
+  onProgress?: (progress: PackageLoadProgress) => void;
+  signal?: AbortSignal;
+}
+
 export interface SandboxOptions {
+  /** Package acquisition only, before the remaining sandbox setup. */
+  onPackageProgress?: (progress: PackageLoadProgress) => void;
+  signal?: AbortSignal;
   packages?: readonly PackageSource[];
   files?: Readonly<Record<string, FileContents>>;
   env?: Readonly<Record<string, string>>;
@@ -95,14 +129,16 @@ export interface Packages {
    * Resolve a registry package, WEBC bytes, or raw WASI/WASIX bytes.
    * Raw modules must export `_start`; their command and entrypoint are `main`.
    */
-  load(source: string | Uint8Array): Promise<Package>;
+  load(source: PackageSource, options?: PackageLoadOptions): Promise<Package>;
+  /** Load concurrently, sharing downloads and preserving input order. */
+  loadMany(sources: readonly PackageSource[], options?: PackageLoadOptions): Promise<Package[]>;
 }
 
 export interface Sandboxes {
   create(options?: SandboxOptions): Promise<Sandbox>;
 }
 
-export interface InstallPackageOptions {
+export interface InstallPackageOptions extends PackageLoadOptions {
   /** Select one command exported by this package as the sandbox's shell. */
   asShell?: string;
 }
@@ -323,7 +359,7 @@ export class Wasmer {
           : validateParallelism(options.parallelism),
     };
     this.packages = new PackagesService(
-      (source) => this.#loadPackage(source),
+      (sources, options) => this.#loadPackages(sources, options),
       (definition) => this.#createPackage(definition),
     );
     this.sandboxes = new SandboxesService((options) =>
@@ -427,25 +463,56 @@ export class Wasmer {
     return new Package(await rethrow(client.createPackage(snapshot)));
   }
 
-  async #loadPackage(source: string | Uint8Array): Promise<Package> {
-    // Capture caller-owned bytes before runtime initialization can yield.
-    const snapshot = typeof source === "string" ? source : new Uint8Array(source);
+  async #loadPackages(sources: readonly PackageSource[], options: PackageLoadOptions): Promise<Package[]> {
+    options.signal?.throwIfAborted();
+    // Snapshot caller-owned bytes before initialization yields.
+    const reused = sources.filter((source): source is Package => source instanceof Package);
+    const snapshots = sources.filter((source): source is string | Uint8Array => !(source instanceof Package))
+      .map(source => typeof source === "string" ? source : new Uint8Array(source));
     const client = await this.getCore();
-    const core = await rethrow(
-      typeof snapshot === "string"
-        ? client.loadPackage(snapshot)
-        : client.loadPackageBytes(snapshot),
-    );
-    return new Package(core);
+    options.signal?.throwIfAborted();
+    const cancellation = new CorePackageLoadCancellation();
+    const cancel = () => cancellation.cancel();
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    let observer = options.onProgress;
+    const onProgress = observer ? (progress: PackageLoadProgress) => {
+      if (!observer || options.signal?.aborted) return;
+      try {
+        const entries = new Map(progress.packages.map(entry => [entry.id, entry]));
+        for (const pkg of reused) {
+          if (!entries.has(pkg.id)) entries.set(pkg.id, {
+            id: pkg.id, phase: "ready", cached: true,
+            download: { downloadedBytes: 0, totalBytes: 0, percent: 100 },
+          });
+        }
+        observer({ ...progress, packages: [...entries.values()] });
+      }
+      catch (error) { observer = undefined; console.error("Package progress observer failed", error); }
+    } : undefined;
+    try {
+      const packages = await rethrow(client.loadPackages(snapshots, onProgress, cancellation));
+      options.signal?.throwIfAborted();
+      let next = 0;
+      return sources.map(source => source instanceof Package ? source : new Package(packages[next++]!));
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      throw error;
+    } finally {
+      observer = undefined;
+      options.signal?.removeEventListener("abort", cancel);
+      cancellation.free();
+    }
   }
 
   async #createSandbox(options: SandboxOptions): Promise<Sandbox> {
     const client = await this.getCore();
-    const packages = await Promise.all(
-      (options.packages ?? []).map((source) =>
-        source instanceof Package ? source : this.packages.load(source),
-      ),
+    const sources = options.packages ?? [];
+    const loaded = await this.packages.loadMany(
+      sources,
+      { onProgress: options.onPackageProgress, signal: options.signal },
     );
+    const packages = loaded;
+    options.signal?.throwIfAborted();
     const builder = client.sandbox();
     for (const pkg of packages) {
       builder.package(packageCores.get(pkg)!);
@@ -531,27 +598,21 @@ function browserCacheOptions(
 }
 
 class PackagesService implements Packages {
-  readonly #load: (source: string | Uint8Array) => Promise<Package>;
-  readonly #create: (definition: PackageDefinition) => Promise<Package>;
-
   constructor(
-    load: (source: string | Uint8Array) => Promise<Package>,
-    create: (definition: PackageDefinition) => Promise<Package>,
-  ) {
-    this.#load = load;
-    this.#create = create;
-  }
+    private readonly loadPackages: (sources: readonly PackageSource[], options: PackageLoadOptions) => Promise<Package[]>,
+    private readonly createPackage: (definition: PackageDefinition) => Promise<Package>,
+  ) {}
 
   create(definition: PackageDefinition): Promise<Package> {
-    return this.#create(definition);
+    return this.createPackage(definition);
   }
 
-  /**
-   * Resolve a registry package, WEBC bytes, or raw WASI/WASIX bytes.
-   * Raw modules must export `_start`; their command and entrypoint are `main`.
-   */
-  load(source: string | Uint8Array): Promise<Package> {
-    return this.#load(source);
+  async load(source: PackageSource, options: PackageLoadOptions = {}): Promise<Package> {
+    return (await this.loadMany([source], options))[0]!;
+  }
+
+  loadMany(sources: readonly PackageSource[], options: PackageLoadOptions = {}): Promise<Package[]> {
+    return this.loadPackages(sources, options);
   }
 }
 
@@ -691,16 +752,10 @@ export class Sandbox {
     source: PackageSource,
     options: InstallPackageOptions = {},
   ): Promise<Package> {
-    let core: PackageCore;
-    if (source instanceof Package) {
-      core = await rethrow(
-        this.#core.installPackageRef(packageCores.get(source)!),
-      );
-    } else if (typeof source === "string") {
-      core = await rethrow(this.#core.installPackage(source));
-    } else {
-      core = await rethrow(this.#core.installPackageBytes(source));
-    }
+    options.signal?.throwIfAborted();
+    const loaded = await this.wasmer.packages.load(source, options);
+    options.signal?.throwIfAborted();
+    const core = await rethrow(this.#core.installPackageRef(packageCores.get(loaded)!));
     const pkg = new Package(core);
     if (options.asShell !== undefined) {
       this.#shell = pkg.command(options.asShell);

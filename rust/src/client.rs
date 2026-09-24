@@ -29,7 +29,11 @@ use wasmer_wasix::{
     },
 };
 
-use crate::{Error, Package, PackageDefinition, PackageSource, Result, SandboxBuilder};
+use crate::package_progress::{Progress, SharedPackageLoader, observe};
+use crate::{
+    Error, Package, PackageDefinition, PackageLoadOptions, PackageSource, Result, SandboxBuilder,
+};
+use wasmer_wasix::Runtime;
 
 const REGISTRY_QUERY_CACHE_TTL: Duration = Duration::from_mins(10);
 
@@ -89,6 +93,7 @@ pub(crate) struct ClientInner {
     pub(crate) tasks: Arc<TokioTaskManager>,
     pub(crate) output_bytes: usize,
     registry_packages: RwLock<HashMap<String, Package>>,
+    loader: Arc<SharedPackageLoader>,
     closed: AtomicBool,
 }
 
@@ -189,8 +194,11 @@ impl Wasmer {
             )
             .set_http_client(http_client);
 
+        let loader = Arc::new(SharedPackageLoader::new(runtime.package_loader()));
+        runtime.set_package_loader(loader.clone());
         Ok(Self {
             inner: Arc::new(ClientInner {
+                loader,
                 runtime: Arc::new(runtime),
                 tasks,
                 output_bytes: config.output_bytes,
@@ -246,8 +254,11 @@ impl Wasmer {
             .set_package_loader(loader)
             .set_http_client(http_client);
 
+        let loader = Arc::new(SharedPackageLoader::new(runtime.package_loader()));
+        runtime.set_package_loader(loader.clone());
         Ok(Self {
             inner: Arc::new(ClientInner {
+                loader,
                 runtime: Arc::new(runtime),
                 output_bytes: config.output_bytes,
                 registry_packages: RwLock::new(HashMap::new()),
@@ -310,11 +321,21 @@ impl Wasmer {
         }
     }
 
-    pub(crate) async fn load_package_source(&self, source: PackageSource) -> Result<Package> {
+    async fn load_package_observed(
+        &self,
+        source: PackageSource,
+        progress: Option<Progress>,
+    ) -> Result<Package> {
         if let PackageSource::Package(package) = source {
+            if let Some(progress) = &progress {
+                progress.local(&package, true);
+            }
             return Ok(package);
         }
-
+        let mut runtime = (*self.inner.runtime).clone();
+        if let Some(progress) = &progress {
+            runtime.set_package_loader(self.inner.loader.observing(progress.clone()));
+        }
         let label = source.label();
         let binary = match source {
             PackageSource::Registry(specifier) => {
@@ -335,10 +356,13 @@ impl Wasmer {
                     .get(&cache_key)
                     .cloned()
                 {
+                    if let Some(progress) = &progress {
+                        progress.local(&package, true);
+                    }
                     return Ok(package);
                 }
 
-                let binary = BinaryPackage::from_registry(&parsed, self.inner.runtime.as_ref())
+                let binary = BinaryPackage::from_registry(&parsed, &runtime)
                     .await
                     .map_err(|error| Error::PackageLoad {
                         package_source: label,
@@ -359,7 +383,7 @@ impl Wasmer {
             }
             #[cfg(feature = "sys")]
             PackageSource::Path(path) if path.is_dir() => {
-                BinaryPackage::from_dir(&path, self.inner.runtime.as_ref()).await
+                BinaryPackage::from_dir(&path, &runtime).await
             }
             #[cfg(feature = "sys")]
             PackageSource::Path(path) => {
@@ -369,7 +393,7 @@ impl Wasmer {
                         message: error.to_string(),
                     }
                 })?;
-                BinaryPackage::from_webc(&container, self.inner.runtime.as_ref()).await
+                BinaryPackage::from_webc(&container, &runtime).await
             }
             #[cfg(not(feature = "sys"))]
             PackageSource::Path(path) => {
@@ -381,7 +405,11 @@ impl Wasmer {
                 });
             }
             PackageSource::Bytes(bytes) if bytes.starts_with(b"\0asm") => {
-                return PackageDefinition::from_wasm(bytes).into_package().await;
+                let package = PackageDefinition::from_wasm(bytes).into_package().await?;
+                if let Some(progress) = &progress {
+                    progress.local(&package, false);
+                }
+                return Ok(package);
             }
             PackageSource::Bytes(bytes) | PackageSource::Webc(bytes) => {
                 let container = wasmer_package::utils::from_bytes(bytes).map_err(|error| {
@@ -390,7 +418,7 @@ impl Wasmer {
                         message: error.to_string(),
                     }
                 })?;
-                BinaryPackage::from_webc(&container, self.inner.runtime.as_ref()).await
+                BinaryPackage::from_webc(&container, &runtime).await
             }
             PackageSource::Package(_) => unreachable!("handled above"),
         }
@@ -428,8 +456,48 @@ impl Packages {
     /// Returns an error if the client is closed, the source is invalid, package
     /// acquisition fails, or the package cannot be decoded and resolved.
     pub async fn load(&self, source: impl Into<PackageSource>) -> Result<Package> {
+        self.load_with_options(source, PackageLoadOptions::default())
+            .await
+    }
+
+    /// Load one package with operation-scoped progress and cancellation.
+    pub async fn load_with_options(
+        &self,
+        source: impl Into<PackageSource>,
+        options: PackageLoadOptions,
+    ) -> Result<Package> {
+        Ok(self
+            .load_many_with_options([source.into()], options)
+            .await?
+            .remove(0))
+    }
+
+    /// Load packages concurrently, preserving input order and sharing downloads.
+    pub async fn load_many(
+        &self,
+        sources: impl IntoIterator<Item = impl Into<PackageSource>>,
+    ) -> Result<Vec<Package>> {
+        self.load_many_with_options(sources, PackageLoadOptions::default())
+            .await
+    }
+
+    pub async fn load_many_with_options(
+        &self,
+        sources: impl IntoIterator<Item = impl Into<PackageSource>>,
+        options: PackageLoadOptions,
+    ) -> Result<Vec<Package>> {
+        use futures::{StreamExt, TryStreamExt};
         self.client.ensure_open()?;
-        self.client.load_package_source(source.into()).await
+        let sources: Vec<PackageSource> = sources.into_iter().map(Into::into).collect();
+        let progress = options
+            .observer
+            .as_ref()
+            .map(|_| Progress::new(sources.len()));
+        let work = futures::stream::iter(sources)
+            .map(|source| self.client.load_package_observed(source, progress.clone()))
+            .buffered(32)
+            .try_collect();
+        observe(options, progress.clone(), work).await
     }
 }
 
@@ -630,6 +698,226 @@ mod tests {
                 .join(format!("{}.bin", hash.as_hex()))
                 .is_file()
         );
+    }
+
+    #[derive(Debug)]
+    struct StreamingHttp {
+        metadata: Vec<u8>,
+        bytes: Vec<u8>,
+        downloads: AtomicUsize,
+        cancelled: Arc<AtomicUsize>,
+    }
+    impl HttpClient for StreamingHttp {
+        fn request(&self, _request: HttpRequest) -> BoxFuture<'_, anyhow::Result<HttpResponse>> {
+            Box::pin(async {
+                Ok(HttpResponse {
+                    body: Some(self.metadata.clone()),
+                    redirected: false,
+                    status: StatusCode::OK,
+                    headers: HeaderMap::new(),
+                })
+            })
+        }
+        fn request_with_progress(
+            &self,
+            _request: HttpRequest,
+            progress: wasmer_wasix::http::HttpDownloadObserver,
+        ) -> BoxFuture<'_, anyhow::Result<HttpResponse>> {
+            Box::pin(async move {
+                self.downloads.fetch_add(1, Ordering::SeqCst);
+                struct DropCount(Arc<AtomicUsize>, bool);
+                impl Drop for DropCount {
+                    fn drop(&mut self) {
+                        if !self.1 {
+                            self.0.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+                }
+                let mut guard = DropCount(self.cancelled.clone(), false);
+                progress(0, None, false);
+                let chunk = self.bytes.len().div_ceil(4);
+                for end in (chunk..self.bytes.len())
+                    .step_by(chunk)
+                    .chain([self.bytes.len()])
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                    progress(end as u64, None, false);
+                }
+                guard.1 = true;
+                Ok(HttpResponse {
+                    body: Some(self.bytes.clone()),
+                    redirected: false,
+                    status: StatusCode::OK,
+                    headers: HeaderMap::new(),
+                })
+            })
+        }
+    }
+
+    fn streaming_fixture(known_size: bool) -> (TempDir, Arc<StreamingHttp>) {
+        let dir = TempDir::new().unwrap();
+        let bytes = registry_fixture(dir.path());
+        let container = wasmer_package::utils::from_bytes(bytes.clone()).unwrap();
+        let distribution = serde_json::json!({
+            "webcManifest": serde_json::to_string(container.manifest()).unwrap(),
+            "piritaDownloadUrl": "https://packages.test/cache.webc",
+            "piritaSha256Hash": WebcHash::sha256(&bytes).as_hex(),
+            "webcSize": if known_size { Some(bytes.len()) } else { None },
+        });
+        let metadata = serde_json::to_vec(&serde_json::json!({ "data": {
+            "getPackage": { "packageName":"cache", "namespace":"sdk-test", "versions":[{
+                "version":"1.0.0", "isArchived":false, "v2":distribution, "v3":distribution }] },
+            "info":{"defaultFrontend":"https://wasmer.io/"}
+        }}))
+        .unwrap();
+        (
+            dir,
+            Arc::new(StreamingHttp {
+                metadata,
+                bytes: bytes.to_vec(),
+                downloads: AtomicUsize::new(0),
+                cancelled: Arc::default(),
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn package_progress_streams_deduplicates_and_reports_cache_hits() {
+        use crate::{PackageLoadOptions, PackageLoadPhase};
+        for known in [true, false] {
+            let (_fixture, http) = streaming_fixture(known);
+            let cache = TempDir::new().unwrap();
+            let config = WasmerConfig {
+                cache: CacheConfig {
+                    root: cache.path().into(),
+                },
+                ..Default::default()
+            };
+            let client = Wasmer::new_with_http_client(config.clone(), http.clone()).unwrap();
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let captured = events.clone();
+            let packages = client
+                .packages()
+                .load_many_with_options(
+                    ["sdk-test/cache", "sdk-test/cache@1.0.0"],
+                    PackageLoadOptions::default()
+                        .on_progress(move |p| captured.lock().unwrap().push(p)),
+                )
+                .await
+                .unwrap();
+            assert_eq!(packages.len(), 2);
+            assert_eq!(http.downloads.load(Ordering::SeqCst), 1);
+            let events = events.lock().unwrap();
+            assert!(events.iter().any(|p| p.download.downloaded_bytes > 0
+                && p.download.downloaded_bytes < http.bytes.len() as u64));
+            let partial = events
+                .iter()
+                .find(|p| {
+                    p.download.downloaded_bytes > 0
+                        && p.download.downloaded_bytes < http.bytes.len() as u64
+                })
+                .unwrap();
+            assert_eq!(partial.download.percent.is_some(), known);
+            let ready = events.last().unwrap();
+            assert_eq!(ready.phase, PackageLoadPhase::Ready);
+            assert_eq!(ready.packages.len(), 1);
+            assert_eq!(ready.download.downloaded_bytes, http.bytes.len() as u64);
+            assert_eq!(ready.download.percent, Some(100.0));
+            drop(events);
+            // A fresh client exercises the persistent cache, not just loaded handles.
+            let fresh = Wasmer::new_with_http_client(config, http.clone()).unwrap();
+            let cached = Arc::new(Mutex::new(Vec::new()));
+            let captured = cached.clone();
+            fresh
+                .packages()
+                .load_with_options(
+                    "sdk-test/cache",
+                    PackageLoadOptions::default()
+                        .on_progress(move |p| captured.lock().unwrap().push(p)),
+                )
+                .await
+                .unwrap();
+            assert_eq!(http.downloads.load(Ordering::SeqCst), 1);
+            let cached = cached.lock().unwrap();
+            let ready = cached.last().unwrap();
+            assert!(ready.packages.iter().all(|p| p.cached));
+            assert_eq!(ready.download.downloaded_bytes, 0);
+            assert_eq!(ready.download.total_bytes, Some(0));
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_one_subscriber_preserves_other_downloads_and_last_cancel_aborts() {
+        use crate::{PackageLoadCancellation, PackageLoadOptions, PackageLoadPhase};
+        let (_fixture, http) = streaming_fixture(true);
+        let cache = TempDir::new().unwrap();
+        let client = Wasmer::new_with_http_client(
+            WasmerConfig {
+                cache: CacheConfig {
+                    root: cache.path().into(),
+                },
+                ..Default::default()
+            },
+            http.clone(),
+        )
+        .unwrap();
+        let token = PackageLoadCancellation::default();
+        let cancel = token.clone();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let options = PackageLoadOptions::default()
+            .cancellation(token)
+            .on_progress(move |p| {
+                if p.download.downloaded_bytes > 0 {
+                    cancel.cancel();
+                }
+                captured.lock().unwrap().push(p);
+            });
+        let api = client.packages();
+        let (cancelled, kept) = tokio::join!(
+            api.load_with_options("sdk-test/cache", options),
+            api.load("sdk-test/cache@1.0.0")
+        );
+        assert!(matches!(cancelled, Err(crate::Error::Cancelled)));
+        assert!(kept.is_ok());
+        assert_eq!(http.downloads.load(Ordering::SeqCst), 1);
+        assert_eq!(http.cancelled.load(Ordering::SeqCst), 0);
+        assert!(
+            !events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|p| p.phase == PackageLoadPhase::Ready)
+        );
+
+        let cache = TempDir::new().unwrap();
+        let client = Wasmer::new_with_http_client(
+            WasmerConfig {
+                cache: CacheConfig {
+                    root: cache.path().into(),
+                },
+                ..Default::default()
+            },
+            http.clone(),
+        )
+        .unwrap();
+        let token = PackageLoadCancellation::default();
+        let cancel = token.clone();
+        let result = client
+            .packages()
+            .load_with_options(
+                "sdk-test/cache",
+                PackageLoadOptions::default()
+                    .cancellation(token)
+                    .on_progress(move |p| {
+                        if p.download.downloaded_bytes > 0 {
+                            cancel.cancel();
+                        }
+                    }),
+            )
+            .await;
+        assert!(matches!(result, Err(crate::Error::Cancelled)));
+        assert_eq!(http.cancelled.load(Ordering::SeqCst), 1);
     }
 
     fn registry_fixture(directory: &Path) -> bytes::Bytes {

@@ -29,6 +29,7 @@ when unsupported by the selected backend:
 | App directory mounts | Not yet exposed | `DirectoryMount` |
 | Terminal / resize | Not yet exposed | `TerminalOptions`, `resizeTerminal` |
 | HTTP discovery / exposure | Not yet exposed | `ports.listening()`, `ports.expose()` |
+| TCP forwarding | Use native host networking directly | `ports.forwardTCP()` |
 
 Inspect `wasmer.capabilities` when using these optional features. `.host` networking
 uses the native runtime on macOS and native DNS/TCP on iOS; iOS does not support UDP
@@ -39,6 +40,49 @@ and platform restrictions are not identical.
 libghostty-vt terminal, Bash, Node.js via Edge.js, Python, cowsay, and `pnpm i react`.
 Guest HTTP servers open in a separate browser view. The iOS implementation has been
 tested in the simulator and cross-compiled for devices; physical-device testing remains.
+
+[Wasmer Postgres](Examples/WasmerPostgres) is a SwiftUI SQL console using
+PostgresNIO to connect to PostgreSQL 18.4 inside the iOS sandbox. It demonstrates
+raw TCP forwarding, queries, transactions and streamed results. See its README
+for the PostgreSQL package fix and the single-client, session-only limitations.
+
+## Package download progress
+
+```swift
+let packages = try await wasmer.packages.loadMany(
+    ["wasmer/bash", "python/python"],
+    onProgress: { progress in
+        print(progress.phase, progress.download.percent as Any)
+    }
+)
+```
+
+Every `packages.load` overload and `sandbox.installPackage` accepts optional
+`onProgress`. `sandboxes.create` accepts `onPackageProgress`. These use the same
+`PackageLoadProgress` type on native macOS and iOS WebKit. The callback is
+`@Sendable` and has no main-actor guarantee; dispatch UI changes to `MainActor`.
+Cancellation follows the enclosing Swift task. iOS forwards only progress
+metadata across the bridge; package bytes stream through its loopback transport.
+
+Progress is a snapshot, not a delta. `download` contains downloaded bytes, an
+optional total, and an optional percentage from 0 to 100. Totals include the
+unique required package artifacts and their dependencies, weighted by bytes.
+Unknown sizes stay indeterminate. Counts describe decoded package bodies;
+SDK cache hits and local sources add zero download bytes. An entirely cached
+or local load reports 0 bytes of 0 and 100%.
+
+The phases are `resolving`, `downloading`, `loading`, and `ready`. Downloading
+can overlap resolution. 100% means the transfer is complete; await the load
+before using the package. The callback does not cover SDK initialization,
+guest execution, or guest `npm`/`pip` downloads. The final `ready` snapshot is
+delivered before a successful load returns, with no callbacks after settlement.
+Errors use the existing load error channel and do not emit `ready`.
+
+Batch results preserve input order. Concurrent loads on the same client share
+in-flight downloads. Cancelling one caller does not interrupt other callers;
+cancelling the last subscriber stops its acquisition. Callbacks are serialized
+per operation, coalesced to about ten byte updates per second, with phase changes
+and completion delivered promptly. Keep callbacks short.
 
 ## Workspace storage
 

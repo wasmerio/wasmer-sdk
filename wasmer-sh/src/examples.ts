@@ -10,6 +10,7 @@ export interface ShellExample {
   icon: string;
   dependencies: string;
   packages: string[];
+  env?: Record<string, string>;
   install: string | null;
   run: string;
 }
@@ -34,6 +35,10 @@ export function exampleFiles(example?: ShellExample): Record<string, string> {
       .filter(([path]) => path.startsWith(prefix))
       .map(([path, contents]) => [path.slice(prefix.length), contents]),
   );
+}
+
+export function exampleEnvironment(example?: ShellExample): Record<string, string> {
+  return Object.assign({}, ...(example ? [example] : examples).map(item => item.env));
 }
 
 export function renderExamples(container: HTMLElement): void {
@@ -73,10 +78,10 @@ export function renderExamples(container: HTMLElement): void {
   }
 }
 
-export function exampleUrl(id: string): string {
+export function exampleUrl(id?: string): string {
   const url = new URL(window.location.href);
-  for (const key of ["package", "command", "use", "arg"])
+  for (const key of ["example", "package", "command", "use", "arg"])
     url.searchParams.delete(key);
-  url.searchParams.set("example", id);
+  if (id) url.searchParams.set("example", id);
   return url.pathname + url.search;
 }

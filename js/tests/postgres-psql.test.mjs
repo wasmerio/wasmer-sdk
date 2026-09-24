@@ -24,7 +24,7 @@ test(
       outputBytes: 256 * 1024,
       cache: { directory: cacheDirectory },
     });
-    const pglite = await client.packages.load("wasmer/pglite@0.1.0");
+    const pglite = await client.packages.load("wasmer/pglite@0.1.3");
     assert.equal(pglite.entrypoint, "pglite");
     assert(pglite.commands.includes("pglite"));
     const sandbox = await client.sandboxes.create({
@@ -58,6 +58,7 @@ test(
         { timeout: 10_000 },
       );
       assert.match(result.stdout, /wasm32-unknown-wasix.*\|42/m);
+      assert.match(result.stdout, /^recovered_after_error\|42$/m);
       const output = await process.wait({ check: true });
       assert.equal(output.exitCode, 0);
       assert.equal(output.reason, "exited");

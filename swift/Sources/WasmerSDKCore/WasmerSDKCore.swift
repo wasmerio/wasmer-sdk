@@ -460,7 +460,13 @@ fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
 
 
 // Public interface members begin here.
-
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+private let IDX_CALLBACK_FREE: Int32 = 0
+// Callback return codes
+private let UNIFFI_CALLBACK_SUCCESS: Int32 = 0
+private let UNIFFI_CALLBACK_ERROR: Int32 = 1
+private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -523,6 +529,22 @@ fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDouble: FfiConverterPrimitive {
+    typealias FfiType = Double
+    typealias SwiftType = Double
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
+        return try lift(readDouble(&buf))
+    }
+
+    public static func write(_ value: Double, into buf: inout [UInt8]) {
+        writeDouble(&buf, lower(value))
     }
 }
 
@@ -1259,6 +1281,130 @@ public func FfiConverterTypePackageCore_lower(_ value: PackageCore) -> UInt64 {
 
 
 
+public protocol PackageLoadCancellationProtocol: AnyObject, Sendable {
+    
+    func cancel() 
+    
+}
+open class PackageLoadCancellation: PackageLoadCancellationProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_wasmer_sdk_uniffi_fn_clone_packageloadcancellation(self.handle, $0) }
+    }
+public convenience init() {
+    let handle =
+        try! rustCall() {
+        uniffiCallStatus in
+    uniffi_wasmer_sdk_uniffi_fn_constructor_packageloadcancellation_new(uniffiCallStatus
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_wasmer_sdk_uniffi_fn_free_packageloadcancellation(handle, $0) }
+    }
+
+    
+
+    
+open func cancel()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_wasmer_sdk_uniffi_fn_method_packageloadcancellation_cancel(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackageLoadCancellation: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = PackageLoadCancellation
+
+    public static func lift(_ handle: UInt64) throws -> PackageLoadCancellation {
+        return PackageLoadCancellation(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: PackageLoadCancellation) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackageLoadCancellation {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: PackageLoadCancellation, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageLoadCancellation_lift(_ handle: UInt64) throws -> PackageLoadCancellation {
+    return try FfiConverterTypePackageLoadCancellation.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageLoadCancellation_lower(_ value: PackageLoadCancellation) -> UInt64 {
+    return FfiConverterTypePackageLoadCancellation.lower(value)
+}
+
+
+
+
+
+
 public protocol PortsCoreProtocol: AnyObject, Sendable {
     
     func wait(port: UInt16, timeoutMs: UInt64) async throws 
@@ -1928,6 +2074,8 @@ public protocol WasmerCoreProtocol: AnyObject, Sendable {
     
     func loadPackageRegistry(specifier: String) async throws  -> PackageCore
     
+    func loadPackages(sources: [PackageLoadSource], observer: PackageLoadObserver?, cancellation: PackageLoadCancellation?) async throws  -> [PackageCore]
+    
 }
 open class WasmerCore: WasmerCoreProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -2083,6 +2231,22 @@ open func loadPackageRegistry(specifier: String)async throws  -> PackageCore  {
             completeFunc: ffi_wasmer_sdk_uniffi_rust_future_complete_u64,
             freeFunc: ffi_wasmer_sdk_uniffi_rust_future_free_u64,
             liftFunc: FfiConverterTypePackageCore_lift,
+            errorHandler: FfiConverterTypeSdkError_lift
+        )
+}
+    
+open func loadPackages(sources: [PackageLoadSource], observer: PackageLoadObserver?, cancellation: PackageLoadCancellation?)async throws  -> [PackageCore]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wasmer_sdk_uniffi_fn_method_wasmercore_load_packages(
+                        self.uniffiCloneHandle(),FfiConverterSequenceTypePackageLoadSource.lower(sources),FfiConverterOptionCallbackInterfacePackageLoadObserver.lower(observer),FfiConverterOptionTypePackageLoadCancellation.lower(cancellation)
+                )
+            },
+            pollFunc: ffi_wasmer_sdk_uniffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wasmer_sdk_uniffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wasmer_sdk_uniffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypePackageCore.lift,
             errorHandler: FfiConverterTypeSdkError_lift
         )
 }
@@ -2244,6 +2408,64 @@ public func FfiConverterTypeDirectoryEntry_lift(_ buf: RustBuffer) throws -> Dir
 #endif
 public func FfiConverterTypeDirectoryEntry_lower(_ value: DirectoryEntry) -> RustBuffer {
     return FfiConverterTypeDirectoryEntry.lower(value)
+}
+
+
+public struct DownloadProgress: Equatable, Hashable {
+    public let downloadedBytes: UInt64
+    public let totalBytes: UInt64?
+    public let percent: Double?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(downloadedBytes: UInt64, totalBytes: UInt64?, percent: Double?) {
+        self.downloadedBytes = downloadedBytes
+        self.totalBytes = totalBytes
+        self.percent = percent
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension DownloadProgress: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDownloadProgress: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DownloadProgress {
+        return
+            try DownloadProgress(
+                downloadedBytes: FfiConverterUInt64.read(from: &buf), 
+                totalBytes: FfiConverterOptionUInt64.read(from: &buf), 
+                percent: FfiConverterOptionDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DownloadProgress, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.downloadedBytes, into: &buf)
+        FfiConverterOptionUInt64.write(value.totalBytes, into: &buf)
+        FfiConverterOptionDouble.write(value.percent, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDownloadProgress_lift(_ buf: RustBuffer) throws -> DownloadProgress {
+    return try FfiConverterTypeDownloadProgress.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDownloadProgress_lower(_ value: DownloadProgress) -> RustBuffer {
+    return FfiConverterTypeDownloadProgress.lower(value)
 }
 
 
@@ -2413,6 +2635,126 @@ public func FfiConverterTypePackageDefinition_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypePackageDefinition_lower(_ value: PackageDefinition) -> RustBuffer {
     return FfiConverterTypePackageDefinition.lower(value)
+}
+
+
+public struct PackageLoadProgress: Equatable, Hashable {
+    public let phase: PackageLoadPhase
+    public let download: DownloadProgress
+    public let packages: [PackageProgress]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(phase: PackageLoadPhase, download: DownloadProgress, packages: [PackageProgress]) {
+        self.phase = phase
+        self.download = download
+        self.packages = packages
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PackageLoadProgress: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackageLoadProgress: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackageLoadProgress {
+        return
+            try PackageLoadProgress(
+                phase: FfiConverterTypePackageLoadPhase.read(from: &buf), 
+                download: FfiConverterTypeDownloadProgress.read(from: &buf), 
+                packages: FfiConverterSequenceTypePackageProgress.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PackageLoadProgress, into buf: inout [UInt8]) {
+        FfiConverterTypePackageLoadPhase.write(value.phase, into: &buf)
+        FfiConverterTypeDownloadProgress.write(value.download, into: &buf)
+        FfiConverterSequenceTypePackageProgress.write(value.packages, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageLoadProgress_lift(_ buf: RustBuffer) throws -> PackageLoadProgress {
+    return try FfiConverterTypePackageLoadProgress.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageLoadProgress_lower(_ value: PackageLoadProgress) -> RustBuffer {
+    return FfiConverterTypePackageLoadProgress.lower(value)
+}
+
+
+public struct PackageProgress: Equatable, Hashable {
+    public let id: String
+    public let phase: PackageLoadPhase
+    public let cached: Bool
+    public let download: DownloadProgress
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, phase: PackageLoadPhase, cached: Bool, download: DownloadProgress) {
+        self.id = id
+        self.phase = phase
+        self.cached = cached
+        self.download = download
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PackageProgress: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackageProgress: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackageProgress {
+        return
+            try PackageProgress(
+                id: FfiConverterString.read(from: &buf), 
+                phase: FfiConverterTypePackageLoadPhase.read(from: &buf), 
+                cached: FfiConverterBool.read(from: &buf), 
+                download: FfiConverterTypeDownloadProgress.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PackageProgress, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterTypePackageLoadPhase.write(value.phase, into: &buf)
+        FfiConverterBool.write(value.cached, into: &buf)
+        FfiConverterTypeDownloadProgress.write(value.download, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageProgress_lift(_ buf: RustBuffer) throws -> PackageProgress {
+    return try FfiConverterTypePackageProgress.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageProgress_lower(_ value: PackageProgress) -> RustBuffer {
+    return FfiConverterTypePackageProgress.lower(value)
 }
 
 
@@ -2882,6 +3224,178 @@ public func FfiConverterTypeOutputMode_lower(_ value: OutputMode) -> RustBuffer 
 
 
 
+public enum PackageLoadPhase: Equatable, Hashable {
+    
+    case resolving
+    case downloading
+    case loading
+    case ready
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PackageLoadPhase: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackageLoadPhase: FfiConverterRustBuffer {
+    typealias SwiftType = PackageLoadPhase
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackageLoadPhase {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .resolving
+        
+        case 2: return .downloading
+        
+        case 3: return .loading
+        
+        case 4: return .ready
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PackageLoadPhase, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .resolving:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .downloading:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .loading:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .ready:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageLoadPhase_lift(_ buf: RustBuffer) throws -> PackageLoadPhase {
+    return try FfiConverterTypePackageLoadPhase.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageLoadPhase_lower(_ value: PackageLoadPhase) -> RustBuffer {
+    return FfiConverterTypePackageLoadPhase.lower(value)
+}
+
+
+
+
+public enum PackageLoadSource {
+    
+    case registry(specifier: String
+    )
+    case path(path: String
+    )
+    case bytes(bytes: Data
+    )
+    case package(package: PackageCore
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PackageLoadSource: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackageLoadSource: FfiConverterRustBuffer {
+    typealias SwiftType = PackageLoadSource
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackageLoadSource {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .registry(specifier: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .path(path: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .bytes(bytes: try FfiConverterData.read(from: &buf)
+        )
+        
+        case 4: return .package(package: try FfiConverterTypePackageCore.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PackageLoadSource, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .registry(specifier):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(specifier, into: &buf)
+            
+        
+        case let .path(path):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(path, into: &buf)
+            
+        
+        case let .bytes(bytes):
+            writeInt(&buf, Int32(3))
+            FfiConverterData.write(bytes, into: &buf)
+            
+        
+        case let .package(package):
+            writeInt(&buf, Int32(4))
+            FfiConverterTypePackageCore.write(package, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageLoadSource_lift(_ buf: RustBuffer) throws -> PackageLoadSource {
+    return try FfiConverterTypePackageLoadSource.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageLoadSource_lower(_ value: PackageLoadSource) -> RustBuffer {
+    return FfiConverterTypePackageLoadSource.lower(value)
+}
+
+
+
+
 public enum ProcessExitReason: Equatable, Hashable {
     
     case exited
@@ -3037,6 +3551,141 @@ public func FfiConverterTypeSdkError_lower(_ value: SdkError) -> RustBuffer {
     return FfiConverterTypeSdkError.lower(value)
 }
 
+
+
+
+public protocol PackageLoadObserver: AnyObject, Sendable {
+    
+    func onProgress(progress: PackageLoadProgress) 
+    
+}
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfacePackageLoadObserver {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfacePackageLoadObserver = UniffiVTableCallbackInterfacePackageLoadObserver(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterCallbackInterfacePackageLoadObserver.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface PackageLoadObserver: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterCallbackInterfacePackageLoadObserver.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface PackageLoadObserver: handle missing in uniffiClone")
+            }
+        },
+        onProgress: { (
+            uniffiHandle: UInt64,
+            progress: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfacePackageLoadObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onProgress(
+                     progress: try FfiConverterTypePackageLoadProgress_lift(progress)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    //
+    // `nonisolated(unsafe)` is needed under Swift 6 strict concurrency.
+    // This is safe because the pointee is initialized once during static init
+    // and never mutated by either side of the FFI.  Its fields are C function pointers.
+    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfacePackageLoadObserver> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfacePackageLoadObserver>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitPackageLoadObserver() {
+    uniffi_wasmer_sdk_uniffi_fn_init_callback_vtable_packageloadobserver(UniffiCallbackInterfacePackageLoadObserver.vtablePtr)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfacePackageLoadObserver {
+    fileprivate static let handleMap = UniffiHandleMap<PackageLoadObserver>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfacePackageLoadObserver : FfiConverter {
+    typealias SwiftType = PackageLoadObserver
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfacePackageLoadObserver_lift(_ handle: UInt64) throws -> PackageLoadObserver {
+    return try FfiConverterCallbackInterfacePackageLoadObserver.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfacePackageLoadObserver_lower(_ v: PackageLoadObserver) -> UInt64 {
+    return FfiConverterCallbackInterfacePackageLoadObserver.lower(v)
+}
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -3056,6 +3705,30 @@ fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
+    typealias SwiftType = Double?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterDouble.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterDouble.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -3104,6 +3777,54 @@ fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypePackageLoadCancellation: FfiConverterRustBuffer {
+    typealias SwiftType = PackageLoadCancellation?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypePackageLoadCancellation.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypePackageLoadCancellation.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionCallbackInterfacePackageLoadObserver: FfiConverterRustBuffer {
+    typealias SwiftType = PackageLoadObserver?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterCallbackInterfacePackageLoadObserver.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterCallbackInterfacePackageLoadObserver.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -3179,6 +3900,56 @@ fileprivate struct FfiConverterSequenceTypeDirectoryEntry: FfiConverterRustBuffe
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeDirectoryEntry.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePackageProgress: FfiConverterRustBuffer {
+    typealias SwiftType = [PackageProgress]
+
+    public static func write(_ value: [PackageProgress], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePackageProgress.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PackageProgress] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PackageProgress]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePackageProgress.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePackageLoadSource: FfiConverterRustBuffer {
+    typealias SwiftType = [PackageLoadSource]
+
+    public static func write(_ value: [PackageLoadSource], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePackageLoadSource.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PackageLoadSource] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PackageLoadSource]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePackageLoadSource.read(from: &buf))
         }
         return seq
     }
@@ -3451,10 +4222,23 @@ private let initializationResult: InitializationResult = {
     if (uniffi_wasmer_sdk_uniffi_checksum_method_wasmercore_load_package_registry() != 55322) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_wasmer_sdk_uniffi_checksum_method_wasmercore_load_packages() != 8995) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wasmer_sdk_uniffi_checksum_method_packageloadcancellation_cancel() != 10525) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_wasmer_sdk_uniffi_checksum_constructor_wasmercore_new() != 60050) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_wasmer_sdk_uniffi_checksum_constructor_packageloadcancellation_new() != 49821) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wasmer_sdk_uniffi_checksum_method_packageloadobserver_on_progress() != 19649) {
+        return InitializationResult.apiChecksumMismatch
+    }
 
+    uniffiCallbackInitPackageLoadObserver()
     return InitializationResult.ok
 }()
 

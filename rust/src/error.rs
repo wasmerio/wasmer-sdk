@@ -11,6 +11,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("package load was cancelled")]
+    Cancelled,
     #[error("the Wasmer client is shut down")]
     ClientClosed,
 
@@ -97,6 +99,7 @@ impl Error {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Cancelled => "CANCELLED",
             Self::ClientClosed => "CLIENT_CLOSED",
             Self::SandboxClosed => "SANDBOX_CLOSED",
             Self::InvalidArgument { .. } => "INVALID_ARGUMENT",

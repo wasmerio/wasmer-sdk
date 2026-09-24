@@ -1,3 +1,5 @@
+import { loadExamplePackages, type PackageLoadProgress } from "./package-loading";
+import { LoadingScreen } from "./loading-screen";
 import "./styles.css";
 
 import {
@@ -16,7 +18,7 @@ import { Terminal } from "@xterm/xterm";
 
 import { detectBrowserCompatibilityWarning } from "./browser-compatibility";
 import { WorkspaceEditor } from "./editor";
-import { examples, exampleFiles, renderExamples, exampleUrl } from "./examples";
+import { examples, exampleFiles, exampleEnvironment, renderExamples, exampleUrl } from "./examples";
 
 const DEFAULT_PACKAGE = "wasmer/bash";
 const EDGEJS_PACKAGE = "wasmer/edge@=0.2.1";
@@ -108,16 +110,16 @@ const elements = {
   ),
   stage: document.querySelector<HTMLElement>(".shell-stage")!,
   picker: requiredElement<HTMLElement>("example-picker"),
-  examplesButton: requiredElement<HTMLButtonElement>("examples-button"),
-  resume: requiredElement<HTMLButtonElement>("resume-button"),
+  examplesButton: requiredElement<HTMLAnchorElement>("examples-button"),
+  resume: requiredElement<HTMLAnchorElement>("resume-button"),
   workspaceColumn: requiredElement<HTMLDivElement>("workspace-column"),
   terminal: requiredElement<HTMLDivElement>("terminal"),
   status: requiredElement<HTMLSpanElement>("session-status"),
   liveHttpBadge: requiredElement<HTMLButtonElement>("live-http-badge"),
   liveHttpLabel: requiredElement<HTMLSpanElement>("live-http-label"),
   packageName: requiredElement<HTMLSpanElement>("package-name"),
-  bootTitle: requiredElement<HTMLHeadingElement>("boot-title"),
   bootDetail: requiredElement<HTMLParagraphElement>("boot-detail"),
+  packageDownloads: requiredElement<HTMLUListElement>("package-downloads"),
   clear: requiredElement<HTMLButtonElement>("clear-button"),
   restart: requiredElement<HTMLButtonElement>("restart-button"),
   editorButton: requiredElement<HTMLButtonElement>("editor-button"),
@@ -161,6 +163,9 @@ showBrowserCompatibilityWarning();
 
 const params = new URLSearchParams(window.location.search);
 const selectedExample = examples.find(example => example.id === params.get("example"));
+const terminalUrl = new URL(window.location.href);
+const startsInTerminal = Boolean(selectedExample || params.get("example") === "shell" ||
+  ["package", "command", "use", "arg"].some(key => params.has(key)));
 const config = readConfig(params);
 const wispAutoconfigureChannel = new BroadcastChannel(
   WISP_AUTOCONFIGURE_CHANNEL,
@@ -216,7 +221,9 @@ const workspaceEditor = new WorkspaceEditor(
 );
 
 let activeSession: ActiveSession | undefined;
+const loadingScreen = new LoadingScreen(elements.packageDownloads);
 let generation = 0;
+let packageLoadAbort: AbortController | undefined;
 let inputQueue = Promise.resolve();
 let pendingProcessInput = "";
 let transcript = "";
@@ -247,8 +254,20 @@ elements.browserWarningDismiss.addEventListener("click", () => {
 });
 renderExamples(requiredElement("example-groups"));
 requiredElement<HTMLAnchorElement>("full-shell-link").href = exampleUrl("shell");
-elements.examplesButton.addEventListener("click", () => showExamples(true));
-elements.resume.addEventListener("click", () => showExamples(false));
+elements.examplesButton.href = exampleUrl();
+elements.resume.href = terminalUrl.href;
+for (const [link, show] of [[elements.examplesButton, true], [elements.resume, false]] as const) {
+  link.addEventListener("click", event => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (window.location.href !== link.href) window.history.pushState(null, "", link.href);
+    showExamples(show);
+  });
+}
+window.addEventListener("popstate", () => showExamples(
+  !startsInTerminal || window.location.pathname !== terminalUrl.pathname ||
+  window.location.search !== terminalUrl.search,
+));
 elements.restart.addEventListener("click", () => void start());
 elements.editorButton.addEventListener("click", () => void toggleEditor());
 elements.networkButton.addEventListener("click", () => void changeWispProxy());
@@ -339,8 +358,7 @@ if (import.meta.env.DEV) {
 }
 
 // Merely browsing examples must not download or initialize any guest packages.
-if (selectedExample || params.get("example") === "shell" ||
-    ["package", "command", "use", "arg"].some(key => params.has(key))) {
+if (startsInTerminal) {
   void start();
 } else {
   setState("choosing", "Choose an example");
@@ -356,15 +374,17 @@ function showExamples(show: boolean): void {
   else { fitTerminal(); terminal.focus(); }
 }
 
+
 async function start(): Promise<void> {
   showExamples(false);
   const currentGeneration = ++generation;
+  packageLoadAbort?.abort();
+  const loadAbort = new AbortController();
+  packageLoadAbort = loadAbort;
   setBusy(true);
   setState("booting", "Preparing runtime");
-  setBootMessage(
-    "Starting your shell",
-    "Initializing the Wasmer runtime in this browser.",
-  );
+  loadingScreen.reset([config.packageName, ...config.uses]);
+  setBootMessage("Initializing the SDK…");
   elements.retry.hidden = true;
   elements.packageName.textContent = config.packageName;
 
@@ -379,32 +399,31 @@ async function start(): Promise<void> {
     await wasmer.ready();
     ensureCurrent(currentGeneration);
 
+    loadingScreen.sdkReady();
     const packageNames = [config.packageName, ...config.uses];
     setState("loading", "Loading packages");
-    setBootMessage("Loading the shell", describePackageLoad(packageNames));
+    setBootMessage("Loading packages…");
     const edgejsDevelopmentPackage = import.meta.env.DEV
       ? import.meta.env.VITE_EDGEJS_WEBC_URL?.trim()
       : undefined;
-    const [mainPackage, ...uses] = await Promise.all(
-      packageNames.map(async (name) => {
-        if (name !== EDGEJS_PACKAGE || !edgejsDevelopmentPackage) {
-          return wasmer.packages.load(name);
-        }
-        const response = await fetch(edgejsDevelopmentPackage);
-        if (!response.ok) {
-          throw new Error(`Unable to load the development Edge.js package (${response.status})`);
-        }
-        return wasmer.packages.load(new Uint8Array(await response.arrayBuffer()));
-      }),
-    );
+    const sources = await Promise.all(packageNames.map(async name => {
+      if (name !== EDGEJS_PACKAGE || !edgejsDevelopmentPackage) return name;
+      const response = await fetch(edgejsDevelopmentPackage, { signal: loadAbort.signal });
+      if (!response.ok) throw new Error(`Unable to load the development Edge.js package (${response.status})`);
+      return new Uint8Array(await response.arrayBuffer());
+    }));
+    const [mainPackage, ...uses] = await loadExamplePackages(wasmer, sources, {
+      signal: loadAbort.signal,
+      onProgress(progress) {
+        if (currentGeneration === generation) showPackageProgress(progress);
+      },
+    });
     ensureCurrent(currentGeneration);
+    loadingScreen.complete([mainPackage.id, ...uses.map(pkg => pkg.id)]);
     elements.packageName.textContent = mainPackage.id;
 
     setState("loading", "Creating sandbox");
-    setBootMessage(
-      "Creating your sandbox",
-      "Composing the packages and workspace entirely inside this tab.",
-    );
+    setBootMessage("Preparing your workspace…");
     const sandbox = await wasmer.sandboxes.create({
       packages: [mainPackage, ...uses],
       files: workspaceFiles(),
@@ -425,6 +444,7 @@ async function start(): Promise<void> {
         LOGNAME: "wasmer",
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
+        ...exampleEnvironment(selectedExample),
       },
     });
 
@@ -439,6 +459,7 @@ async function start(): Promise<void> {
       pendingPreviewPorts: new Set(),
     };
     activeSession = session;
+    elements.resume.hidden = false;
     session.stopWatchingPorts = sandbox.ports.onListen(
       (port) => {
         session.listeningPorts.add(port);
@@ -488,7 +509,8 @@ async function runInteractiveShell(
   if (!session) return;
 
   writeWelcome();
-  setState("running", "Starting Bash");
+  setState("loading", "Starting Bash");
+  setBootMessage("Starting Bash…");
   const process = await sandbox
     .command(
       mainPackage,
@@ -558,7 +580,8 @@ async function runPassthrough(
 ): Promise<void> {
   const session = activeSession;
   if (!session) return;
-  setState("running", "Running");
+  setState("loading", "Starting program");
+  setBootMessage("Starting program…");
   const process = await sandbox
     .command(selectCommand(mainPackage), config.args, {
       cwd: "/workspace",
@@ -573,6 +596,7 @@ async function runPassthrough(
     await process.kill();
     throw new Error("The process did not expose its requested streams.");
   }
+  setState("running", "Running");
   session.process = process;
   session.stdin = process.stdin;
   const streams = Promise.allSettled([
@@ -911,6 +935,7 @@ function getServiceWorkerOrigin(): string {
 
 async function dispose(): Promise<void> {
   generation += 1;
+  packageLoadAbort?.abort();
   try {
     await closeActiveSession();
   } finally {
@@ -1211,16 +1236,16 @@ function showBrowserCompatibilityWarning(): void {
   elements.browserWarning.hidden = false;
 }
 
-function describePackageLoad(packageNames: string[]): string {
-  if (packageNames.length === 1) {
-    return `Resolving ${packageNames[0]} and its cached package data.`;
-  }
-  return `Resolving ${packageNames[0]} with ${packageNames.length - 1} supporting package${packageNames.length === 2 ? "" : "s"}.`;
+function setBootMessage(detail: string): void {
+  elements.bootDetail.textContent = detail;
 }
 
-function setBootMessage(title: string, detail: string): void {
-  elements.bootTitle.textContent = title;
-  elements.bootDetail.textContent = detail;
+function showPackageProgress(progress: PackageLoadProgress): void {
+  loadingScreen.update(progress);
+  const label = progress.phase === "resolving" ? "Resolving packages…" :
+    progress.phase === "downloading" ? "Downloading packages…" : "Preparing packages…";
+  setState("loading", label);
+  setBootMessage(label);
 }
 
 function setState(state: string, status: string): void {
@@ -1235,8 +1260,9 @@ function setBusy(busy: boolean): void {
 }
 
 function showStartupError(error: unknown): void {
+  loadingScreen.fail();
   setState("error", "Unable to start");
-  setBootMessage("The shell could not start", describeError(error));
+  setBootMessage(describeError(error));
   elements.retry.hidden = false;
   showTerminalError(error);
 }

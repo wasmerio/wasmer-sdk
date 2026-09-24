@@ -147,7 +147,7 @@ async def benchmark_wasmer(count: int, cache_root: Path) -> tuple[list[Sample], 
     for runtime, spec in RUNTIMES.items():
         packages[runtime] = await wasmer.packages.load(spec["wasmer_package"])
     tools = await wasmer.packages.load("wasmer/coreutils@=1.0.25")
-    postgres = await wasmer.packages.load("wasmer/pglite@=0.1.0")
+    postgres = await wasmer.packages.load("wasmer/pglite@=0.1.3")
 
     # Force compilation before samples. Disk package acquisition and compilation
     # are preparation, not sandbox creation or CPython startup.

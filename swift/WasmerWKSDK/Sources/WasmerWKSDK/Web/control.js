@@ -41,15 +41,29 @@ worker.onmessage = async ({ data }) => {
   }
   if (data.kind === "ready") { void native.postMessage({ ...data, pageIsolated: crossOriginIsolated }); return; }
   if (data.kind === "diagnostic" || data.kind === "progress") { void native.postMessage({ kind: "progress", message: data.message }); return; }
+  if (data.kind === "packageProgress") {
+    const entry = pending.get(data.id);
+    if (entry && !entry.cancelled) {
+      entry.progress = (entry.progress ?? Promise.resolve()).then(() => {
+        if (!entry.cancelled) return native.postMessage(data);
+      }).catch(() => {});
+    }
+    return;
+  }
   const entry = pending.get(data.id);
   if (entry) {
-    pending.delete(data.id);
     if (entry.cancelled && !data.error) {
       // Cancellation can overtake a result already queued by the worker.
       const cleanup = entry.method === "command.spawn" ? ["process.release", { process: data.value.handle }] :
-        entry.method === "sandbox.create" ? ["sandbox.close", { sandbox: data.value }] : undefined;
+        entry.method === "sandbox.create" ? ["sandbox.close", { sandbox: data.value }] :
+        entry.method === "tcp.connect" ? ["tcp.close", { connection: data.value }] : undefined;
       if (cleanup) worker.postMessage({ id: crypto.randomUUID(), method: cleanup[0], args: cleanup[1] });
-    } else entry.resolve(data);
+    } else {
+      // Flush the final progress message before settling the Swift await.
+      await entry.progress;
+      if (!entry.cancelled) entry.resolve(data);
+    }
+    pending.delete(data.id);
   }
 };
 worker.onerror = event => {

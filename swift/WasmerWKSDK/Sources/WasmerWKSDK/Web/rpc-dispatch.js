@@ -15,11 +15,11 @@ const outputValue = value => {
 };
 
 export class SDKDispatcher {
-  #core; #initialize; #network; #storage; #ready; #next = 0;
-  #packages = new Map(); #packageIDs = new Map(); #sandboxes = new Map(); #processes = new Map(); #jobs = new Map();
-  constructor(initialize, network, storage) { this.#initialize = initialize; this.#network = network; this.#storage = storage; }
+  #core; #initialize; #network; #storage; #progress; #cancellation; #ready; #next = 0;
+  #connections = new Map(); #packages = new Map(); #packageIDs = new Map(); #sandboxes = new Map(); #processes = new Map(); #jobs = new Map();
+  constructor(initialize, network, storage, progress, cancellation) { this.#initialize = initialize; this.#network = network; this.#storage = storage; this.#progress = progress; this.#cancellation = cancellation; }
   async request(id, method, args) {
-    const job = { cancelled: false, process: undefined, sandbox: undefined };
+    const job = { id, cancelled: false, process: undefined, sandbox: undefined, loadCancellation: undefined };
     this.#jobs.set(id, job);
     try {
       if (method === "initialize") {
@@ -30,12 +30,20 @@ export class SDKDispatcher {
       if (!this.#ready) fail("CLIENT_CLOSED", "Client was not initialized");
       await this.#ready;
       const result = await this.#dispatch(method, args, job);
-      if (job.cancelled) fail("CANCELLED", "Swift task cancelled");
+      if (job.cancelled) {
+        if (job.connection) this.#closeConnection(job.connection);
+        fail("CANCELLED", "Swift task cancelled");
+      }
       return result;
     } finally { this.#jobs.delete(id); this.#collect(); }
   }
   #collect() {
     const jobs = [...this.#jobs.values()];
+    for (const [id, connection] of this.#connections) {
+      if (connection.closed && !jobs.some(job => job.connection === connection)) {
+        connection.value.free(); this.#connections.delete(id);
+      }
+    }
     for (const [id, value] of this.#processes) {
       if (value.released && !jobs.some(job => job.process === value.process)) {
         value.process.free(); this.#processes.delete(id);
@@ -49,7 +57,19 @@ export class SDKDispatcher {
   }
   cancel(id) {
     const job = this.#jobs.get(id);
-    if (job) { job.cancelled = true; job.process?.kill(); }
+    if (job) { job.cancelled = true; job.process?.kill(); job.loadCancellation?.cancel(); if (job.connection) this.#closeConnection(job.connection); }
+  }
+  #closeConnection(connection) {
+    if (connection.closed) return;
+    connection.closed = true;
+    connection.value.close();
+  }
+  #connection(handle, job) {
+    const connection = this.#connections.get(handle);
+    if (!connection || connection.closed) fail("CONNECTION_CLOSED", "TCP connection is closed");
+    job.connection = connection;
+    this.#sandbox(connection.sandbox, job);
+    return connection.value;
   }
   #package(handle) {
     const value = this.#packages.get(handle);
@@ -94,6 +114,30 @@ export class SDKDispatcher {
   }
   async #dispatch(method, args, job) {
     switch (method) {
+      case "package.many": {
+        const cancellation = this.#cancellation();
+        job.loadCancellation = cancellation;
+        if (job.cancelled) cancellation.cancel();
+        const reused = args.sources.filter(s => s.package != null).map(s => this.#package(s.package));
+        const sources = args.sources.filter(s => s.package == null).map(s => s.registry ?? decode(s.bytes));
+        const onProgress = args.progress ? progress => {
+          const ids = new Set(progress.packages.map(p => p.id));
+          const packages = [...progress.packages];
+          for (const pkg of reused) {
+            if (ids.has(pkg.id)) continue;
+            ids.add(pkg.id);
+            packages.push({ id: pkg.id, phase: "ready", cached: true,
+              download: { downloadedBytes: 0, totalBytes: 0, percent: 100 } });
+          }
+          if (!job.cancelled) this.#progress({ kind: "packageProgress", id: job.id, progress: { ...progress, packages } });
+        } : undefined;
+        try {
+          const loaded = await this.#core.loadPackages(sources, onProgress, cancellation);
+          if (job.cancelled) { for (const pkg of loaded) pkg.free(); fail("CANCELLED", "Swift task cancelled"); }
+          let next = 0;
+          return args.sources.map(s => s.package != null ? this.#packageIDs.get(this.#package(s.package).id) : this.#retainPackage(loaded[next++]));
+        } finally { job.loadCancellation = undefined; cancellation.free(); }
+      }
       case "package.load": return this.#retainPackage(await this.#core.loadPackage(args.source));
       case "package.bytes": return this.#retainPackage(await this.#core.loadPackageBytes(decode(args.bytes)));
       case "package.create": {
@@ -143,6 +187,9 @@ export class SDKDispatcher {
         if (!sandbox || sandbox.closed) return true;
         sandbox.closed = true; job.sandbox = args.sandbox;
         for (const value of this.#processes.values()) if (value.sandbox === args.sandbox) value.process.kill();
+        for (const connection of this.#connections.values()) {
+          if (connection.sandbox === args.sandbox) this.#closeConnection(connection);
+        }
         await sandbox.value.close();
         sandbox.network?.close();
         if (sandbox.storageMount) await this.#storage.close(sandbox.storageMount);
@@ -233,6 +280,22 @@ export class SDKDispatcher {
       case "ports.list": {
         const ports = this.#sandbox(args.sandbox, job).value.httpListeningPorts();
         return ports == null ? null : Array.from(ports);
+      }
+      case "tcp.connect": {
+        const value = this.#sandbox(args.sandbox, job).value.connectTcp(args.port);
+        const handle = ++this.#next;
+        const connection = { value, sandbox: args.sandbox, closed: false };
+        this.#connections.set(handle, connection);
+        job.connection = connection;
+        return handle;
+      }
+      case "tcp.read": return encode(await this.#connection(args.connection, job).read());
+      case "tcp.write": await this.#connection(args.connection, job).write(decode(args.bytes)); return true;
+      case "tcp.shutdownWrite": this.#connection(args.connection, job).shutdownWrite(); return true;
+      case "tcp.close": {
+        const connection = this.#connections.get(args.connection);
+        if (connection) this.#closeConnection(connection);
+        return true;
       }
       case "ports.request": {
         const response = await this.#sandbox(args.sandbox, job).value.handleHttpRequest(args.port, args.method, args.path, args.headers, decode(args.body));

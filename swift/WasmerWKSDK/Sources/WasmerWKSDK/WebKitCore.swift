@@ -71,7 +71,7 @@ private actor WebKitClient {
   private var transport: WebKitTransport?
   private var starting: Task<WebKitTransport, Error>?
   private var closed = false
-  private var exposures: [Int: [GuestHTTPServer]] = [:]
+  private var exposures: [Int: [any GuestPortServer]] = [:]
   private var closedSandboxes: Set<Int> = []
   init(options: ClientOptions) { self.options = options }
   func host() async throws -> WebKitTransport {
@@ -115,12 +115,13 @@ private actor WebKitClient {
     }
   }
   func call<T: Decodable & Sendable>(
-    _ method: String, _ args: [String: Wire] = [:], as: T.Type = T.self
+    _ method: String, _ args: [String: Wire] = [:], as: T.Type = T.self,
+    onProgress: (@Sendable (PackageLoadProgress) -> Void)? = nil
   ) async throws -> T {
     try Task.checkCancellation()
     let host = try await host()
     try Task.checkCancellation()
-    let data = try await host.request(method, payload: JSONEncoder().encode(args))
+    let data = try await host.request(method, payload: JSONEncoder().encode(args), onProgress: onProgress)
     let reply: Reply<T>
     do { reply = try JSONDecoder().decode(Reply<T>.self, from: data) } catch {
       throw SdkError.Failure(
@@ -141,7 +142,7 @@ private actor WebKitClient {
     if let transport { await transport.close() }
     transport = nil
   }
-  func ownExposure(_ server: GuestHTTPServer, sandbox: Int) throws {
+  func ownExposure(_ server: any GuestPortServer, sandbox: Int) throws {
     guard !closed, !closedSandboxes.contains(sandbox) else {
       server.stop()
       throw SdkError.Failure(code: "SANDBOX_CLOSED", message: "Sandbox is closed")
@@ -230,6 +231,44 @@ public final class WasmerCore: Sendable {
     guard case .object(let args) = try Wire.encode(definition) else { preconditionFailure() }
     let value: PackageValue = try await client.call("package.create", args)
     return PackageCore(client: client, value: value, source: .definition(definition))
+  }
+  public func loadPackages(sources: [PackageLoadSource], observer: (any PackageLoadObserver)?, cancellation: PackageLoadCancellation?) async throws -> [PackageCore] {
+    var encoded: [Wire] = []
+    var origins: [Source] = []
+    for source in sources {
+      switch source {
+      case .registry(let specifier):
+        encoded.append(.object(["registry": .string(specifier)])); origins.append(.registry(specifier))
+      case .path(let path):
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &directory) else {
+          throw SdkError.Failure(code: "PACKAGE_LOAD_FAILED", message: "Package file does not exist: \(path)")
+        }
+        guard !directory.boolValue else {
+          throw SdkError.Failure(code: "CAPABILITY_UNAVAILABLE", message: "WebKit cannot load a local package directory. Pass a WEBC/Wasm file or use packages.create(PackageDefinition).")
+        }
+        let bytes: Data
+        do { bytes = try Data(contentsOf: URL(fileURLWithPath: path)) }
+        catch { throw SdkError.Failure(code: "PACKAGE_LOAD_FAILED", message: error.localizedDescription) }
+        encoded.append(.object(["bytes": .string(bytes.base64EncodedString())])); origins.append(.bytes(bytes))
+      case .bytes(let bytes):
+        encoded.append(.object(["bytes": .string(bytes.base64EncodedString())])); origins.append(.bytes(bytes))
+      case .package(let package):
+        let package = try await owned(package)
+        encoded.append(.object(["package": .handle(package.value.handle)])); origins.append(package.source)
+      }
+    }
+    let args: [String: Wire] = ["sources": .array(encoded), "progress": .bool(observer != nil)]
+    let task = Task { [client, origins] in
+      let callback: (@Sendable (PackageLoadProgress) -> Void)? = observer.map { observer in
+        { @Sendable progress in observer.onProgress(progress: progress) }
+      }
+      let values: [PackageValue] = try await client.call("package.many", args, onProgress: callback)
+      return zip(values, origins).map { value, source in PackageCore(client: client, value: value, source: source) }
+    }
+    cancellation?.attach { task.cancel() }
+    defer { cancellation?.detach() }
+    return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
   }
   public func loadPackageRegistry(specifier: String) async throws -> PackageCore {
     let value: PackageValue = try await client.call("package.load", ["source": .string(specifier)])
@@ -582,6 +621,36 @@ public final class PortsCore: Sendable {
         "body": .string(request.body.base64EncodedString()),
       ])
   }
+  /// Forward raw TCP to an ephemeral loopback port for native protocol clients.
+  public func forwardTCP(port: UInt16) async throws -> TCPPortForwardCore {
+    try await wait(port: port, timeoutMs: 30_000)
+    let client = sandbox.client
+    let sandboxHandle = sandbox.handle
+    let server = GuestTCPServer {
+      let handle: Int = try await client.call("tcp.connect", [
+        "sandbox": .handle(sandboxHandle), "port": .number(Double(port)),
+      ])
+      let args: [String: Wire] = ["connection": .handle(handle)]
+      return GuestTCPStream(
+        read: { try await client.call("tcp.read", args) },
+        write: { bytes in
+          let _: Bool = try await client.call("tcp.write", args.merging([
+            "bytes": .string(bytes.base64EncodedString()),
+          ]) { _, rhs in rhs })
+        },
+        shutdownWrite: { let _: Bool = try await client.call("tcp.shutdownWrite", args) },
+        close: {
+          // Cleanup must still reach JS when the forwarding task was cancelled.
+          await Task { let _: Bool? = try? await client.call("tcp.close", args) }.value
+        }
+      )
+    }
+    do {
+      let localPort = try await server.start()
+      try await client.ownExposure(server, sandbox: sandboxHandle)
+      return TCPPortForwardCore(port: localPort, server: server)
+    } catch { server.stop(); throw error }
+  }
   public func expose(port: UInt16) async throws -> ExposedPortCore {
     try await wait(port: port, timeoutMs: 30_000)
     let server = GuestHTTPServer { request in try await self.request(port: port, request: request) }
@@ -602,6 +671,18 @@ public final class ExposedPortCore: Sendable {
     self.url = url
     self.server = server
   }
+  public func close() { server.stop() }
+  deinit { server.stop() }
+}
+
+protocol GuestPortServer: Sendable { func stop() }
+extension GuestHTTPServer: GuestPortServer {}
+extension GuestTCPServer: GuestPortServer {}
+
+public final class TCPPortForwardCore: Sendable {
+  public let port: UInt16
+  private let server: GuestTCPServer
+  fileprivate init(port: UInt16, server: GuestTCPServer) { self.port = port; self.server = server }
   public func close() { server.stop() }
   deinit { server.stop() }
 }

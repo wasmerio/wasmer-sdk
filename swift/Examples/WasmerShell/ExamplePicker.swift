@@ -11,6 +11,7 @@ struct ShellExample: Decodable, Identifiable, Sendable {
   let icon: String
   let dependencies: String
   let packages: [String]
+  let env: [String: String]?
   let install: String?
   let run: String
 
@@ -22,6 +23,12 @@ struct ShellExample: Decodable, Identifiable, Sendable {
       return try JSONDecoder().decode([ShellExample].self, from: Data(contentsOf: url))
     } catch { preconditionFailure("Invalid bundled example catalog: \(error)") }
   }()
+
+  static func environment(for example: ShellExample?) -> [String: String] {
+    (example.map { [$0] } ?? all).reduce(into: [:]) { env, item in
+      env.merge(item.env ?? [:]) { _, value in value }
+    }
+  }
 }
 
 struct ExamplePicker: View {
