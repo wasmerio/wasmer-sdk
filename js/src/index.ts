@@ -68,11 +68,17 @@ export type WispUrlProvider = (
 export type NetworkPolicy =
   | { mode: "disabled" }
   | { mode: "host" }
-  /** Browser-only HTTP ingress, exposed through `sandbox.ports.expose()`. */
-  | { mode: "http" }
+  /** Browser virtual TCP and HTTP ingress, with no external egress. */
+  | {
+      mode: "http";
+      /** Omit to share localhost with this client; [] isolates, [sandbox] links explicitly. */
+      peers?: readonly Sandbox[];
+    }
   /** Browser TCP/DNS egress over WISP, plus browser HTTP ingress. */
   | {
       mode: "wisp";
+      /** Omit to share localhost with this client; [] isolates, [sandbox] links explicitly. */
+      peers?: readonly Sandbox[];
       /** Initial endpoint. The connection is opened lazily on first network egress. */
       url?: string;
       dnsUrl?: string;
@@ -334,6 +340,7 @@ function toWasmerError(error: unknown): unknown {
 }
 
 const packageCores = new WeakMap<Package, PackageCore>();
+const sandboxCores = new WeakMap<Sandbox, SandboxCore>();
 
 let browserInitialization: Promise<void> | undefined;
 const MAX_WASM32_SIZE = 0xffff_ffff;
@@ -545,6 +552,15 @@ export class Wasmer {
       builder.network(network.mode);
     }
     try {
+      if ((network.mode === "http" || network.mode === "wisp") && network.peers !== undefined) {
+        builder.restrictNetworkPeers();
+        for (const peer of new Set(network.peers)) {
+          if (peer.wasmer !== this) {
+            throw new WasmerError("network peers must belong to the same Wasmer client", "INVALID_ARGUMENT");
+          }
+          rethrowSync(() => builder.addNetworkPeer(sandboxCores.get(peer)!));
+        }
+      }
       const core = await rethrow(builder.start());
       return new Sandbox(this, core, options.shell, networkBridge);
     } catch (error) {
@@ -690,6 +706,7 @@ export class Sandbox {
     networkBridge?: NetworkBridge,
   ) {
     this.#core = core;
+    sandboxCores.set(this, core);
     this.fs = new SandboxFileSystem(core);
     this.ports = new Ports(core);
     this.network = new SandboxNetworkService(networkBridge);
@@ -835,9 +852,9 @@ export class Ports {
    * what the guest exposed, and fails with `CAPABILITY_UNAVAILABLE` when
    * networking is disabled.
    *
-   * A successful probe opens and immediately closes one real TCP connection.
-   * Use an application-level readiness signal for one-shot or
-   * connection-count-sensitive servers.
+   * Browser virtual networks observe the listener without connecting. Other
+   * targets open and immediately close a real TCP connection; use an
+   * application readiness signal there for single-client servers.
    */
   async wait(
     port: number,
@@ -845,7 +862,19 @@ export class Ports {
   ): Promise<void> {
     const validPort = validateInteger("port", port, 1, 65_535);
     const timeoutMs = validateTimeoutMs(options.timeoutMs ?? 30_000);
-    await rethrow(this.#core.waitForPort(validPort, timeoutMs));
+    let browserNetwork = false;
+    try {
+      this.#core.httpListeningPorts();
+      browserNetwork = true;
+    } catch (error) {
+      if (!WasmerError.is(toWasmerError(error), "CAPABILITY_UNAVAILABLE")) throw error;
+    }
+    if (browserNetwork) {
+      // Observing readiness must not consume a single-client server's connection.
+      await waitForTcpListener(this.#core, validPort, timeoutMs);
+    } else {
+      await rethrow(this.#core.waitForPort(validPort, timeoutMs));
+    }
   }
 
   /**
@@ -868,7 +897,7 @@ export class Ports {
       options?.serviceWorker ?? DEFAULT_SERVICE_WORKER_ORIGIN,
       timeoutMs,
     );
-    await waitForHttpListener(this.#core, validPort, timeoutMs);
+    await waitForTcpListener(this.#core, validPort, timeoutMs);
 
     const id = createBrowserServerId();
     const channel = new MessageChannel();
@@ -920,7 +949,7 @@ export class Ports {
   }
 
   /**
-   * Observe HTTP listeners opened by browser guests.
+   * Observe TCP listeners opened by browser guests. The protocol may not be HTTP.
    *
    * Existing listeners are delivered immediately. A port is delivered again
    * if its listener closes and a later process binds it again.
@@ -1248,7 +1277,7 @@ async function connectRemoteServiceWorker(
   }
 }
 
-async function waitForHttpListener(
+async function waitForTcpListener(
   core: SandboxCore,
   port: number,
   timeoutMs: number,
@@ -1257,7 +1286,7 @@ async function waitForHttpListener(
   while (!rethrowSync(() => core.isHttpPortListening(port))) {
     if (performance.now() >= deadline) {
       throw new WasmerError(
-        `timed out waiting for the guest HTTP listener on port ${port}`,
+        `timed out waiting for the guest TCP listener on port ${port}`,
         "TIMEOUT",
       );
     }

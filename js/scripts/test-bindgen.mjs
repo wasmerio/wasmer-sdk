@@ -23,7 +23,7 @@ try {
       "-p", "wasmer-sdk-js",
       "--lib",
       "--target", "wasm32-unknown-unknown",
-      "tasks::interop::tests",
+      process.argv[2] ?? "tasks::interop::tests",
     ],
     {
       cwd: resolve(packageRoot, ".."),

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PostgreSQL in your browser · Wasmer</title>
+<style>
+  :root { color-scheme: dark; font: 16px system-ui, sans-serif; background: #0d1117; color: #e6edf3; }
+  body { max-width: 880px; margin: 3rem auto; padding: 0 1.5rem; }
+  h1 { font-size: 2rem; letter-spacing: -.04em; margin-bottom: .5rem; }
+  p { color: #9da8b6; line-height: 1.6; }
+  pre { box-sizing: border-box; height: 48vh; min-height: 250px; overflow: auto; padding: 1.25rem; background: #070b10; border: 1px solid #273140; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.6 ui-monospace, monospace; }
+  label { display: block; margin: 1rem 0 .5rem; }
+  textarea { box-sizing: border-box; width: 100%; min-height: 5rem; padding: .75rem; font: 14px/1.5 ui-monospace, monospace; border: 1px solid #536277; border-radius: 6px; background: #141b24; color: inherit; resize: vertical; }
+  button { margin: .75rem .5rem 0 0; padding: .6rem 1rem; border: 1px solid #536277; border-radius: 6px; background: #253348; color: inherit; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  :focus-visible { outline: 2px solid #84b9ff; outline-offset: 3px; }
+  #error { color: #ffada5; }
+</style>
+<h1>PostgreSQL in your browser</h1>
+<p>PGlite and psql run here as WebAssembly. Their connection stays in memory—no database server or network proxy to set up.</p>
+<p id="status" role="status">Ready to start.</p>
+<button id="start">Start database</button>
+<pre id="output" aria-label="psql terminal output" tabindex="0"></pre>
+<form id="form">
+  <label for="sql">SQL or psql command</label>
+  <textarea id="sql" spellcheck="false">SELECT version();
+SELECT 6 * 7 AS answer;</textarea>
+  <button id="send" disabled>Send to psql</button>
+</form>
+<p id="error" role="alert"></p>
+<p>Try <code>\dt</code>, <code>SELECT 1 / 0;</code>, or <code>\q</code>. Restarting discards this session’s data.</p>
+<script type="module">
+  import { startPostgres } from './postgres-browser.mjs';
+  const start = document.querySelector('#start'), send = document.querySelector('#send');
+  const status = document.querySelector('#status'), output = document.querySelector('#output');
+  const error = document.querySelector('#error'), sql = document.querySelector('#sql');
+  let session;
+  start.onclick = async () => {
+    start.disabled = send.disabled = true;
+    error.textContent = '';
+    status.textContent = 'Starting PostgreSQL…';
+    try {
+      const previous = session;
+      session = undefined;
+      await previous?.close();
+      output.textContent = '';
+      session = await startPostgres({
+        onProgress(value) { status.textContent = `Loading packages${value.download.percent === null ? '…' : ` · ${Math.round(value.download.percent)}%`}`; },
+        onOutput(text) { output.textContent = (output.textContent + text).slice(-128 * 1024); output.scrollTop = output.scrollHeight; },
+      });
+      status.textContent = 'Connected · localhost:5432 · browser memory';
+      send.disabled = false; sql.focus();
+      const current = session;
+      void session.done.then(result => {
+        if (session !== current) return;
+        status.textContent = `psql exited (${result.exitCode}). Restart to reconnect.`;
+        send.disabled = true;
+      }).catch(cause => { if (session === current) fail(cause); });
+    } catch (cause) { fail(cause); }
+    finally { start.disabled = false; start.textContent = 'Restart database'; }
+  };
+  function fail(cause) { error.textContent = cause.message ?? String(cause); send.disabled = true; }
+  document.querySelector('#form').onsubmit = async event => {
+    event.preventDefault();
+    if (!sql.value.trim() || !session) return;
+    try { await session.send(sql.value); } catch (cause) { fail(cause); }
+  };
+</script>
+</html>

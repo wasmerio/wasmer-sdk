@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 
-use browser_http::{BrowserHttpNetworking, BrowserHttpRequestHandler};
+use browser_http::{BrowserHttpRequestHandler, BrowserNetworkGroup};
 use bytes::Bytes;
 use http::{Request as HttpRequest, header::HOST};
 use js_sys::Uint8Array;
@@ -135,6 +135,7 @@ impl From<PackageDefinition> for wasmer_sdk::PackageDefinition {
 pub struct JsWasmer {
     inner: Wasmer,
     tasks: Arc<tasks::ThreadPool>,
+    browser_networks: BrowserNetworkGroup,
 }
 
 #[wasm_bindgen(js_class = WasmerCore)]
@@ -208,7 +209,11 @@ impl JsWasmer {
         let package_cache = cache.map(|cache| -> Arc<dyn PackageCache> { cache });
         let inner = Wasmer::from_js_runtime(&config, runtime, query_cache, package_cache)
             .map_err(sdk_error)?;
-        Ok(Self { inner, tasks })
+        Ok(Self {
+            inner,
+            tasks,
+            browser_networks: BrowserNetworkGroup::default(),
+        })
     }
 
     #[wasm_bindgen(js_name = createPackage)]
@@ -248,10 +253,12 @@ impl JsWasmer {
         JsSandboxBuilder {
             inner: Some(self.inner.sandboxes().create()),
             browser_http: None,
+            browser_networks: self.browser_networks.clone(),
         }
     }
 
     pub async fn shutdown(&self) -> Result<(), JsValue> {
+        self.browser_networks.close();
         self.inner.shutdown().await.map_err(sdk_error)?;
         self.tasks
             .close_and_wait()
@@ -293,6 +300,7 @@ impl JsPackage {
 pub struct JsSandboxBuilder {
     inner: Option<SandboxBuilder>,
     browser_http: Option<BrowserHttpRequestHandler>,
+    browser_networks: BrowserNetworkGroup,
 }
 
 #[wasm_bindgen(js_class = SandboxBuilderCore)]
@@ -360,7 +368,7 @@ impl JsSandboxBuilder {
                 builder.network(NetworkPolicy::Host)
             }
             "http" => {
-                let networking = BrowserHttpNetworking::new();
+                let networking = self.browser_networks.create(None);
                 self.browser_http = Some(networking.request_handler());
                 builder.network_provider(Arc::new(networking))
             }
@@ -379,10 +387,44 @@ impl JsSandboxBuilder {
     #[wasm_bindgen(js_name = networkWisp)]
     pub fn network_wisp(&mut self, bridge: NodeNetworkBridge) -> Result<(), JsValue> {
         let builder = self.take()?;
-        let networking = BrowserHttpNetworking::with_egress(NodeNetworking::new(bridge));
+        let networking = self
+            .browser_networks
+            .create(Some(NodeNetworking::new(bridge)));
         self.browser_http = Some(networking.request_handler());
         self.inner = Some(builder.network_provider(Arc::new(networking)));
         Ok(())
+    }
+
+    /// Disable automatic localhost discovery before adding explicit peers.
+    #[wasm_bindgen(js_name = restrictNetworkPeers)]
+    pub fn restrict_network_peers(&self) -> Result<(), JsValue> {
+        self.browser_http
+            .as_ref()
+            .ok_or_else(|| {
+                custom_error(
+                    "CAPABILITY_UNAVAILABLE",
+                    "network peers require browser networking",
+                )
+            })?
+            .restrict_peers()
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = addNetworkPeer)]
+    pub fn add_network_peer(&self, peer: &JsSandbox) -> Result<(), JsValue> {
+        let own = self.browser_http.as_ref().ok_or_else(|| {
+            custom_error(
+                "CAPABILITY_UNAVAILABLE",
+                "network peers require browser networking",
+            )
+        })?;
+        let peer = peer.browser_http.as_ref().ok_or_else(|| {
+            custom_error(
+                "CAPABILITY_UNAVAILABLE",
+                "the peer requires browser networking",
+            )
+        })?;
+        own.add_peer(peer).map_err(js_error)
     }
 
     pub async fn start(mut self) -> Result<JsSandbox, JsValue> {
@@ -658,6 +700,9 @@ impl JsSandbox {
     }
 
     pub async fn close(&self) -> Result<(), JsValue> {
+        if let Some(network) = &self.browser_http {
+            network.close();
+        }
         self.inner.close().await.map_err(sdk_error)
     }
 }
