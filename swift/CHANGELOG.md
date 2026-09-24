@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-swift-v0.5.0...wasmer-sdk-swift-v0.6.0) (2026-09-24)
+
+
+### Features
+
+* **js:** connect browser sandboxes over local TCP and run PostgreSQL ([#530](https://github.com/wasmerio/wasmer-sdk/issues/530)) ([2478d31](https://github.com/wasmerio/wasmer-sdk/commit/2478d3175abe0dd2827be0901ebd80a0a8812050))
+
 ## [0.5.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-swift-v0.4.0...wasmer-sdk-swift-v0.5.0) (2026-09-24)
 
 
