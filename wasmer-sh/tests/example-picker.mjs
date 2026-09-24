@@ -273,11 +273,11 @@ try {
       await page.evaluate(() => window.__wasmerShell.send("\\q\r"));
       await waitForPrompt(beforeQuit);
       await page.evaluate(() => window.__wasmerShell.waitForPort(5432));
-      assert((await command("psql -Atc 'SELECT count(*) AS saved_notes FROM notes'")).includes("\n1\n"));
+      assert((await command(`psql -Atc "SELECT 'saved_notes=' || count(*) FROM notes"`)).includes("saved_notes=1"));
       // A server with no client reaches WASIX's accept timeout after 30 seconds.
       await new Promise(resolve => setTimeout(resolve, 32_000));
       await page.evaluate(() => window.__wasmerShell.waitForPort(5432));
-      assert((await command("psql -Atc 'SELECT count(*) FROM notes'")).includes("\n1\n"));
+      assert((await command(`psql -Atc "SELECT 'idle_notes=' || count(*) FROM notes"`)).includes("idle_notes=1"));
       assert.equal(await page.locator("#preview-panel").isVisible(), false);
       assert.equal(proxyConnections, connections, "PostgreSQL must not connect to Wisp");
       assert.equal(await page.locator("#wisp-dialog").isVisible(), false);
