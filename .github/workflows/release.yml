@@ -75,7 +75,7 @@ jobs:
               release-please--branches--main--components--wasmer-sdk-swift)
                 gh workflow run prepare-swift-release.yml --repo "$GITHUB_REPOSITORY" --ref main -f pull_request="$pr"
                 ;;
-              release-please--branches--main--components--wasmer-sdk-js|release-please--branches--main--components--wasmer-sdk-python)
+              release-please--branches--main--components--wasmer-sdk-js|release-please--branches--main--components--wasmer-sdk-python|release-please--branches--main--components--wasmer-sdk-go)
                 gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
                 ;;
             esac
@@ -113,12 +113,12 @@ jobs:
           HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           if [ -n "$REQUESTED_TAG" ]; then
-            [[ "$REQUESTED_TAG" =~ ^wasmer-sdk-(js|python|swift)-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            [[ "$REQUESTED_TAG" =~ ^wasmer-sdk-(js|python|swift|go)-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
             component="${BASH_REMATCH[1]}"
             gh release view "$REQUESTED_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
             echo 'retry=true' >> "$GITHUB_OUTPUT"
           else
-            [[ "$HEAD_BRANCH" =~ ^release-please--branches--main--components--wasmer-sdk-(js|python|swift)$ ]]
+            [[ "$HEAD_BRANCH" =~ ^release-please--branches--main--components--wasmer-sdk-(js|python|swift|go)$ ]]
             component="${BASH_REMATCH[1]}"
             echo 'retry=false' >> "$GITHUB_OUTPUT"
           fi
@@ -203,6 +203,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           COMPONENT: ${{ needs.select.outputs.component }}
         run: python .github/scripts/github_release.py download --component "$COMPONENT" --assets release-dist
+
+  publish-go:
+    needs: [select, artifacts]
+    if: always() && needs.artifacts.result == 'success' && needs.select.outputs.component == 'go'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.select.outputs.tag }}
+        run: gh workflow run activate-go-proxy.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$RELEASE_TAG"
 
   publish-python:
     needs: [select, artifacts]

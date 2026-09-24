@@ -1,6 +1,6 @@
 # SDK releases
 
-JavaScript, Python, and Swift retain independent versions and GitHub releases.
+JavaScript, Python, Swift, and Go retain independent versions and GitHub releases.
 Release Please reads each component's manifest and creates separate release PRs.
 Existing JavaScript and Python versions and tag names are preserved; Swift's
 initial version is `0.2.1`, matching Python at the time Swift was added.
@@ -10,6 +10,7 @@ initial version is `0.2.1`, matching Python at the time Swift was added.
 | JavaScript | `js/package.json` | `wasmer-sdk-js-v<version>` | One npm `.tgz`, including Node and browser exports |
 | Python | `python/pyproject.toml` | `wasmer-sdk-python-v<version>` | Four `py3-none` wheels: macOS arm64/x86_64 and Linux aarch64/x86_64 |
 | Swift | `swift/version.txt` | `wasmer-sdk-swift-v<version>` | One universal macOS arm64/x86_64 XCFramework ZIP |
+| Go | `go/version.txt` | `wasmer-sdk-go-v<version>` | Source module ZIP, `.mod`/`.info`, and four native archives containing static and dynamic libraries |
 
 Each release also includes `SHA256SUMS` and `release-metadata.json`, recording
 the source commit, component version, and artifact hashes. Rust crate versions
@@ -127,6 +128,39 @@ predates iOS support; see the
 [iOS installation guide](../swift/WasmerWKSDK/README.md#add-to-an-app) for
 local build and resource generation instructions.
 
+## Go distribution
+
+Go's generated UniFFI bindings and C header are committed alongside the
+handwritten API, helper, build tooling, and release descriptor. Normal CI and
+release builds use these sources without compiling the binding generator.
+`go/bindings.json` records their inputs and output hashes; CI checks this receipt
+and requires explicit regeneration when it becomes stale. Native libraries
+remain release-only artifacts, and CI rejects adding those binaries to Git.
+
+The Go release matrix uses Linux amd64/arm64 and macOS amd64/arm64. It builds the
+shared UniFFI facade, tests both link modes, runs registry workloads, and tests an
+external application against the exact packaged module and native archive. The
+bundle job requires all four architectures and matching interface hashes before
+creating the complete source ZIP and embedded native checksums.
+
+After GitHub publication, **Activate Go module proxy** verifies those assets and
+updates `go/proxy/versions.json` on the `go-module-index` branch. This metadata
+branch starts from the release source and updates only the index; it contains no
+native binaries. The Node service reads the index and redirects module downloads
+to immutable release assets.
+If activation fails, dispatch that workflow again with the same Go component tag.
+
+Before the first public Go installation, deploy the dependency-free
+[Node proxy](../go/proxy/README.md), configure `go.wasmer.io` DNS/TLS, and verify
+resolution through Go's default public proxy/checksum database. Version `v0.1.0`
+is the Go module identity; `wasmer-sdk-go-v0.1.0` remains the repository release
+tag. There is no registry upload to npm or PyPI for this component.
+
+Changes to shared Rust/UniFFI inputs may need an explicit Go release bump even if
+no file under `go/` changes. Check Go release scope during those reviews. Published
+module ZIPs and native archives are never replaced with new bytes at the same
+version. See the [Go guide](../go/README.md) for installation and source builds.
+
 ## Local validation
 
 ```console
@@ -135,6 +169,10 @@ actionlint
 python3.13 .github/scripts/sdk_release.py check --component js
 python3.13 .github/scripts/sdk_release.py check --component python
 python3.13 .github/scripts/sdk_release.py check --component swift
+python3.13 .github/scripts/sdk_release.py check --component go
+python3.13 .github/scripts/go_release.py check
+python3.13 go/scripts/bindings.py
+node --test go/proxy/*.test.mjs
 ```
 
 Release scripts use Python 3.11 or newer. Ordinary Python SDK consumers still

@@ -32,15 +32,70 @@ jobs:
           python-version: '3.13'
       - name: Check component versions and release tooling
         run: |
-          for component in js python swift; do
+          for component in js python swift go; do
             python .github/scripts/sdk_release.py check --component "$component"
           done
           python -m unittest discover -s .github/scripts/tests -v
+          python .github/scripts/go_release.py check
+          python go/scripts/bindings.py
       - name: Require a prepared Swift release
         if: >-
           github.head_ref == 'release-please--branches--main--components--wasmer-sdk-swift' ||
           github.ref_name == 'release-please--branches--main--components--wasmer-sdk-swift'
         run: python .github/scripts/sdk_release.py verify-swift-inputs
+
+  go-proxy:
+    name: Go module proxy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: node --test go/proxy/*.test.mjs
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.8'
+          cache: false
+      - name: Test the installer without native libraries
+        working-directory: go
+        env:
+          CGO_ENABLED: '0'
+        run: go test ./internal/installer ./cmd/wasmer-sdk
+
+  go-native:
+    name: Go native SDK
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.8'
+          cache: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: ./.github/actions/cache-sdk
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          cargo-profile: native-1.95-release-napi-v8
+      - run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
+      - name: Build native libraries using committed Go bindings
+        run: python go/scripts/build.py --release
+        env:
+          RUSTUP_TOOLCHAIN: 1.95.0
+      - run: python go/scripts/test.py --link static --race
+      - run: python go/scripts/test.py --link dynamic
+      - name: Test a released-module consumer
+        run: |
+          python .github/scripts/go_release.py native --native go/Artifacts/darwin-arm64 --assets go/.build/release
+          python .github/scripts/go_release.py module --local --assets go/.build/release
+          python go/scripts/test_release.py --assets go/.build/release
 
   shell:
     name: Shell (published SDK)

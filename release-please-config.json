@@ -16,6 +16,13 @@
       "include-component-in-tag": true,
       "initial-version": "0.11.0"
     },
+    "go": {
+      "release-type": "simple",
+      "package-name": "wasmer-sdk-go",
+      "component": "wasmer-sdk-go",
+      "include-component-in-tag": true,
+      "initial-version": "0.1.0"
+    },
     "swift": {
       "release-type": "simple",
       "package-name": "wasmer-sdk-swift",

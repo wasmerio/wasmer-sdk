@@ -1,0 +1,9 @@
+{
+  "component": "go",
+  "version_file": "version.txt",
+  "tag_template": "wasmer-sdk-go-v{version}",
+  "release_url_template": "https://github.com/wasmerio/wasmer-sdk/releases/tag/wasmer-sdk-go-v{version}",
+  "source_asset_template": "v{version}.zip",
+  "native_asset_template": "wasmer-sdk-go-{version}-{goos}-{goarch}.tar.gz",
+  "module": "go.wasmer.io/sdk"
+}

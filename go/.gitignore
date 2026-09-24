@@ -1,0 +1,6 @@
+/.build/
+/.wasmer/
+/Artifacts/
+/internal/distribution/native.json
+/testdata/
+/examples/internal/guest/fixtures/

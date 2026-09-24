@@ -100,6 +100,22 @@ class ReleaseTests(unittest.TestCase):
         release.seal(self.assets, 'swift', run_id='1234', root=self.root)
         return bundle
 
+    def test_webkit_verifier_loads_release_helpers_from_an_unrelated_directory(self):
+        archive = self.runtime_archive()
+        verifier = release.ROOT / 'swift/WasmerWKSDK/scripts/verify_runtime.py'
+        # An isolated subprocess avoids the test runner's sys.path additions
+        # and cached imports masking the verifier's file-based loading path.
+        result = subprocess.run([
+            sys.executable, '-I', '-c',
+            'import runpy, sys\n'
+            'from pathlib import Path\n'
+            'release = runpy.run_path(sys.argv[1])["release"]\n'
+            'release.validate_swift_runtime(Path(sys.argv[2]))\n'
+            'release.version("go")\n',
+            str(verifier), str(archive),
+        ], cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def wheels(self):
         for platform in ('manylinux_2_35_x86_64', 'manylinux_2_35_aarch64', 'macosx_12_0_arm64', 'macosx_12_0_x86_64'):
             name = f'wasmer_sdk-0.2.1-py3-none-{platform}.whl'

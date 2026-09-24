@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "inputs": {
+    "Cargo.lock": "beeab970b4a564a30c239e73893e98ff74f3db5b00c54a226c993f1feb73a778",
+    "Cargo.toml": "069a773d0fc9125887942c9fcdc0cbcc4fcc429405d20f47a1db96c76628e383",
+    "go/generator.json": "7bbe6fdafde5e6f5e496bffda0e4e546c0c0e3df341e7be03da16b6104fe00cc",
+    "go/scripts/build.py": "61926da2774b148ea5fab5442d6d04a9ed334df6e8acd6aa3b18034b83975caf",
+    "go/uniffi.toml": "3a6b5a17de01ae1fe292693b8f51d53d1d358bb63104a40408dc8e7392e7dda6",
+    "rust/uniffi/Cargo.toml": "2b9b3275caa11897777d03850e14182b94eb5fea980171907383c0a7e7c57388",
+    "rust/uniffi/src/bin/uniffi-bindgen.rs": "f7a2dd11fb370e9595bdfa6c32fc41a9b67a60bbab06ec711cb7a03eb873ffa6",
+    "rust/uniffi/src/error.rs": "8ca80b8d9f49e2cd373973153c3332a37524a47a476005179ffcafeba35b583b",
+    "rust/uniffi/src/lib.rs": "eef1b9954b6a0c6f8b127e0b8c17f9ccc7025e002e429b3990d4d5849199a721",
+    "rust/uniffi/src/runtime.rs": "97e943974c1aed2a3fe9d20e4bec223f4291fdc00f0142094884076b021d3afd",
+    "rust/uniffi/uniffi.toml": "5eb7078d030378ba3263a6ee98b2f9603ac2195afff5e52518af1d3e4d5d864d"
+  },
+  "generated": {
+    "go/internal/ffi/wasmer_sdk_uniffi.go": "1ab9e4322eead6f5279c4057fd41eca873a879cfbe6accb05e8fe63ba274b923",
+    "go/internal/ffi/wasmer_sdk_uniffi.h": "0d07b974fd61d54d4f6a54e7b8d9261adf2c70e65fcbc453a8d2f462aef32025"
+  }
+}

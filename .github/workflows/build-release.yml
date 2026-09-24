@@ -137,11 +137,103 @@ jobs:
           path: wheelhouse/*.whl
           if-no-files-found: error
 
+  go:
+    if: inputs.component == 'go'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            os: ubuntu-22.04
+            backend: napi-v8
+          - target: linux-arm64
+            os: ubuntu-22.04-arm
+            backend: sys
+          - target: darwin-amd64
+            os: macos-15-intel
+            backend: sys
+          - target: darwin-arm64
+            os: macos-15
+            backend: napi-v8
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.8'
+          cache: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: ./.github/actions/cache-sdk
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          cargo-profile: native-1.95-release-${{ matrix.backend }}
+      - run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
+      - if: runner.os == 'Linux'
+        run: python -m pip install patchelf==0.19.1.0
+      - name: Build native libraries using committed Go bindings
+        env:
+          RUSTUP_TOOLCHAIN: 1.95.0
+        run: python go/scripts/build.py --release
+      - name: Install the PostgreSQL client
+        shell: bash
+        run: |
+          if ! command -v psql >/dev/null; then
+            if [ "$RUNNER_OS" = Linux ]; then
+              sudo apt-get update
+              sudo apt-get install -y postgresql-client
+            else
+              brew install libpq
+              echo "$(brew --prefix libpq)/bin" >> "$GITHUB_PATH"
+            fi
+          fi
+      - name: Test both link modes and registry workloads
+        env:
+          WASMER_GO_INTEGRATION: '1'
+          WASMER_GO_REQUIRE_PSQL: '1'
+          WASMER_GO_NAPI: ${{ matrix.backend == 'napi-v8' && '1' || '0' }}
+        run: |
+          python go/scripts/test.py --link static --race
+          python go/scripts/test.py --link dynamic
+      - name: Run Go examples
+        env:
+          SDK_BACKEND: ${{ matrix.backend }}
+        run: |
+          python go/scripts/run_example.py python
+          python go/scripts/run_example.py postgres_psql
+          if [ "$SDK_BACKEND" = napi-v8 ]; then
+            python go/scripts/run_example.py multiple_runtimes
+            python go/scripts/run_example.py edgejs_http
+          fi
+      - name: Package the tested native libraries
+        env:
+          GO_TARGET: ${{ matrix.target }}
+        run: python .github/scripts/go_release.py native --native "go/Artifacts/$GO_TARGET" --assets release-build
+      - name: Test installation from the packaged bytes
+        run: |
+          mkdir -p go/.build/release
+          cp release-build/*.tar.gz go/.build/release/
+          python .github/scripts/go_release.py module --local --assets go/.build/release
+          python go/scripts/test_release.py --assets go/.build/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-build-go-${{ matrix.target }}
+          path: release-build/*.tar.gz
+          if-no-files-found: error
+
   bundle:
-    needs: [javascript, python]
+    needs: [javascript, python, go]
     if: >-
       always() &&
-      (needs.javascript.result == 'success' || needs.python.result == 'success') &&
+      (needs.javascript.result == 'success' || needs.python.result == 'success' || needs.go.result == 'success') &&
       !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-24.04
     steps:
@@ -156,6 +248,9 @@ jobs:
           pattern: release-build-${{ inputs.component }}*
           merge-multiple: true
           path: release-dist
+      - name: Assemble the Go release module
+        if: inputs.component == 'go'
+        run: python .github/scripts/go_release.py module --assets release-dist
       - name: Validate the complete artifact set and record checksums
         env:
           COMPONENT: ${{ inputs.component }}
