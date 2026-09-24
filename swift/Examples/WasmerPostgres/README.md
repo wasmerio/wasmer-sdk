@@ -29,7 +29,7 @@ runtime until an SDK release includes it; `build.py` sets
 
 ### PostgreSQL package fix
 
-The example loads `wasmer/pglite@0.1.2`, which fixes an uncaught Wasm exception
+The example loads `wasmer/pglite@0.1.3`, which fixes an uncaught Wasm exception
 on SQL errors caused by the `sigsetjmp` wrapper in version 0.1.0, and uses standard
 exception instructions compatible with both WebKit and the native SDK. To rebuild
 the corrected package yourself, apply
@@ -40,12 +40,10 @@ where LLVM can generate the exception recovery block.
 
 Build all objects with wasixcc 0.4.4 using
 `-sWASM_EXCEPTIONS=exnref -sRUN_WASM_OPT=no -mno-wide-arithmetic` to emit standard
-WebAssembly exceptions directly. Legacy exceptions are unsupported by the
-native SDK; version 0.1.1 used that format. Version 0.1.2 already contains
-standard exceptions, but used an intermediate conversion that new builds do
-not need. Disabling wide arithmetic avoids instructions unsupported by the
-tested iOS WebKit. Package the rebuilt module with the runtime files and
-initialized database, then run:
+WebAssembly exceptions directly, with no intermediate conversion. Disabling
+wide arithmetic avoids instructions unsupported by the tested iOS WebKit.
+Package the rebuilt module with the runtime files and initialized database,
+then run:
 
 ```sh
 python3 swift/Examples/WasmerPostgres/build.py --pglite-webc /path/to/pglite-fixed.webc
@@ -62,7 +60,7 @@ package is expected to fail the error-recovery check.
 
 ```swift
 let wasmer = try Wasmer()
-let package = try await wasmer.packages.load("wasmer/pglite@0.1.2")
+let package = try await wasmer.packages.load("wasmer/pglite@0.1.3")
 let sandbox = try await wasmer.sandboxes.create(
     packages: [.package(package)], network: .host
 )

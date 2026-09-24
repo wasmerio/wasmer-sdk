@@ -25,7 +25,7 @@ class PostgresPsqlTests(unittest.IsolatedAsyncioTestCase):
         sandbox = None
         process = None
         try:
-            pglite = await client.packages.load("wasmer/pglite@0.1.2")
+            pglite = await client.packages.load("wasmer/pglite@0.1.3")
             self.assertEqual(pglite.entrypoint, "pglite")
             self.assertIn("pglite", pglite.commands)
             sandbox = await client.sandboxes.create(

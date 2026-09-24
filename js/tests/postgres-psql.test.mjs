@@ -24,7 +24,7 @@ test(
       outputBytes: 256 * 1024,
       cache: { directory: cacheDirectory },
     });
-    const pglite = await client.packages.load("wasmer/pglite@0.1.2");
+    const pglite = await client.packages.load("wasmer/pglite@0.1.3");
     assert.equal(pglite.entrypoint, "pglite");
     assert(pglite.commands.includes("pglite"));
     const sandbox = await client.sandboxes.create({
