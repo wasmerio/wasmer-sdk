@@ -146,10 +146,25 @@ WASMER_GO_INTEGRATION=1 python3.13 go/scripts/test.py
 node --test go/proxy/*.test.mjs
 ```
 
-Use Rust 1.95.0 and Go 1.26+. On Linux, install `patchelf`. The script pins the
-UniFFI 0.32-compatible generator revision in `generator.json` and builds it in
-`go/.build`. Generated bindings, native outputs, and copied test fixtures are
-ignored by Git. The Rust facade and Python/Swift bindings are unchanged.
+Use Rust 1.95.0 and Go 1.26+. On Linux, install `patchelf`. Normal builds use the
+committed Go bindings and C header in `internal/ffi`; they do not install or run
+the UniFFI Go generator. Native libraries, release outputs, and copied test
+fixtures remain ignored by Git.
+
+After changing the Rust facade, Cargo manifests/lockfile, or generator settings,
+regenerate the bindings explicitly and commit both generated files and the
+updated `bindings.json` receipt:
+
+```sh
+python3.13 go/scripts/build.py --release --generate-bindings
+python3.13 go/scripts/bindings.py
+```
+
+Regeneration installs the UniFFI 0.32-compatible revision pinned in
+`generator.json` into `go/.build`. CI uses the receipt to check input and output
+hashes without compiling that tool. Native runtime tests still check the compiled
+FFI contract and both link modes. The Rust facade and Python/Swift bindings are
+unchanged.
 
 To test release installation locally, including the Node module proxy:
 

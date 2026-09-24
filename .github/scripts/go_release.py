@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble and validate release-only Go sources and native archives."""
+"""Assemble and validate Go release modules and native archives."""
 from __future__ import annotations
 
 import argparse
@@ -184,7 +184,7 @@ def validate_assets(directory: Path, version: str, complete: bool = True) -> dic
 def check_sources(root: Path = ROOT) -> None:
     tracked = subprocess.check_output(["git", "ls-files", "go", "-z"], cwd=root).decode().split("\0")
     for name in tracked:
-        require(not name.endswith((".a", ".so", ".dylib")) and name not in {"go/" + n for n in GENERATED}
+        require(not name.endswith((".a", ".so", ".dylib"))
                 and not name.startswith(("go/Artifacts/", "go/.build/", "go/testdata/")), f"Generated artifact tracked in Git: {name}")
 
 

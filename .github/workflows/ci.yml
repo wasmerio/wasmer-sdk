@@ -37,6 +37,7 @@ jobs:
           done
           python -m unittest discover -s .github/scripts/tests -v
           python .github/scripts/go_release.py check
+          python go/scripts/bindings.py
       - name: Require a prepared Swift release
         if: >-
           github.head_ref == 'release-please--branches--main--components--wasmer-sdk-swift' ||
@@ -84,7 +85,8 @@ jobs:
         with:
           cargo-profile: native-1.95-release-napi-v8
       - run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
-      - run: python go/scripts/build.py --release
+      - name: Build native libraries using committed Go bindings
+        run: python go/scripts/build.py --release
         env:
           RUSTUP_TOOLCHAIN: 1.95.0
       - run: python go/scripts/test.py --link static --race

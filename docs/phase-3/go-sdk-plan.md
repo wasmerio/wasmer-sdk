@@ -2,7 +2,9 @@
 
 Prepared September 22, 2026 against `main` at `842f77425753005a27f18ae21a99a541d5215b86`, then approved for implementation. The implementation is on `codex/go-uniffi`; see the [Go guide](../../go/README.md) and [Node proxy deployment guide](../../go/proxy/README.md). Local macOS arm64 validation covers both link modes, race checks, Python/PostgreSQL/Edge.js workloads, and an external release consumer. The four-platform release matrix is configured in CI; publishing the first release and configuring the public domain remain deployment steps.
 
-Reuse the Rust SDK's UniFFI facade, add a handwritten Go API, and publish all generated bindings and native libraries in independent Go GitHub releases. Keep generated files and binaries out of Git, including release branches. Recommend a small release-backed Go module proxy for normal `go get`, plus an explicit native-library installation step. This requires hosting a discovery/proxy endpoint; archive download with a local module replacement is the alternative if we want to avoid that infrastructure.
+Updated September 23, 2026: commit the generated Go bindings and C header to avoid rebuilding the generator in CI. Native libraries remain outside Git. Normal builds check the recorded binding inputs/outputs; maintainers regenerate explicitly with `python3.13 go/scripts/build.py --release --generate-bindings` when those inputs change.
+
+Reuse the Rust SDK's UniFFI facade, add a handwritten Go API, and publish complete source modules and native libraries in independent Go GitHub releases. The release-backed Go module proxy supports normal `go get`, plus an explicit native-library installation step. This requires hosting a discovery/proxy endpoint; archive download with a local module replacement is the alternative if we want to avoid that infrastructure.
 
 **1. Existing foundation and the first compatibility gate**
 
@@ -23,7 +25,7 @@ The spike must generate bindings from the actual SDK library and run a local Was
 | `go/` in Git | `go.mod`, handwritten public API and linker glue, tests, examples, README, license, changelog, `version.txt`, and release URL descriptor |
 | `go/scripts/` in Git | Build, generation, packaging, and artifact validation tools; pinned generator configuration |
 | `go/cmd/wasmer-sdk/` in Git | Pure-Go native installer/build helper, with no import of the cgo SDK package |
-| `go/internal/ffi/` locally | Generated `.go`, `.h`, and any required C shims; ignored by Git except explicitly handwritten glue |
+| `go/internal/ffi/` in Git | Generated `.go` and `.h` alongside handwritten linker glue; generation inputs and hashes recorded in `go/bindings.json` |
 | `go/Artifacts/`, `go/.build/` locally | Native libraries and assembled release module; ignored by Git |
 | Go GitHub release | Complete Go module source ZIP, module metadata, four native archives, checksums, build metadata, and licenses |
 
@@ -48,7 +50,7 @@ Each native archive contains `static/libwasmer_sdk_uniffi.a`, `dynamic/libwasmer
 
 Link these artifacts from the root README, `go/README.md`, release notes, and a checked-in `go/release.json` descriptor. The descriptor contains the component version, exact tag, release URL, and asset naming rules. Final checksums live in release metadata and an embedded native manifest in the source ZIP. This avoids needing a post-build checksum commit or moving a published tag.
 
-CI must explicitly reject tracked generated files, `.a`, `.so`, and `.dylib` files in the Go tree. Ignoring them is not enough to catch accidental force-adds.
+CI checks committed binding freshness without running the generator and explicitly rejects tracked `.a`, `.so`, and `.dylib` files in the Go tree. Ignoring native binaries is not enough to catch accidental force-adds.
 
 **3. How Go consumers obtain the generated source**
 
@@ -71,7 +73,7 @@ Implement this service in **Node.js with zero npm dependencies**, using `node:ht
 | `/mod/go.wasmer.io/sdk/@v/v0.1.0.mod` | Redirect to the release's `v0.1.0.mod` |
 | `/mod/go.wasmer.io/sdk/@v/v0.1.0.zip` | Redirect to the release's `v0.1.0.zip` |
 
-Use a small `versions.json` deployment input containing published versions, immutable asset URLs, version times, and the latest stable version. After publication verifies all assets, the release workflow atomically updates this index and activates it at the proxy. Preserve every older version and make retries idempotent. The index is ordinary metadata; it may be versioned in Git or delivered by the hosting platform without storing generated bindings or binaries there. The service serves only this approved index, so no GitHub API query or database is needed on the request path. Missing/corrupt index state fails as a service error rather than pretending that all versions are absent.
+Use a small `versions.json` deployment input containing published versions, immutable asset URLs, version times, and the latest stable version. After publication verifies all assets, the release workflow atomically updates this index and activates it at the proxy. Preserve every older version and make retries idempotent. The index is ordinary metadata; it may be versioned in Git or delivered by the hosting platform without storing native binaries there. The service serves only this approved index, so no GitHub API query or database is needed on the request path. Missing/corrupt index state fails as a service error rather than pretending that all versions are absent.
 
 Redirect to stable public GitHub release download URLs, not their temporary signed storage URLs. GitHub serves the archive bytes, keeping proxy memory and bandwidth small. Restrict routes to this module and published versions; return plain-text 404s for unknown modules/versions and 405 for unsupported methods. Cache discovery/list/latest briefly and versioned asset redirects for longer. Supporting this release-only module does not require a general-purpose proxy, branch/pseudo-version resolution, or a checksum-database proxy. Tests should cover discovery, exact redirects, version listing/latest, unknown paths, invalid versions, and failure states, followed by a real Go download against staged artifacts.
 
@@ -86,7 +88,7 @@ go run go.wasmer.io/sdk/cmd/wasmer-sdk@v0.1.0 exec -- go build ./...
 
 The helper reads the SDK version selected in the consumer's module graph, selects the target archive, verifies it against the native manifest from that version's source module, and installs it into a versioned user cache outside `GOMODCACHE`. Reject a helper/module/native-version mismatch. The `exec` command sets the required cgo environment for its child process; provide an `env` command for IDEs and existing build systems. Installation is explicit; ordinary builds do not unexpectedly fetch native code. Cached builds work offline. Allow a cache directory override and predownloaded archives for CI.
 
-If we choose **no hosted proxy**, use the same source ZIP and native archives with a repository-provided downloader. It unpacks into an ignored project directory and prints the required `go mod edit -require` and `-replace` commands. This satisfies release-only storage, but every application/CI environment must bootstrap it; dependency-module replacements do not propagate to consumers. Do not advertise plain `go get` in that mode. A generated-code branch, Git LFS, or separate generated-code repository does not meet the proposed no-generated-code-in-Git rule.
+If we choose **no hosted proxy**, the same source ZIP and native archives could use a repository-provided downloader. It would unpack into an ignored project directory and print the required `go mod edit -require` and `-replace` commands. Every application/CI environment would need to bootstrap it; dependency-module replacements do not propagate to consumers. The implementation keeps the chosen proxy and publishes the complete source module with embedded native checksums.
 
 **4. Native linking and supported targets**
 
@@ -122,7 +124,7 @@ Extend the existing publication path rather than introducing Swift-style prepara
 1. Add Go to `release-please-config.json`, `.release-please-manifest.json`, and `.github/release-please/go.json`, using the simple release strategy and `go/version.txt`. Update branch/tag selection and explicit release-PR CI dispatch in `release.yml`.
 2. Add Go build/test jobs to `ci.yml` and a four-target Go matrix to `build-release.yml`; update the bundle job's dependencies and success conditions. Pin the Rust, Go, and generator toolchains. Validate the minimum Go version and current supported releases before declaring compatibility.
 3. After the Go release PR merges, build from its exact tagged commit. Build native archives, test their link modes, and calculate their hashes first.
-4. Assemble the complete module, adding generated bindings and an embedded manifest of those native hashes. Package its ZIP, `.mod`, and `.info`, then test consumers against these exact staged bytes through a temporary module proxy.
+4. Assemble the complete module from committed bindings, adding an embedded manifest of those native hashes. Package its ZIP, `.mod`, and `.info`, then test consumers against these exact staged bytes through a temporary module proxy.
 5. Extend `sdk_release.py` and `github_release.py` component validation, version handling, asset allowlists, and metadata verification. Require three module assets plus exactly four target archives; inspect contents and architectures, not only filenames. Seal all assets with source identity and hashes.
 6. Upload to the draft Go release and publish only after validation. Activate the module proxy's version index after the complete release is public. There is no npm/PyPI publish step for Go.
 7. Retry proxy activation or publication using the original assets. Preserve the existing refusal to overwrite assets with different bytes. Never regenerate a module ZIP already visible to a Go proxy/checksum database; changed content needs a new version.
@@ -134,7 +136,7 @@ The embedded native manifest excludes the source ZIP's own checksum, avoiding a 
 Deliver in reviewable stages:
 
 1. **Compatibility spike:** pinned 0.32-capable generator, one real SDK consumer, both link modes, async/error/ownership checks, and a recorded decision on the generator revision. Stop expanding implementation if this foundation fails.
-2. **Go SDK:** internal bindings generation, public wrapper, examples, local build tooling, and contract tests using existing fixtures. Generated outputs remain ignored.
+2. **Go SDK:** explicit bindings generation, committed Go/C output, public wrapper, examples, local build tooling, and contract tests using existing fixtures. Native outputs remain ignored.
 3. **Release archives and installer:** four platforms, dependency audits, deterministic source packaging, version/hash checks, and a pure-Go helper. Exercise a fresh external consumer with Rust absent from PATH and an empty native cache.
 4. **Publication and discovery:** release-please/workflow integration, hosted proxy/discovery, and public module resolution. If the archive-only option is selected, replace the proxy work with the documented local-module bootstrap.
 
@@ -144,4 +146,4 @@ Distribution tests must cover static and dynamic consumers on every advertised t
 
 **Review decisions**
 
-Recommended choices are: a tested and pinned UniFFI 0.32 generator port; independent Go `0.1.0` releases; `go.wasmer.io/sdk` through a release-backed proxy; a separate native installer; static SDK linkage by default with dynamic linkage available; and the four-platform backend matrix above. The main product tradeoff is hosting the small module endpoint versus requiring archive bootstrap and local replacements. Both keep generated Go files and static/dynamic libraries in Go releases and out of Git.
+The selected approach uses a tested and pinned UniFFI 0.32 generator port, committed Go/C bindings, independent Go `0.1.0` releases, `go.wasmer.io/sdk` through a release-backed proxy, a separate native installer, static SDK linkage by default with dynamic linkage available, and the four-platform backend matrix above. Static/dynamic native libraries remain in Go releases and out of Git.

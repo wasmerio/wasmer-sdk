@@ -101,7 +101,8 @@ JavaScript runs Wasmer and WASIX directly in WebAssembly through
 not a native addon. Python uses the Rust SDK through a Python-independent
 UniFFI library. Swift uses that same UniFFI facade with an async Swift API.
 Go uses the same UniFFI facade through cgo, with static and dynamic native linking.
-Its generated bindings and native archives are distributed through Go releases.
+Its generated bindings are committed; complete source modules and native archives
+are distributed through Go releases.
 The Swift preview runs on macOS; the pinned runtime needs an iOS-capable backend
 before it can run on iPhone. Rust uses Wasmer natively.
 

@@ -107,9 +107,12 @@ local build and resource generation instructions.
 
 ## Go distribution
 
-Go's generated UniFFI bindings, C header, and native libraries are release-only
-artifacts. `go/` tracks the handwritten API, helper, build tooling, and a release
-descriptor; CI rejects generated bindings and native libraries added to Git.
+Go's generated UniFFI bindings and C header are committed alongside the
+handwritten API, helper, build tooling, and release descriptor. Normal CI and
+release builds use these sources without compiling the binding generator.
+`go/bindings.json` records their inputs and output hashes; CI checks this receipt
+and requires explicit regeneration when it becomes stale. Native libraries
+remain release-only artifacts, and CI rejects adding those binaries to Git.
 
 The Go release matrix uses Linux amd64/arm64 and macOS amd64/arm64. It builds the
 shared UniFFI facade, tests both link modes, runs registry workloads, and tests an
@@ -119,8 +122,9 @@ creating the complete source ZIP and embedded native checksums.
 
 After GitHub publication, **Activate Go module proxy** verifies those assets and
 updates `go/proxy/versions.json` on the `go-module-index` branch. This metadata
-branch contains no generated Go bindings or native binaries. The Node service
-reads the index and redirects module downloads to immutable release assets.
+branch starts from the release source and updates only the index; it contains no
+native binaries. The Node service reads the index and redirects module downloads
+to immutable release assets.
 If activation fails, dispatch that workflow again with the same Go component tag.
 
 Before the first public Go installation, deploy the dependency-free
@@ -144,6 +148,7 @@ python3.13 .github/scripts/sdk_release.py check --component python
 python3.13 .github/scripts/sdk_release.py check --component swift
 python3.13 .github/scripts/sdk_release.py check --component go
 python3.13 .github/scripts/go_release.py check
+python3.13 go/scripts/bindings.py
 node --test go/proxy/*.test.mjs
 ```
 

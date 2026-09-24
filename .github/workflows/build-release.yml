@@ -179,7 +179,7 @@ jobs:
       - run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
       - if: runner.os == 'Linux'
         run: python -m pip install patchelf==0.19.1.0
-      - name: Build native libraries and bindings
+      - name: Build native libraries using committed Go bindings
         env:
           RUSTUP_TOOLCHAIN: 1.95.0
         run: python go/scripts/build.py --release
@@ -228,12 +228,6 @@ jobs:
           name: release-build-go-${{ matrix.target }}
           path: release-build/*.tar.gz
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        if: matrix.target == 'darwin-arm64'
-        with:
-          name: go-generated-source
-          path: go/internal/ffi/wasmer_sdk_uniffi.*
-          if-no-files-found: error
 
   bundle:
     needs: [javascript, python, go]
@@ -254,12 +248,7 @@ jobs:
           pattern: release-build-${{ inputs.component }}*
           merge-multiple: true
           path: release-dist
-      - uses: actions/download-artifact@v4
-        if: inputs.component == 'go'
-        with:
-          name: go-generated-source
-          path: go/internal/ffi
-      - name: Assemble the release-only Go module
+      - name: Assemble the Go release module
         if: inputs.component == 'go'
         run: python .github/scripts/go_release.py module --assets release-dist
       - name: Validate the complete artifact set and record checksums

@@ -119,9 +119,19 @@ class GoReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"checksum"):
             go.validate_assets(self.assets,"0.1.0")
 
-    def test_generated_sources_cannot_be_tracked(self):
-        with self.assertRaisesRegex(ValueError,"Generated artifact tracked"):
-            go.check_sources(self.root)
+    def test_generated_sources_can_be_tracked(self):
+        go.check_sources(self.root)
+
+    def test_native_libraries_cannot_be_tracked(self):
+        for extension in ("a", "so", "dylib"):
+            with self.subTest(extension=extension):
+                library = self.package / ("libnative." + extension)
+                library.write_bytes(b"native")
+                subprocess.run(["git", "add", str(library)], cwd=self.root, check=True)
+                with self.assertRaisesRegex(ValueError, "Generated artifact tracked"):
+                    go.check_sources(self.root)
+                subprocess.run(["git", "rm", "-f", str(library)], cwd=self.root, check=True,
+                               stdout=subprocess.DEVNULL)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build native Go artifacts and generate bindings without adding them to Git."""
+"""Build native Go artifacts using committed bindings; regenerate only on request."""
 from __future__ import annotations
 
 import argparse
@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import bindings
 
 PACKAGE = Path(__file__).resolve().parents[1]
 ROOT = PACKAGE.parent
@@ -35,7 +37,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--release", action="store_true")
     parser.add_argument("--backend", choices=("auto", "sys", "napi-v8"), default="auto")
+    parser.add_argument("--generate-bindings", action="store_true",
+                        help="install the pinned generator and update committed bindings and their receipt")
     args = parser.parse_args()
+    if not args.generate_bindings:
+        bindings.check()
+        print("Using committed Go bindings (generator not required)", flush=True)
     if not shutil.which("go"):
         parser.error("Go 1.26 or newer is required on PATH")
     if os.environ.get("CARGO_BUILD_TARGET"):
@@ -54,7 +61,7 @@ def main() -> None:
     install = PACKAGE / ".build/bindgen"
     generator = install / "bin/uniffi-bindgen-go"
     receipt = install / "revision"
-    if not generator.exists() or not receipt.exists() or receipt.read_text().strip() != pin["revision"]:
+    if args.generate_bindings and (not generator.exists() or not receipt.exists() or receipt.read_text().strip() != pin["revision"]):
         run(["cargo", "install", "uniffi-bindgen-go", "--git", pin["repository"], "--rev", pin["revision"],
              "--locked", "--root", str(install), "--force", "--jobs", "2"])
         receipt.write_text(pin["revision"] + "\n")
@@ -76,8 +83,14 @@ def main() -> None:
     cargo = json.loads(output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"]))
     native_dir = Path(cargo["target_directory"]) / profile
     dynamic_name = "libwasmer_sdk_uniffi." + ("dylib" if goos == "darwin" else "so")
-    run([str(generator), "--library", str(native_dir / dynamic_name), "--crate", "wasmer_sdk_uniffi",
-         "--config", str(PACKAGE / "uniffi.toml"), "--out-dir", str(PACKAGE / "internal")])
+    if args.generate_bindings:
+        run([str(generator), "--library", str(native_dir / dynamic_name), "--crate", "wasmer_sdk_uniffi",
+             "--config", str(PACKAGE / "uniffi.toml"), "--out-dir", str(PACKAGE / "internal")])
+        # The generator's C template emits whitespace-only lines; normalize
+        # these outputs for a reproducible, whitespace-clean committed header.
+        header = PACKAGE / "internal/ffi/wasmer_sdk_uniffi.h"
+        header.write_text("\n".join(line.rstrip() for line in header.read_text().splitlines()) + "\n")
+        bindings.record()
     destination = PACKAGE / "Artifacts" / f"{goos}-{goarch}"
     for mode, name in (("static", "libwasmer_sdk_uniffi.a"), ("dynamic", dynamic_name)):
         (destination / mode).mkdir(parents=True, exist_ok=True)
