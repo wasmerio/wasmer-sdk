@@ -38,12 +38,13 @@ to the Oliphaunt PostgreSQL sources, alongside the existing direct-socket patch,
 and rebuild all affected objects. This keeps `setjmp` in the actual caller,
 where LLVM can generate the exception recovery block.
 
-The tested build uses wasixcc 0.4.4 with
-`-sWASM_EXCEPTIONS=legacy -sRUN_WASM_OPT=no -mno-wide-arithmetic`, followed by
-Binaryen's `wasm-opt input.wasm --all-features --translate-to-exnref -o pglite.wasm`.
-The final conversion is required: version 0.1.1 omitted it and cannot run in the
-native SDK. Disabling wide arithmetic avoids instructions unsupported by the
-tested iOS WebKit. Package the converted module with the runtime files and
+Build all objects with wasixcc 0.4.4 using
+`-sWASM_EXCEPTIONS=exnref -sRUN_WASM_OPT=no -mno-wide-arithmetic` to emit standard
+WebAssembly exceptions directly. Legacy exceptions are unsupported by the
+native SDK; version 0.1.1 used that format. Version 0.1.2 already contains
+standard exceptions, but used an intermediate conversion that new builds do
+not need. Disabling wide arithmetic avoids instructions unsupported by the
+tested iOS WebKit. Package the rebuilt module with the runtime files and
 initialized database, then run:
 
 ```sh

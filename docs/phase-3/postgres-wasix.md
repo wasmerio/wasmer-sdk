@@ -2,7 +2,7 @@
 
 Status: packaged and verified locally on July 29, 2026.
 
-`wasmer/pglite@0.1.2` contains PostgreSQL 18.4 compiled for WASIX, its
+`wasmer/pglite@0.1.0` contains PostgreSQL 18.4 compiled for WASIX, its
 Oliphaunt runtime tree, and an initialized database. PostgreSQL itself owns a
 loopback TCP socket and speaks the standard wire protocol directly to native
 clients. There is no native PostgreSQL server or protocol proxy.
@@ -31,7 +31,7 @@ directory, fixed launch arguments, runtime environment, and default port
 ```rust
 let pglite = wasmer
     .packages()
-    .load("wasmer/pglite@0.1.2")
+    .load("wasmer/pglite@0.1.0")
     .await?;
 let sandbox = wasmer
     .sandboxes()
@@ -92,14 +92,14 @@ wasmer package publish --wait=container packages/pglite
 
 ## Verified execution
 
-The Rust example resolves `wasmer/pglite@0.1.2` from the registry:
+The Rust example resolves `wasmer/pglite@0.1.0` from the registry:
 
 ```console
 cargo run -p wasmer-sdk --example postgres_psql -- \
   /opt/homebrew/opt/libpq/bin/psql
 ```
 
-The Python example also resolves `wasmer/pglite@0.1.2`:
+The Python example also resolves `wasmer/pglite@0.1.0`:
 
 ```console
 PYTHONPATH=python/src \
