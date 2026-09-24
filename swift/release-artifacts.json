@@ -4,12 +4,12 @@
   "version": "0.6.0",
   "repository": "wasmerio/wasmer-sdk",
   "tag": "wasmer-sdk-swift-v0.6.0",
-  "source_sha": "393850221badfbcaa6749930900af1e9175890ea",
+  "source_sha": "275f6069bc70172011765450f84e9c9983487e3b",
   "files": {
     "WasmerSDKFFI-0.6.0-macos-universal.zip": "eeefe00510eea670493385b8072ef5c200538ed7e8116dabe5dcbdf3429be79c",
-    "WasmerWKRuntime-0.6.0.zip": "261e0164cdd68d973cf53f0c00c315682e3cfc1c682e4a60032aa0a525e6b8f5"
+    "WasmerWKRuntime-0.6.0.zip": "bfcd322445816ee11de02b244f644c1029d9682494f3a7e7ce7af5ef2cfab30b"
   },
-  "build_run_id": 36056982445,
-  "source_sha256": "a5fc51419a03add0951dd685605a185b44e678644022482f7a6f02964ee928b6",
+  "build_run_id": 36061661643,
+  "source_sha256": "c80c695ca2523cef4d65a2bfd5ba4f688d096a5e587205a8633b42ce95facc6f",
   "swift_source_sha256": "cc4312d9fa9111b3664fe2c22965fae10613e024b2a3a59dc66aac911cf23db6"
 }
