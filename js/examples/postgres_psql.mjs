@@ -14,7 +14,7 @@ const query = fileURLToPath(
 
 const wasmer = new Wasmer({ outputBytes: 256 * 1024 });
 const sandbox = await wasmer.sandboxes.create({
-  packages: ["wasmer/pglite@0.1.0"],
+  packages: ["wasmer/pglite@0.1.2"],
   network: { mode: "host" },
 });
 const postgres = await sandbox

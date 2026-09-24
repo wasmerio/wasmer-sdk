@@ -29,18 +29,21 @@ runtime until an SDK release includes it; `build.py` sets
 
 ### PostgreSQL package fix
 
-The example loads `wasmer/pglite@0.1.1`, which fixes an uncaught Wasm exception
-on SQL errors caused by the `sigsetjmp` wrapper in version 0.1.0. To rebuild
+The example loads `wasmer/pglite@0.1.2`, which fixes an uncaught Wasm exception
+on SQL errors caused by the `sigsetjmp` wrapper in version 0.1.0, and uses standard
+exception instructions compatible with both WebKit and the native SDK. To rebuild
 the corrected package yourself, apply
 [`postgres-18.4-wasix-sigsetjmp.patch`](../../../rust/examples/postgres-wasix/postgres-18.4-wasix-sigsetjmp.patch)
 to the Oliphaunt PostgreSQL sources, alongside the existing direct-socket patch,
 and rebuild all affected objects. This keeps `setjmp` in the actual caller,
 where LLVM can generate the exception recovery block.
 
-For a browser-compatible build with wasixcc 0.4.4, use
-`-sWASM_EXCEPTIONS=legacy -sRUN_WASM_OPT=no -mno-wide-arithmetic`. The wide
-arithmetic instructions emitted by the new compiler are not accepted by the
-tested iOS WebKit. Package the rebuilt module with the runtime files and
+The tested build uses wasixcc 0.4.4 with
+`-sWASM_EXCEPTIONS=legacy -sRUN_WASM_OPT=no -mno-wide-arithmetic`, followed by
+Binaryen's `wasm-opt input.wasm --all-features --translate-to-exnref -o pglite.wasm`.
+The final conversion is required: version 0.1.1 omitted it and cannot run in the
+native SDK. Disabling wide arithmetic avoids instructions unsupported by the
+tested iOS WebKit. Package the converted module with the runtime files and
 initialized database, then run:
 
 ```sh
@@ -58,7 +61,7 @@ package is expected to fail the error-recovery check.
 
 ```swift
 let wasmer = try Wasmer()
-let package = try await wasmer.packages.load("wasmer/pglite@0.1.1")
+let package = try await wasmer.packages.load("wasmer/pglite@0.1.2")
 let sandbox = try await wasmer.sandboxes.create(
     packages: [.package(package)], network: .host
 )

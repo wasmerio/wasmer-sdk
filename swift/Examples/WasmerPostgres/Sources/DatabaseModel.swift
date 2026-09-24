@@ -60,7 +60,7 @@ final class DatabaseModel: ObservableObject {
     if let localPackage = Bundle.main.url(forResource: "pglite", withExtension: "webc") {
       source = .file(localPackage)
       appendLog("Using the locally rebuilt PGlite package")
-    } else { source = .registry("wasmer/pglite@0.1.1") }
+    } else { source = .registry("wasmer/pglite@0.1.2") }
     let package = try await wasmer.packages.load(source, onProgress: { [weak self] update in
       Task { @MainActor in self?.progress = update.download.percent.map { $0 / 100 } }
     })

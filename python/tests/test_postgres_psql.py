@@ -25,7 +25,7 @@ class PostgresPsqlTests(unittest.IsolatedAsyncioTestCase):
         sandbox = None
         process = None
         try:
-            pglite = await client.packages.load("wasmer/pglite@0.1.0")
+            pglite = await client.packages.load("wasmer/pglite@0.1.2")
             self.assertEqual(pglite.entrypoint, "pglite")
             self.assertIn("pglite", pglite.commands)
             sandbox = await client.sandboxes.create(
@@ -59,6 +59,7 @@ class PostgresPsqlTests(unittest.IsolatedAsyncioTestCase):
                 result.stdout,
                 r"(?m)wasm32-unknown-wasix.*\|42$",
             )
+            self.assertRegex(result.stdout, r"(?m)^recovered_after_error\|42$")
             output = await asyncio.wait_for(
                 process.wait(check=True),
                 timeout=10,
