@@ -20,18 +20,21 @@ async function command(input, timeout = 120_000) {
   const number = ++commandNumber;
   await page.evaluate(
     (input) => window.__wasmerShell.send(input),
-    `${input}; printf '\\n__EXAMPLE_%s__:%s\\n' ${number} "$?"\r`,
+    `${input}; printf '\\n__EXAMPLE_%s__:%s\\n' ${number} "$?"; printf '\\n__EXAMPLE_STDERR_%s__\\n' ${number} >&2\r`,
   );
+  // Drain both pipes without ordering them: Bash's stderr prompt can arrive
+  // before buffered stdout, so waiting for a trailing prompt is unreliable.
   await page.waitForFunction(
-    (number) =>
-      window.__wasmerShell.snapshot().includes(`__EXAMPLE_${number}__:`),
+    (number) => {
+      const output = window.__wasmerShell.snapshot();
+      return output.includes(`__EXAMPLE_${number}__:`) &&
+        output.includes(`__EXAMPLE_STDERR_${number}__`);
+    },
     number,
     { timeout },
   );
   const output = await page.evaluate(() => window.__wasmerShell.snapshot());
   assert(output.includes(`__EXAMPLE_${number}__:0`), output.slice(-5000));
-  // Bash writes its prompt to stderr, which can arrive before stdout. The
-  // stdout completion marker is enough to submit the next command safely.
   return output;
 }
 async function waitForPrompt(after) {
