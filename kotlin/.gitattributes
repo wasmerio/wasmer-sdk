@@ -1,0 +1,4 @@
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+sdk/src/main/kotlin/io/wasmer/sdk/ffi/*.kt linguist-generated=true
+android/vendor/** linguist-vendored=true

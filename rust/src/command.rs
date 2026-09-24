@@ -1,4 +1,4 @@
-#[cfg(feature = "napi-v8")]
+#[cfg(all(feature = "napi-v8", not(target_os = "android")))]
 use std::borrow::Cow;
 use std::{
     collections::{BTreeMap, HashSet},
@@ -9,9 +9,12 @@ use std::{
 
 use bytes::Bytes;
 use tokio::io::AsyncWriteExt;
-#[cfg(any(all(target_arch = "wasm32", feature = "js"), feature = "napi-v8"))]
+#[cfg(any(
+    all(target_arch = "wasm32", feature = "js"),
+    all(feature = "napi-v8", not(target_os = "android"))
+))]
 use wasmer_wasix::bin_factory::BinaryPackageCommand;
-#[cfg(feature = "napi-v8")]
+#[cfg(all(feature = "napi-v8", not(target_os = "android")))]
 use wasmer_wasix::runtime::ModuleInput;
 use wasmer_wasix::{
     Runtime,
@@ -353,7 +356,16 @@ impl Command {
             .ok_or_else(|| Error::CommandNotFound {
                 command: command_name.clone(),
             })?;
-        #[cfg(feature = "napi-v8")]
+        // Android V8 cannot unwind WASIX coroutine stacks. A shell can exec
+        // Node without importing N-API itself, so pin the entire process tree.
+        #[cfg(all(feature = "napi-v8", target_os = "android"))]
+        {
+            runner
+                .capabilities_mut()
+                .threading
+                .enable_asynchronous_threading = false;
+        }
+        #[cfg(all(feature = "napi-v8", not(target_os = "android")))]
         configure_wasi_runner_for_napi(runtime.as_ref(), binary_command, &mut runner).await?;
         #[cfg(all(target_arch = "wasm32", feature = "js"))]
         precompile_browser_command(runtime.as_ref(), binary_command).await?;
@@ -601,7 +613,7 @@ fn tolerate_early_exit(result: std::io::Result<()>) -> std::io::Result<()> {
     }
 }
 
-#[cfg(feature = "napi-v8")]
+#[cfg(all(feature = "napi-v8", not(target_os = "android")))]
 async fn configure_wasi_runner_for_napi(
     runtime: &(dyn Runtime + Send + Sync),
     command: &BinaryPackageCommand,
