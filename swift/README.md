@@ -29,6 +29,7 @@ when unsupported by the selected backend:
 | App directory mounts | Not yet exposed | `DirectoryMount` |
 | Terminal / resize | Not yet exposed | `TerminalOptions`, `resizeTerminal` |
 | HTTP discovery / exposure | Not yet exposed | `ports.listening()`, `ports.expose()` |
+| TCP forwarding | Use native host networking directly | `ports.forwardTCP()` |
 
 Inspect `wasmer.capabilities` when using these optional features. `.host` networking
 uses the native runtime on macOS and native DNS/TCP on iOS; iOS does not support UDP
@@ -39,6 +40,11 @@ and platform restrictions are not identical.
 libghostty-vt terminal, Bash, Node.js via Edge.js, Python, cowsay, and `pnpm i react`.
 Guest HTTP servers open in a separate browser view. The iOS implementation has been
 tested in the simulator and cross-compiled for devices; physical-device testing remains.
+
+[Wasmer Postgres](Examples/WasmerPostgres) is a SwiftUI SQL console using
+PostgresNIO to connect to PostgreSQL 18.4 inside the iOS sandbox. It demonstrates
+raw TCP forwarding, queries, transactions and streamed results. See its README
+for the PostgreSQL package fix and the single-client, session-only limitations.
 
 ## Package download progress
 

@@ -71,7 +71,7 @@ private actor WebKitClient {
   private var transport: WebKitTransport?
   private var starting: Task<WebKitTransport, Error>?
   private var closed = false
-  private var exposures: [Int: [GuestHTTPServer]] = [:]
+  private var exposures: [Int: [any GuestPortServer]] = [:]
   private var closedSandboxes: Set<Int> = []
   init(options: ClientOptions) { self.options = options }
   func host() async throws -> WebKitTransport {
@@ -142,7 +142,7 @@ private actor WebKitClient {
     if let transport { await transport.close() }
     transport = nil
   }
-  func ownExposure(_ server: GuestHTTPServer, sandbox: Int) throws {
+  func ownExposure(_ server: any GuestPortServer, sandbox: Int) throws {
     guard !closed, !closedSandboxes.contains(sandbox) else {
       server.stop()
       throw SdkError.Failure(code: "SANDBOX_CLOSED", message: "Sandbox is closed")
@@ -621,6 +621,36 @@ public final class PortsCore: Sendable {
         "body": .string(request.body.base64EncodedString()),
       ])
   }
+  /// Forward raw TCP to an ephemeral loopback port for native protocol clients.
+  public func forwardTCP(port: UInt16) async throws -> TCPPortForwardCore {
+    try await wait(port: port, timeoutMs: 30_000)
+    let client = sandbox.client
+    let sandboxHandle = sandbox.handle
+    let server = GuestTCPServer {
+      let handle: Int = try await client.call("tcp.connect", [
+        "sandbox": .handle(sandboxHandle), "port": .number(Double(port)),
+      ])
+      let args: [String: Wire] = ["connection": .handle(handle)]
+      return GuestTCPStream(
+        read: { try await client.call("tcp.read", args) },
+        write: { bytes in
+          let _: Bool = try await client.call("tcp.write", args.merging([
+            "bytes": .string(bytes.base64EncodedString()),
+          ]) { _, rhs in rhs })
+        },
+        shutdownWrite: { let _: Bool = try await client.call("tcp.shutdownWrite", args) },
+        close: {
+          // Cleanup must still reach JS when the forwarding task was cancelled.
+          await Task { let _: Bool? = try? await client.call("tcp.close", args) }.value
+        }
+      )
+    }
+    do {
+      let localPort = try await server.start()
+      try await client.ownExposure(server, sandbox: sandboxHandle)
+      return TCPPortForwardCore(port: localPort, server: server)
+    } catch { server.stop(); throw error }
+  }
   public func expose(port: UInt16) async throws -> ExposedPortCore {
     try await wait(port: port, timeoutMs: 30_000)
     let server = GuestHTTPServer { request in try await self.request(port: port, request: request) }
@@ -641,6 +671,18 @@ public final class ExposedPortCore: Sendable {
     self.url = url
     self.server = server
   }
+  public func close() { server.stop() }
+  deinit { server.stop() }
+}
+
+protocol GuestPortServer: Sendable { func stop() }
+extension GuestHTTPServer: GuestPortServer {}
+extension GuestTCPServer: GuestPortServer {}
+
+public final class TCPPortForwardCore: Sendable {
+  public let port: UInt16
+  private let server: GuestTCPServer
+  fileprivate init(port: UInt16, server: GuestTCPServer) { self.port = port; self.server = server }
   public func close() { server.stop() }
   deinit { server.stop() }
 }

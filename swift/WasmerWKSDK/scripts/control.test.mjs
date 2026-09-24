@@ -19,6 +19,7 @@ test('cancellation releases process and sandbox results already queued by the wo
     for (const [method, value, cleanup, args] of [
       ['command.spawn', { handle: 7, id: 1 }, 'process.release', { process: 7 }],
       ['sandbox.create', 8, 'sandbox.close', { sandbox: 8 }],
+      ['tcp.connect', 10, 'tcp.close', { connection: 10 }],
     ]) {
       const result = rpc.request({ id: method, method, args: {} });
       rpc.cancel(method);

@@ -55,7 +55,8 @@ worker.onmessage = async ({ data }) => {
     if (entry.cancelled && !data.error) {
       // Cancellation can overtake a result already queued by the worker.
       const cleanup = entry.method === "command.spawn" ? ["process.release", { process: data.value.handle }] :
-        entry.method === "sandbox.create" ? ["sandbox.close", { sandbox: data.value }] : undefined;
+        entry.method === "sandbox.create" ? ["sandbox.close", { sandbox: data.value }] :
+        entry.method === "tcp.connect" ? ["tcp.close", { connection: data.value }] : undefined;
       if (cleanup) worker.postMessage({ id: crypto.randomUUID(), method: cleanup[0], args: cleanup[1] });
     } else {
       // Flush the final progress message before settling the Swift await.

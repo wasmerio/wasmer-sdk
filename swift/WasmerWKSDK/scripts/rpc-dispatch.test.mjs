@@ -132,3 +132,49 @@ test('memory workspace works without an external storage worker', async () => {
   });
   await request('sandbox.close', {sandbox});
 });
+
+test('TCP close wakes pending reads and defers free until the borrow ends', async () => {
+  const { request, dispatcher, sandboxes } = fixture();
+  await request('initialize');
+  const sandbox = await request('sandbox.create', { packages: [], files: {}, env: {}, network: 'host' });
+  const events = [];
+  let resolveRead;
+  sandboxes[0].connectTcp = () => ({
+    async read() { events.push('read'); return new Promise(resolve => { resolveRead = resolve; }); },
+    async write(bytes) { events.push([...bytes]); },
+    close() { events.push('close'); resolveRead?.(new Uint8Array()); },
+    free() { events.push('free'); },
+  });
+  const connection = await request('tcp.connect', { sandbox, port: 5432 });
+  await request('tcp.write', { connection, bytes: encode(Uint8Array.of(0, 255, 128)) });
+  const reading = dispatcher.request('read', 'tcp.read', { connection });
+  await tick();
+  await request('sandbox.close', { sandbox });
+  assert.equal(await reading, '');
+  assert.deepEqual(events, [[0, 255, 128], 'read', 'close', 'free']);
+  await request('tcp.close', { connection });
+  await assert.rejects(request('tcp.read', { connection }), { code: 'CONNECTION_CLOSED' });
+});
+
+test('cancelling TCP reads or connects closes their otherwise unowned stream', async () => {
+  const { request, dispatcher, sandboxes } = fixture();
+  await request('initialize');
+  const sandbox = await request('sandbox.create', { packages: [], files: {}, env: {}, network: 'host' });
+  let closed = 0, freed = 0, resolveRead;
+  sandboxes[0].connectTcp = () => ({
+    read() { return new Promise(resolve => { resolveRead = resolve; }); },
+    close() { closed++; resolveRead?.(new Uint8Array()); },
+    free() { freed++; },
+  });
+  const connection = await request('tcp.connect', { sandbox, port: 5432 });
+  const reading = dispatcher.request('read', 'tcp.read', { connection });
+  await tick();
+  const rejected = assert.rejects(reading, { code: 'CANCELLED' });
+  dispatcher.cancel('read');
+  await rejected;
+  const connecting = dispatcher.request('connect', 'tcp.connect', { sandbox, port: 5432 });
+  dispatcher.cancel('connect');
+  await assert.rejects(connecting, { code: 'CANCELLED' });
+  assert.equal(closed, 2);
+  assert.equal(freed, 2);
+});

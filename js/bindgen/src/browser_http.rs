@@ -98,6 +98,34 @@ impl BrowserHttpRequestHandler {
         Some(ports)
     }
 
+    /// Connect directly to a guest listener without interpreting its protocol.
+    /// Bounded buffers propagate backpressure in both directions.
+    pub(crate) fn connect(&self, port: u16) -> NetworkResult<virtual_net::tcp_pair::TcpSocketHalf> {
+        let state = self.state.lock().expect("browser HTTP network poisoned");
+        let (address, listener) = state
+            .listeners
+            .iter()
+            .find_map(|(address, listener)| {
+                (address.port() == port)
+                    .then(|| listener.upgrade().map(|l| (*address, l)))
+                    .flatten()
+            })
+            .ok_or(NetworkError::ConnectionRefused)?;
+        drop(state);
+        let peer = match address {
+            SocketAddr::V4(_) => SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 50_000),
+            SocketAddr::V6(_) => SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 50_000),
+        };
+        let (host, guest) =
+            virtual_net::tcp_pair::TcpSocketHalf::channel(256 * 1024, peer, address);
+        BrowserHttpListener {
+            state: listener,
+            local_addr: address,
+        }
+        .push(Box::new(guest), peer);
+        Ok(host)
+    }
+
     pub(crate) async fn handle(
         &self,
         request: Request<Bytes>,
@@ -124,11 +152,17 @@ impl BrowserHttpRequestHandler {
                 state: listener,
                 local_addr: address,
             }
-            .push(ActiveRequest {
-                request,
+            .push(
+                Box::new(BrowserHttpSocket::new(
+                    address,
+                    ActiveRequest {
+                        request,
+                        peer_addr,
+                        response: sender,
+                    },
+                )),
                 peer_addr,
-                response: sender,
-            });
+            );
             receiver
         };
 
@@ -273,7 +307,7 @@ fn normalize_listener_address(address: SocketAddr) -> SocketAddr {
 
 #[derive(Debug, Default)]
 struct ListenerState {
-    backlog: VecDeque<ActiveRequest>,
+    backlog: VecDeque<(Box<dyn VirtualTcpSocket + Sync>, SocketAddr)>,
     handler: Option<Box<dyn InterestHandler + Send + Sync>>,
     wakers: Vec<Waker>,
 }
@@ -359,9 +393,9 @@ impl BrowserHttpListener {
         }
     }
 
-    fn push(&mut self, request: ActiveRequest) {
+    fn push(&mut self, socket: Box<dyn VirtualTcpSocket + Sync>, peer: SocketAddr) {
         let mut state = self.state.lock().expect("browser HTTP listener poisoned");
-        state.backlog.push_back(request);
+        state.backlog.push_back((socket, peer));
         if let Some(handler) = state.handler.as_mut() {
             handler.push_interest(InterestType::Readable);
         }
@@ -402,18 +436,12 @@ impl VirtualIoSource for BrowserHttpListener {
 
 impl VirtualTcpListener for BrowserHttpListener {
     fn try_accept(&mut self) -> NetworkResult<(Box<dyn VirtualTcpSocket + Sync>, SocketAddr)> {
-        let request = self
-            .state
+        self.state
             .lock()
             .expect("browser HTTP listener poisoned")
             .backlog
             .pop_front()
-            .ok_or(NetworkError::WouldBlock)?;
-        let peer_addr = request.peer_addr;
-        Ok((
-            Box::new(BrowserHttpSocket::new(self.local_addr, request)),
-            peer_addr,
-        ))
+            .ok_or(NetworkError::WouldBlock)
     }
 
     fn set_handler(

@@ -1,0 +1,19 @@
+--- a/src/include/port/wasix-dl.h
++++ b/src/include/port/wasix-dl.h
+@@ -9,5 +9,16 @@
+ #ifdef OLIPHAUNT_WASM_SINGLE_USER
+ #include <setjmp.h>
++#ifdef __wasm_exception_handling__
++/*
++ * WASIX libc's sigsetjmp function wraps setjmp. With Wasm EH that saves
++ * the wrapper's invocation, which has already returned when PostgreSQL
++ * raises an ERROR. LLVM must see setjmp in the actual PG_TRY/caller frame
++ * so the longjmp exception reaches its recovery block. Like WASIX libc,
++ * this currently does not save a signal mask.
++ */
++#define sigsetjmp(env, savesigs) setjmp(env)
++#endif
++
+ #include <pwd.h>
+ #include <sys/types.h>
+ #include <sys/ipc.h>
