@@ -6,18 +6,22 @@ import { startAppServer } from "./support/browser-servers.mjs";
 
 const browsers = { chromium, firefox, webkit };
 for (const name of (process.env.WASMER_TEST_BROWSERS ?? "chromium,firefox,webkit").split(",")) {
-  test(`PostgreSQL and WASIX psql use browser-local TCP in ${name}`, { timeout: 180_000 }, async () => {
+  test(`PostgreSQL and WASIX psql use browser-local TCP in ${name}`, { timeout: 180_000 }, async t => {
     const files = {};
     if (process.env.PSQL_WEBC) files["/psql.webc"] = await readFile(process.env.PSQL_WEBC);
     if (process.env.PGLITE_WEBC) files["/pglite.webc"] = await readFile(process.env.PGLITE_WEBC);
     const host = await startAppServer({ files, html: `<!doctype html><script type="importmap">{"imports":{"@mercuryworkshop/wisp-js/client":"/node_modules/@mercuryworkshop/wisp-js/src/entrypoints/client.mjs","/node_modules/@mercuryworkshop/wisp-js/src/compat.mjs":"/node_modules/@mercuryworkshop/wisp-js/src/compat_browser.mjs"}}</script>` });
     let browser;
     const diagnostics = [];
+    t.after(async () => {
+      try { await browser?.close(); }
+      finally { await host.close(); }
+    });
     try {
       browser = await browsers[name].launch({ headless: true, timeout: 20_000 });
       const page = await browser.newPage();
-      page.on("console", message => { diagnostics.push(message.text()); if (process.env.WASMER_TEST_VERBOSE) console.log(name, message.text()); });
-      page.on("pageerror", error => diagnostics.push(error.stack));
+      page.on("console", message => { diagnostics.push(message.text()); console.log(`${name}: ${message.text()}`); });
+      page.on("pageerror", error => { diagnostics.push(error.stack); console.error(`${name}: ${error.stack}`); });
       page.on("websocket", socket => diagnostics.push("WEBSOCKET " + socket.url()));
       await page.goto(host.url);
       const results = await page.evaluate(async ({ localPsql, localPg }) => {
@@ -29,11 +33,13 @@ for (const name of (process.env.WASMER_TEST_BROWSERS ?? "chromium,firefox,webkit
         let wispRequests = 0;
         const wisp = { mode: "wisp", requestUrl() { wispRequests++; throw new Error("localhost escaped to WISP"); } };
         try {
+          console.log("Loading PostgreSQL packages");
           const bytes = async path => new Uint8Array(await (await fetch(path)).arrayBuffer());
           const psql = await wasmer.packages.load(localPsql ? await bytes("/psql.webc") : "wasmer/psql@=18.4.0");
           const pg = await wasmer.packages.load(localPg ? await bytes("/pglite.webc") : "wasmer/pglite@=0.1.3");
           console.log("PostgreSQL packages loaded");
           const start = async (network = { mode: "http" }) => {
+            console.log("Starting PostgreSQL");
             const sandbox = await wasmer.sandboxes.create({ packages: [pg, psql], network });
             const process = await sandbox.command(pg).spawn({ stdout: "capture", stderr: "capture" });
             // This must not consume PGlite's single accepted connection.
@@ -57,8 +63,8 @@ for (const name of (process.env.WASMER_TEST_BROWSERS ?? "chromium,firefox,webkit
           const isolated = await wasmer.sandboxes.create({ packages: [psql], network: { mode: "http", peers: [] } });
           await refused(isolated);
           await isolated.close();
-          console.log("check complete");
           results.push("client and sandbox isolation");
+          console.log("PASS " + results.at(-1));
 
           const client = await wasmer.sandboxes.create({ packages: [psql], network: wisp });
           await refused(client, { PGPORT: "5433" });
@@ -69,6 +75,7 @@ for (const name of (process.env.WASMER_TEST_BROWSERS ?? "chromium,firefox,webkit
             "SELECT repeat('x', 8 * 1024 * 1024);",
             ...Array.from({ length: 30 }, (_, i) => `SELECT 'query_${i}';`),
           ].join("\n") + "\n";
+          console.log("Running large TCP transfer");
           const output = await query(client, sql);
           success(output);
           const text = output.stdout.text();
@@ -77,14 +84,14 @@ for (const name of (process.env.WASMER_TEST_BROWSERS ?? "chromium,firefox,webkit
           check(/division by zero/.test(output.stderr.text()), "SQL error was lost");
           check((await db.process.wait()).ok, "server failed after psql disconnected");
           await client.close(); await db.sandbox.close();
-          console.log("check complete");
           results.push("automatic sharing, local DNS, recovery, 1 MiB request, 8 MiB response, 30 queries");
+          console.log("PASS " + results.at(-1));
 
           const same = await start();
           success(await query(same.sandbox, undefined, { PGHOST: "127.0.0.1" }));
           await same.sandbox.close();
-          console.log("check complete");
           results.push("same-sandbox loopback");
+          console.log("PASS " + results.at(-1));
 
           const restricted = await start({ mode: "http", peers: [] });
           const automatic = await wasmer.sandboxes.create({ packages: [psql], network: { mode: "http" } });
@@ -95,8 +102,8 @@ for (const name of (process.env.WASMER_TEST_BROWSERS ?? "chromium,firefox,webkit
           await restricted.sandbox.close();
           await refused(linked);
           await linked.close();
-          console.log("check complete");
           results.push("explicit links and closed-peer cleanup");
+          console.log("PASS " + results.at(-1));
 
           const first = await start();
           const second = await start();
@@ -107,8 +114,8 @@ for (const name of (process.env.WASMER_TEST_BROWSERS ?? "chromium,firefox,webkit
           const selected = await wasmer.sandboxes.create({ packages: [psql], network: { mode: "http", peers: [first.sandbox] } });
           success(await query(selected));
           await selected.close(); await first.sandbox.close(); await second.sandbox.close();
-          console.log("check complete");
           results.push("duplicate-port ambiguity and explicit selection");
+          console.log("PASS " + results.at(-1));
           check(wispRequests === 0, "localhost requested WISP");
           return results;
         } finally {
@@ -141,8 +148,6 @@ for (const name of (process.env.WASMER_TEST_BROWSERS ?? "chromium,firefox,webkit
       assert(!diagnostics.some(line => line.startsWith("WEBSOCKET ")), diagnostics.join("\n"));
     } catch (error) {
       throw new Error(`${error.stack ?? error}\n${diagnostics.join("\n")}`);
-    } finally {
-      await browser?.close(); await host.close();
     }
   });
 }
