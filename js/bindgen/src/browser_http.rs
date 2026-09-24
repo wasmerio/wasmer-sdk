@@ -165,7 +165,7 @@ impl BrowserHttpNetworking {
             state: listener,
             local_addr: peer,
         }
-        .push(Box::new(server), local);
+        .push(Box::new(server), local)?;
         Ok(client)
     }
 }
@@ -201,9 +201,27 @@ impl BrowserHttpRequestHandler {
     pub(crate) fn close(&self) {
         let mut state = self.state.lock().expect("browser TCP network poisoned");
         state.closed = true;
-        state.listeners.clear();
+        let listeners: Vec<_> = state
+            .listeners
+            .drain()
+            .filter_map(|(_, listener)| listener.upgrade())
+            .collect();
         state.bound.clear();
         state.peers = Some(Vec::new());
+        drop(state);
+        // Closing a sandbox must also release guests waiting in accept().
+        for listener in listeners {
+            let mut listener = listener.lock().expect("browser HTTP listener poisoned");
+            listener.closed = true;
+            listener.backlog.clear();
+            if let Some(handler) = listener.handler.as_mut() {
+                handler.push_interest(InterestType::Readable);
+                handler.push_interest(InterestType::Closed);
+            }
+            for waiter in listener.wakers.drain(..) {
+                waiter.wake();
+            }
+        }
     }
 
     pub(crate) fn has_listener(&self, port: u16) -> bool {
@@ -257,7 +275,7 @@ impl BrowserHttpRequestHandler {
             state: listener,
             local_addr: address,
         }
-        .push(Box::new(guest), peer);
+        .push(Box::new(guest), peer)?;
         Ok(host)
     }
 
@@ -297,7 +315,7 @@ impl BrowserHttpRequestHandler {
                     },
                 )),
                 peer_addr,
-            );
+            )?;
             receiver
         };
 
@@ -460,6 +478,7 @@ fn normalize_listener_address(address: SocketAddr) -> SocketAddr {
 
 #[derive(Debug, Default)]
 struct ListenerState {
+    closed: bool,
     backlog: VecDeque<(Box<dyn VirtualTcpSocket + Sync>, SocketAddr)>,
     handler: Option<Box<dyn InterestHandler + Send + Sync>>,
     wakers: Vec<Waker>,
@@ -554,8 +573,15 @@ impl BrowserHttpListener {
         }
     }
 
-    fn push(&mut self, socket: Box<dyn VirtualTcpSocket + Sync>, peer: SocketAddr) {
+    fn push(
+        &mut self,
+        socket: Box<dyn VirtualTcpSocket + Sync>,
+        peer: SocketAddr,
+    ) -> NetworkResult<()> {
         let mut state = self.state.lock().expect("browser HTTP listener poisoned");
+        if state.closed {
+            return Err(NetworkError::ConnectionRefused);
+        }
         state.backlog.push_back((socket, peer));
         if let Some(handler) = state.handler.as_mut() {
             handler.push_interest(InterestType::Readable);
@@ -563,6 +589,7 @@ impl BrowserHttpListener {
         for waiter in state.wakers.drain(..) {
             waiter.wake();
         }
+        Ok(())
     }
 }
 
@@ -577,6 +604,9 @@ impl VirtualIoSource for BrowserHttpListener {
 
     fn poll_read_ready(&mut self, context: &mut Context<'_>) -> Poll<NetworkResult<usize>> {
         let mut state = self.state.lock().expect("browser HTTP listener poisoned");
+        if state.closed {
+            return Poll::Ready(Err(NetworkError::ConnectionAborted));
+        }
         if !state.backlog.is_empty() {
             return Poll::Ready(Ok(state.backlog.len()));
         }
@@ -597,12 +627,11 @@ impl VirtualIoSource for BrowserHttpListener {
 
 impl VirtualTcpListener for BrowserHttpListener {
     fn try_accept(&mut self) -> NetworkResult<(Box<dyn VirtualTcpSocket + Sync>, SocketAddr)> {
-        self.state
-            .lock()
-            .expect("browser HTTP listener poisoned")
-            .backlog
-            .pop_front()
-            .ok_or(NetworkError::WouldBlock)
+        let mut state = self.state.lock().expect("browser HTTP listener poisoned");
+        if state.closed {
+            return Err(NetworkError::ConnectionAborted);
+        }
+        state.backlog.pop_front().ok_or(NetworkError::WouldBlock)
     }
 
     fn set_handler(
@@ -610,8 +639,11 @@ impl VirtualTcpListener for BrowserHttpListener {
         mut handler: Box<dyn InterestHandler + Send + Sync>,
     ) -> NetworkResult<()> {
         let mut state = self.state.lock().expect("browser HTTP listener poisoned");
-        if !state.backlog.is_empty() {
+        if state.closed || !state.backlog.is_empty() {
             handler.push_interest(InterestType::Readable);
+        }
+        if state.closed {
+            handler.push_interest(InterestType::Closed);
         }
         state.handler = Some(handler);
         Ok(())
@@ -1102,6 +1134,42 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn closing_network_wakes_pending_accept() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct WakeCount(AtomicUsize);
+        impl std::task::Wake for WakeCount {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let network = BrowserHttpNetworking::new();
+        let mut listener = network
+            .listen_tcp("127.0.0.1:5432".parse().unwrap(), false, false, false)
+            .await
+            .unwrap();
+        let wakes = Arc::new(WakeCount(AtomicUsize::new(0)));
+        let waker = Waker::from(wakes.clone());
+        let mut context = Context::from_waker(&waker);
+        assert!(listener.poll_read_ready(&mut context).is_pending());
+        listener
+            .set_handler(virtual_mio::WakerInterestHandler::new(&waker))
+            .unwrap();
+
+        network.request_handler().close();
+        // Both readiness mechanisms must wake, then report closure rather
+        // than putting the guest back to sleep with WouldBlock.
+        assert!(wakes.0.load(Ordering::SeqCst) >= 2);
+        assert!(matches!(
+            listener.poll_read_ready(&mut context),
+            Poll::Ready(Err(NetworkError::ConnectionAborted))
+        ));
+        assert!(matches!(
+            listener.try_accept(),
+            Err(NetworkError::ConnectionAborted)
+        ));
     }
 
     #[wasm_bindgen_test::wasm_bindgen_test]
