@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.18.0...wasmer-sdk-js-v0.19.0) (2026-09-28)
+
+
+### Features
+
+* run published Pi in wasmer.sh and iOS WasmerShell ([#543](https://github.com/wasmerio/wasmer-sdk/issues/543)) ([829ab94](https://github.com/wasmerio/wasmer-sdk/commit/829ab94598bdabdd02af59c7fe9df9be0d71a2b1))
+
 ## [0.18.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.17.0...wasmer-sdk-js-v0.18.0) (2026-09-24)
 
 
