@@ -21,6 +21,8 @@ runtime download is required.
   revision `b86d5c9a0bdd4f3f5c30898a63654dd32f39fd76`, with a green `#44B78B`
   fill for contrast on the dark picker. The logo path is unchanged.
   See `SIMPLE-ICONS-LICENSE.txt` (CC0 1.0).
+- `pi.svg` is the official [Pi](https://pi.dev/) logo, supplied as
+  `pi-logo-on-light.svg`. Its artwork, colors, and view box are unchanged.
 
 `benchmark.svg` is an original speedometer illustration for the Richards.js
 performance example, shared under the repository license.

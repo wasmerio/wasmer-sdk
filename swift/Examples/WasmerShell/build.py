@@ -62,6 +62,10 @@ def build(platform, edgejs_webc=None, integration_tests=False):
         "-I", library, "-I", library / "Modules", *sources, obj, library / "libWasmerSDK.a",
         prefix / "lib/libghostty-vt.a", "-o", app / "WasmerShell")
     copy_resources(library, app)
+    if integration_tests:
+        shutil.copyfile(ROOT.parents[2] / "wasmer-sh/tests/support/pi-locks.cjs", app / "pi-locks.cjs")
+    else:
+        (app / "pi-locks.cjs").unlink(missing_ok=True)
     # Test runtime changes before publishing a registry release. This artifact
     # is generated externally and never checked into the source tree.
     local_edgejs = app / "edgejs.webc"
@@ -179,7 +183,7 @@ def main():
     parser.add_argument("action", choices=["build", "run", "test", "stress"])
     parser.add_argument("--platform", choices=["simulator", "device"], default="simulator")
     parser.add_argument("--device", help="iOS 27+ simulator UDID")
-    parser.add_argument("--example", choices=["node", "node-next", "node-richards", "clang", "python", "postgres", "storage", "picker"], help="Run an example, or select the node-next/node-richards/clang/postgres/storage/picker integration test (test)")
+    parser.add_argument("--example", choices=["pi", "node", "node-next", "node-richards", "clang", "python", "postgres", "storage", "picker"], help="Run an example or its integration test; for Pi tests use node Tests/pi.mjs")
     parser.add_argument("--edgejs-webc", type=Path, help="Use a locally generated EdgeJS package instead of the registry release")
     parser.add_argument("--storage", choices=["native", "memory", "opfs"], help="Choose workspace storage; run preserves the app selection, tests default to native")
     parser.add_argument("--reuse-next-project", action="store_true", help="Test the existing node-next directory and pnpm cache, preserving files (test --example node-next only)")

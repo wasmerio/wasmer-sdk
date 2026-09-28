@@ -54,7 +54,7 @@ struct ExamplePicker: View {
               .padding(.top, 6)
           }
         }
-        ForEach(["Node.js", "Python", "Databases", "Tools"], id: \.self) { group in
+        ForEach(["AI", "Node.js", "Python", "Databases", "Tools"], id: \.self) { group in
           VStack(alignment: .leading, spacing: 12) {
             Text(group.uppercased()).font(.caption.weight(.semibold)).tracking(1)
               .foregroundStyle(ShellTheme.muted).accessibilityAddTraits(.isHeader)

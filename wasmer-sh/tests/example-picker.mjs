@@ -4,6 +4,8 @@ import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { chromium, firefox, webkit } from "playwright";
 import { createServer } from "vite";
+import { checkPiAgent } from "./support/pi-agent.mjs";
+import { instrumentPiPage } from "./support/pi-preview.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const catalog = JSON.parse(
@@ -79,6 +81,7 @@ try {
   assert(browserType, "WASMER_BROWSER must be chromium, firefox, or webkit");
   browser = await browserType.launch({ headless: true });
   page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
+  if (selectedExamples.some(example => example.id === "pi")) await instrumentPiPage(page);
   page.on("pageerror", (error) => diagnostics.push(error.stack));
   page.on("console", (message) => {
     // Framework demos deliberately request invalid input (400/422), and stopping
@@ -111,9 +114,10 @@ try {
   for (const path of [
     "node/server.js", "python/server.py", "python-django/manage.py",
     "python-django/mysite/settings.py", "next/pages/index.js", "yt-dlp/yt-dlp.conf",
-    "node-richards/richards.js", "clang/hello.c", "postgres/demo.sql",
+    "node-richards/richards.js", "clang/hello.c", "postgres/demo.sql", "pi/hello.js",
   ])
     assert(fullShellPaths.includes(path), `Missing full-shell source: ${path}`);
+  assert(!fullShellPaths.includes("pi/start-pi.sh"), "Pi must launch without a workspace wrapper");
   assert.equal(
     packages.length,
     0,
@@ -141,7 +145,7 @@ try {
     ),
     true,
   );
-  for (const id of ["postgres", "clang", "ffmpeg", "yt-dlp"]) {
+  for (const id of ["pi", "postgres", "clang", "ffmpeg", "yt-dlp"]) {
     const tool = page.locator(`[data-example="${id}"]`);
     await tool.scrollIntoViewIfNeeded();
     assert.equal(await tool.isVisible(), true);
@@ -188,7 +192,7 @@ try {
       `test "$PWD" = /workspace && test -f README.md && test ! -d node_modules && test ! -d .python-packages && test ! -d /workspace/${example.source} && test ! -e .picker-example && test "$PIP_TARGET" = /workspace/.python-packages && test "$PYTHONPATH" = /workspace/.python-packages`,
     );
     await command(`printf '%s' '${example.id}' > .picker-example`);
-    if (example.group === "Node.js")
+    if (example.group === "Node.js" || example.id === "pi")
       await command(
         "command -v node && ! command -v python && ! command -v php && ! command -v ffmpeg",
       );
@@ -238,7 +242,14 @@ try {
         180_000,
       );
     }
-    if (example.id === "yt-dlp") {
+    if (example.id === "pi") {
+      assert.equal(example.install, null, "Pi must start from its WebC without npm installation");
+      assert.equal(example.run, "pi", "Pi must launch its package command directly");
+      const tools = await command("find . -maxdepth 1 -name hello.js -print0 | xargs -0 grep -l greet | sed 's|./|BROWSER_TOOLS_OK:|'");
+      assert(tools.includes("BROWSER_TOOLS_OK:hello.js"));
+      await command("sed -i 's/Hello/Hello/' hello.js && locate --version && updatedb --version");
+      await checkPiAgent({ page, command, waitForPrompt });
+    } else if (example.id === "yt-dlp") {
       await command(
         'qjs --version && ffmpeg -version && /workspace/.python-packages/bin/yt-dlp --version && python -c "import yt_dlp_ejs; from yt_dlp.utils._jsruntime import QuickJsRuntime; assert QuickJsRuntime().info.supported"',
       );

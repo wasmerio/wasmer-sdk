@@ -23,8 +23,16 @@ final class TerminalView: UIView, UIKeyInput {
   var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
   var keyboardAppearance: UIKeyboardAppearance = .dark
   var keyboardType: UIKeyboardType = .asciiCapable
+  var pasteboard: UIPasteboard = .general
+  private let editMenu = UIEditMenuInteraction(delegate: nil)
   var hasText: Bool { true }
-  override var canBecomeFirstResponder: Bool { true }
+  var inputReady = false {
+    didSet {
+      if inputReady { focus() }
+      else { resignFirstResponder() }
+    }
+  }
+  override var canBecomeFirstResponder: Bool { inputReady }
 
   override init(frame: CGRect) {
     guard let terminal = wt_new(80, 24) else { fatalError("Unable to initialize libghostty-vt") }
@@ -38,11 +46,27 @@ final class TerminalView: UIView, UIKeyInput {
     accessibilityIdentifier = "wasmer-terminal"
     addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(focus)))
     addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(scroll(_:))))
+    addInteraction(editMenu)
+    addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(showEditMenu(_:))))
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
   isolated deinit { wt_free(terminal) }
 
-  @objc func focus() { becomeFirstResponder() }
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    // SwiftUI removes this view for the picker and reattaches it on resume.
+    // Wait for attachment rather than focusing an offscreen input surface.
+    focus()
+  }
+  @objc func focus() {
+    guard inputReady, window != nil else { return }
+    becomeFirstResponder()
+  }
+  @objc private func showEditMenu(_ gesture: UILongPressGestureRecognizer) {
+    guard inputReady, gesture.state == .began else { return }
+    focus()
+    editMenu.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: gesture.location(in: self)))
+  }
   @objc private func scroll(_ gesture: UIPanGestureRecognizer) {
     let delta = Int(gesture.translation(in: self).y / cellHeight)
     if delta != 0 {
@@ -77,6 +101,26 @@ final class TerminalView: UIView, UIKeyInput {
     onInput?(Data(text.replacingOccurrences(of: "\n", with: "\r").utf8))
     setNeedsDisplay()
   }
+  override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+    if action == #selector(paste(_:)) { return inputReady && pasteboard.hasStrings }
+    return super.canPerformAction(action, withSender: sender)
+  }
+  override func paste(_ sender: Any?) {
+    guard inputReady, let text = pasteboard.string else { return }
+    pasteText(text)
+  }
+  func pasteText(_ text: String) {
+    guard inputReady, !text.isEmpty else { return }
+    // Normalize CRLF once so Windows clipboard text doesn't gain blank lines.
+    var input = Array(text.replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n").utf8)
+    var bytes = [UInt8](repeating: 0, count: input.count + 12)
+    let count = wt_paste(terminal, &input, input.count, &bytes, bytes.count)
+    guard count > 0 else { return }
+    wt_bottom(terminal)
+    onInput?(Data(bytes.prefix(count)))
+    setNeedsDisplay()
+  }
   func deleteBackward() { sendKey(4) }
   func sendKey(_ key: Int32) {
     wt_bottom(terminal)
@@ -88,6 +132,7 @@ final class TerminalView: UIView, UIKeyInput {
 
   override var keyCommands: [UIKeyCommand]? {
     let commands = [
+      UIKeyCommand(input: "v", modifierFlags: .command, action: #selector(paste(_:))),
       UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(key(_:))),
       UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(key(_:))),
       UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: #selector(key(_:))),

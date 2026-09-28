@@ -699,9 +699,6 @@ async function openPreview(session: ActiveSession, port: number): Promise<void> 
     elements.stage.classList.add("has-preview");
     updateLiveHttpBadge(session);
     fitTerminal();
-    writeTerminal(
-      `\r\n\x1b[38;5;81m[web server listening on port ${port} · preview opened]\x1b[0m\r\n`,
-    );
   } finally {
     session.pendingPreviewPorts.delete(port);
   }

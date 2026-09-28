@@ -46,12 +46,16 @@ impl TerminalBridge {
         self.options.clone()
     }
 
-    pub(crate) fn resize(&self, columns: u32, rows: u32) {
+    pub(crate) fn resize(&self, columns: u32, rows: u32) -> bool {
+        let mut state = self.state.lock().unwrap();
+        if (state.cols, state.rows) == (columns, rows) {
+            return false;
+        }
         self.options.set_cols(columns);
         self.options.set_rows(rows);
-        let mut state = self.state.lock().unwrap();
         state.cols = columns;
         state.rows = rows;
+        true
     }
 
     fn initial_state(options: TerminalOptions) -> WasiTtyState {
@@ -111,7 +115,8 @@ mod tests {
         assert!(!bridge.options().echo());
         assert!(!bridge.options().line_buffering());
 
-        bridge.resize(90, 30);
+        assert!(bridge.resize(90, 30));
+        assert!(!bridge.resize(90, 30));
         let resized = bridge.tty_get();
         assert_eq!((resized.cols, resized.rows), (90, 30));
     }

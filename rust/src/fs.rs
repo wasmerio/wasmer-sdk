@@ -265,6 +265,9 @@ fn virtual_metadata(metadata: &virtual_fs::Metadata) -> FileMetadata {
         },
         len: metadata.len(),
         readonly: false,
+        accessed: metadata.accessed,
+        modified: metadata.modified,
+        created: metadata.created,
     }
 }
 

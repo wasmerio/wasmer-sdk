@@ -245,6 +245,12 @@ mode handles the LF bytes emitted by the WASIX output pipe.
 state, draws colors/styles and Unicode cells, handles scrollback, encodes keys,
 and sends terminal query responses back to the guest. This is a UIKit renderer
 using Ghostty's VT engine, not Ghostty's desktop Metal renderer.
+The terminal takes keyboard focus when the shell is ready and when returning
+from the example picker or a server preview. Launching an example keeps focus.
+Use **Cmd+V** on a hardware keyboard, or long-press the terminal and choose
+**Paste**, to insert clipboard text. Paste respects the application's bracketed
+paste mode, so multiline text stays editable in Pi. Clipboard contents are read
+only when Paste is invoked; Unicode and Windows line endings are supported.
 
 The app watches `sandbox.ports.listening()` and calls `ports.expose(port)`.
 Each returned `ExposedPort` provides an authenticated loopback URL for its
@@ -270,6 +276,26 @@ Closing a guest listener stops its proxy and dismisses the preview. The hidden
 execution WKWebView remains unattached throughout.
 
 ## Validation
+
+Pi has a dedicated simulator test with the same local streaming model fixture
+as the browser example. It checks the published Edge.js 0.2.4 runtime, all seven
+agent tools, credential lock heartbeats and contention, native keyboard input,
+keyboard focus on entry and picker resume, Pi's login menu, and return to Bash. No
+provider account or paid API calls are needed:
+
+```sh
+node swift/Examples/WasmerShell/Tests/pi.mjs --storage native
+```
+
+The runner requires the Node dependencies in `wasmer-sh` and resolves
+`wasmer/pi@=0.87.1` from the registry; no local Pi WebC build is required.
+Clipboard checks route the native Paste action through the responder chain using
+an isolated test pasteboard, leaving the system clipboard untouched. They cover
+multiline Pi input, Unicode, newline normalization, and pastes larger than 64 KiB.
+These checks pass with native storage on the iPhone 18 Pro simulator running
+iOS 27.0. Physical-device Pi execution remains untested. The native filesystem
+supports the timestamp updates Pi uses for its
+credential locks; Pi itself needs no patches.
 
 `build.py test --example storage --storage opfs` checks Swift/guest file sharing,
 binary IO, directory rename, and persistence across a runtime restart. Use
@@ -353,10 +379,18 @@ packaged by CI in the Swift release's runtime XCFramework.
 
 ## Example picker
 
-WasmerShell opens with a grid of Node.js, Express, Next.js, Richards.js, Python
+WasmerShell opens with a grid of Pi, Node.js, Express, Next.js, Richards.js, Python
 HTTP, Flask, Django, FastAPI, Clang / C, FFmpeg, and yt-dlp templates. The catalog
 and sources are shared with
 `wasmer-sh/examples.json` and `wasmer-sh/workspace`.
+
+Choose **Pi coding agent** under **AI**, then run `pi`. The app downloads
+`wasmer/pi@=0.87.1` from the registry. Its WebC bundles the Pi CLI and resolves
+Edge.js and the command-line tools as registry dependencies; no local Pi asset
+is bundled in the app.
+Use `/login` and `/model` inside Pi to configure your provider. No installation
+script is needed. Native workspace storage keeps settings and sessions between
+app launches; memory storage discards them when the sandbox closes.
 
 Selecting an example starts a shell with only that example's runtime packages,
 copies missing source files directly into `/workspace`, and opens Bash there.

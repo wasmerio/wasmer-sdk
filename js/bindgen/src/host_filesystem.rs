@@ -26,7 +26,9 @@ fn call<T: Serialize, R: serde::de::DeserializeOwned>(
     method: &str,
     args: T,
 ) -> FsResult<R> {
-    let args = serde_wasm_bindgen::to_value(&args).map_err(|e| FsError::Io(e.to_string()))?;
+    let args = args
+        .serialize(&serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true))
+        .map_err(|e| FsError::Io(e.to_string()))?;
     let value = host_call(mount, method, args).map_err(|error| {
         let code = js_sys::Reflect::get(&error, &JsValue::from_str("code"))
             .ok()
@@ -53,6 +55,19 @@ fn path(path: &RelativePath) -> String {
 struct Metadata {
     kind: String,
     size: u64,
+    #[serde(default, deserialize_with = "nanoseconds")]
+    accessed: u64,
+    #[serde(default, deserialize_with = "nanoseconds")]
+    modified: u64,
+    #[serde(default, deserialize_with = "nanoseconds")]
+    created: u64,
+}
+
+// Decimal strings preserve nanoseconds beyond JavaScript's safe integer range.
+fn nanoseconds<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+    String::deserialize(deserializer)?
+        .parse()
+        .map_err(serde::de::Error::custom)
 }
 impl From<Metadata> for FileMetadata {
     fn from(value: Metadata) -> Self {
@@ -64,6 +79,9 @@ impl From<Metadata> for FileMetadata {
             },
             len: value.size,
             readonly: false,
+            accessed: value.accessed,
+            modified: value.modified,
+            created: value.created,
         }
     }
 }
@@ -87,19 +105,15 @@ impl FileSystem for HostFileSystem {
         #[derive(Deserialize)]
         struct Entry {
             name: String,
-            kind: String,
-            size: u64,
+            #[serde(flatten)]
+            metadata: Metadata,
         }
         let entries: Vec<Entry> = call(self.mount_id, "readDir", (path(name),))?;
         Ok(entries
             .into_iter()
             .map(|e| DirectoryEntry {
                 name: e.name,
-                metadata: Metadata {
-                    kind: e.kind,
-                    size: e.size,
-                }
-                .into(),
+                metadata: e.metadata.into(),
             })
             .collect())
     }
@@ -139,6 +153,24 @@ impl FileSystem for HostFileSystem {
     async fn flush(&self) -> FsResult<()> {
         call(self.mount_id, "sync", ())
     }
+    async fn set_times(
+        &self,
+        name: &RelativePath,
+        atime: Option<u64>,
+        mtime: Option<u64>,
+        _follow_symlinks: bool,
+    ) -> FsResult<()> {
+        // The native provider rejects all symlinks, including the final component.
+        call(
+            self.mount_id,
+            "setTimes",
+            (
+                path(name),
+                atime.map(|n| n.to_string()),
+                mtime.map(|n| n.to_string()),
+            ),
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -149,6 +181,20 @@ struct HostFile {
 
 #[async_trait]
 impl File for HostFile {
+    async fn metadata(&self) -> FsResult<FileMetadata> {
+        call::<_, Metadata>(self.mount_id, "fileStat", (self.id,)).map(Into::into)
+    }
+    async fn set_times(&self, atime: Option<u64>, mtime: Option<u64>) -> FsResult<()> {
+        call(
+            self.mount_id,
+            "setFileTimes",
+            (
+                self.id,
+                atime.map(|n| n.to_string()),
+                mtime.map(|n| n.to_string()),
+            ),
+        )
+    }
     async fn read_at(&self, offset: u64, length: usize) -> FsResult<Bytes> {
         // ByteBuf accepts legacy number arrays as well as the binary reply
         // transport, which copies a Uint8Array without decoding each element.

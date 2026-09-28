@@ -83,7 +83,9 @@ struct WasmerShellApp: App {
       .background(ShellTheme.page)
       .preferredColorScheme(.dark)
       .task { await session.startIfRequested() }
-      .sheet(item: $session.presentedPreview) { preview in ServerPreviewSheet(preview: preview).id(preview.id) }
+      .sheet(item: $session.presentedPreview, onDismiss: { session.view.focus() }) { preview in
+        ServerPreviewSheet(preview: preview).id(preview.id)
+      }
     }
   }
   private func key(_ title: String, _ code: Int32) -> some View {
@@ -105,7 +107,9 @@ final class TerminalSession: ObservableObject {
       #endif
     }
   }
-  @Published var ready = false
+  @Published var ready = false {
+    didSet { view.inputReady = ready }
+  }
   @Published var starting = false
   @Published var previews: [ServerPreview] = []
   @Published var presentedPreview: ServerPreview?
@@ -128,7 +132,7 @@ final class TerminalSession: ObservableObject {
     guard arguments.contains("--smoke-test") || arguments.contains("--stress-test") ||
           arguments.contains(where: { $0.hasPrefix("--example-") }) else { return }
     showingExamples = false
-    let focusedTemplateTest = ["node-richards", "clang", "postgres"].contains { arguments.contains("--example-" + $0) }
+    let focusedTemplateTest = ["pi", "node-richards", "clang", "postgres"].contains { arguments.contains("--example-" + $0) }
     if focusedTemplateTest || (!arguments.contains("--smoke-test") && !arguments.contains("--stress-test")) {
       selectedExample = ShellExample.all.first { arguments.contains("--example-" + $0.id) }
     }
@@ -222,7 +226,7 @@ final class TerminalSession: ObservableObject {
       #if WASMER_SHELL_TESTS
       if startIntegrationTests(host) { return }
       #endif
-      if let name = ["node", "node-next", "node-richards", "clang", "python", "postgres"].first(where: { ProcessInfo.processInfo.arguments.contains("--example-" + $0) }) {
+      if let name = ["pi", "node", "node-next", "node-richards", "clang", "python", "postgres"].first(where: { ProcessInfo.processInfo.arguments.contains("--example-" + $0) }) {
         Task {
           do { try await waitFor("➜ ~ $ "); runExample(name) }
           catch { status = error.localizedDescription }
@@ -277,7 +281,6 @@ final class TerminalSession: ObservableObject {
 
   func runExample(_ name: String) {
     guard let example = ShellExample.all.first(where: { $0.id == name }) else { return }
-    view.resignFirstResponder()
     let workingDirectory = selectedExample == nil ? "/workspace/" + example.id : "/workspace"
     send(Data(("cd " + workingDirectory + " && " + example.run + "\r").utf8))
   }

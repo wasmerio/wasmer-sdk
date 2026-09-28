@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import WebKit
 import WasmerSDK
 
@@ -26,6 +27,10 @@ extension TerminalSession {
   }
 
   private func runSmokeTest(_ host: ShellRuntime) async {
+    if ProcessInfo.processInfo.arguments.contains("--example-pi") {
+      await runPiSmokeTest(host)
+      return
+    }
     if ProcessInfo.processInfo.arguments.contains("--example-picker") {
       await runPickerSmokeTest()
       return
@@ -161,6 +166,197 @@ extension TerminalSession {
     report["transcript"] = text
     writeReport(report)
   }
+  private func runPiSmokeTest(_ host: ShellRuntime) async {
+    var report: [String: Any] = ["passed": false, "example": "pi", "storage": storage.rawValue,
+                               "osVersion": ProcessInfo.processInfo.operatingSystemVersionString]
+    var checks: [String] = []
+    do {
+      let environment = ProcessInfo.processInfo.environment
+      guard let models = environment["PI_TEST_MODELS"], let auth = environment["PI_TEST_AUTH"],
+            let health = environment["PI_TEST_HEALTH_URL"] else {
+        throw DemoError.failed("Start the local model fixture with node swift/Examples/WasmerShell/Tests/pi.mjs")
+      }
+      try await waitFor("➜ ~ $ ")
+      try await checkKeyboardFocus()
+      checks.append("keyboard focus on terminal entry and return from picker")
+      try await host.writeTerminal(Data("PS1='wasmer: $ '\r".utf8))
+      try checkPasteEncoding()
+      let beforePaste = text.count
+      try pasteThroughResponder("printf '%s\\n' PASTE_SHELL_OK")
+      await inputTask?.value
+      try await waitFor("PASTE_SHELL_OK", after: beforePaste)
+      guard !String(text.dropFirst(beforePaste)).contains("\nPASTE_SHELL_OK\n") else {
+        throw DemoError.failed("Pasting unexpectedly submitted the shell command")
+      }
+      view.sendKey(5); await inputTask?.value
+      try await waitFor("\nPASTE_SHELL_OK\n", after: beforePaste)
+      checks.append("Cmd-V responder action, Unicode, newline normalization and paste larger than 64 KiB")
+      try await shellCheck(host, command: "test -f hello.js && test ! -f start-pi.sh && test ! -f install.sh && pi --version", marker: "\n0.87.1\n")
+      let runtime = try await shellCheck(host, command: "node -p process.versions.edge", marker: "\n0.0.0-ga04c84b\n")
+      report["runtime"] = runtime
+      checks.append("Pi WebC and Edge.js 0.2.4 without a wrapper")
+      status = "Testing Pi credential locks…"
+      let lockTest = try String(contentsOf: Bundle.main.url(forResource: "pi-locks", withExtension: "cjs")!, encoding: .utf8)
+      try await host.fs.writeText("pi-locks.cjs", lockTest)
+      try await shellCheck(host, command: "node pi-locks.cjs /opt/pi", marker: "\nPI_LOCKS_OK\n")
+      checks.append("credential lock heartbeat, cross-process contention and stale-lock recovery")
+      let directory = ".pi-ios-test-" + UUID().uuidString
+      try await host.fs.mkdir(directory)
+      try await host.fs.writeText(directory + "/models.json", models)
+      try await host.fs.writeText(directory + "/auth.json", auth)
+      try await shellCheck(host, command: "curl --fail --silent --show-error '\(health)' && printf '\\nPI_NETWORK_OK\\n'", marker: "\nPI_NETWORK_OK\n")
+      checks.append("native HTTP connection to local model")
+
+      status = "Testing Pi agent tools…"
+      let beforeAgent = text.count
+      try await host.writeTerminal(Data("PI_CODING_AGENT_DIR=/workspace/\(directory) pi --offline --provider wasmer-test --model test --thinking off --tools read,write,edit,bash,grep,find,ls\r".utf8))
+      try await waitFor("pi v0.87.1", after: beforeAgent, timeout: 90)
+      view.insertText("Exercise the workspace tools.\n")
+      await inputTask?.value
+      try await waitFor("PI_AGENT_TOOLS_OK", after: beforeAgent, timeout: 120, failureMarker: "Credential store read failed")
+      guard try await host.fs.readText("pi-test/result.txt") == "after\n" else {
+        throw DemoError.failed("Pi did not write and edit the workspace file")
+      }
+      checks.append("streaming agent: read, write, edit, bash, grep, find and ls")
+
+      // Exercise the native keyboard queue and Ghostty's rendered screen.
+      for character in "Now change something" {
+        view.insertText(String(character))
+        await inputTask?.value
+        try await Task.sleep(for: .milliseconds(40))
+      }
+      try await waitFor("Now change something", after: beforeAgent)
+      let typingDeadline = ContinuousClock.now + .seconds(5)
+      while !view.visibleText.contains("Now change something"), ContinuousClock.now < typingDeadline {
+        try await Task.sleep(for: .milliseconds(50))
+      }
+      let lines = view.visibleText.components(separatedBy: "\n").filter { $0.contains("Now change") }
+      guard lines.count == 1, lines[0].contains("Now change something") else {
+        throw DemoError.failed("Pi repeated or lost editable input: \(lines)")
+      }
+      report["agentVisibleText"] = view.visibleText
+      checks.append("native keyboard input without duplicated lines")
+      view.sendControl(3); await inputTask?.value
+      let beforeMultilinePaste = text.count
+      try pasteThroughResponder("First pasted line π\r\nSecond pasted line café")
+      await inputTask?.value
+      try await waitFor("Second pasted line café", after: beforeMultilinePaste)
+      guard view.visibleText.contains("First pasted line π"), view.visibleText.contains("Second pasted line café") else {
+        throw DemoError.failed("Pi did not retain the multiline clipboard text in its editor")
+      }
+      checks.append("Pi multiline bracketed paste remains editable")
+      view.sendControl(3); await inputTask?.value
+      let beforeQuit = text.count
+      view.insertText("/quit\n"); await inputTask?.value
+      try await waitFor("wasmer: $ ", after: beforeQuit)
+      checks.append("agent exit restores Bash")
+
+      status = "Testing Pi login…"
+      let beforeLogin = text.count
+      runExample("pi"); await inputTask?.value
+      try await waitForKeyboardFocus()
+      try await waitFor("pi v0.87.1", after: beforeLogin, timeout: 90)
+      view.insertText("/login\n"); await inputTask?.value
+      try await waitFor("Select authentication method:", after: beforeLogin)
+      report["loginVisibleText"] = view.visibleText
+      view.sendControl(3); await inputTask?.value
+      let cancelDeadline = ContinuousClock.now + .seconds(5)
+      while view.visibleText.contains("Select authentication method:"), ContinuousClock.now < cancelDeadline {
+        try await Task.sleep(for: .milliseconds(50))
+      }
+      let beforeLoginQuit = text.count
+      view.insertText("/quit\n"); await inputTask?.value
+      try await waitFor("wasmer: $ ", after: beforeLoginQuit)
+      checks.append("plain pi launch, native login menu, cancellation and exit")
+      try await shellCheck(host, command: "printf '\\nPI_SHELL_RECOVERED\\n'", marker: "\nPI_SHELL_RECOVERED\n")
+      report["nativeNetwork"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(await host.nativeNetworkStats))
+      report["nativeOperations"] = await host.nativeOperationCount
+      report["webViewAttached"] = host.isWebViewAttached
+      report["passed"] = true
+      status = "Pi integration tests passed"
+    } catch {
+      report["error"] = error.localizedDescription
+      status = "Pi integration test failed: \(error.localizedDescription)"
+    }
+    report["checks"] = checks
+    report["transcript"] = text
+    writeReport(report)
+  }
+
+  private func waitForKeyboardFocus() async throws {
+    let deadline = ContinuousClock.now + .seconds(5)
+    while !view.isFirstResponder {
+      guard ContinuousClock.now < deadline else {
+        throw DemoError.failed("Terminal is visible and ready but is not the keyboard's first responder")
+      }
+      try await Task.sleep(for: .milliseconds(50))
+    }
+  }
+
+  private func pasteThroughResponder(_ text: String) throws {
+    let original = view.pasteboard
+    let board = UIPasteboard.withUniqueName()
+    view.pasteboard = board
+    defer {
+      view.pasteboard = original
+      UIPasteboard.remove(withName: board.name)
+    }
+    let action = #selector(UIResponderStandardEditActions.paste(_:))
+    guard !view.canPerformAction(action, withSender: nil) else {
+      throw DemoError.failed("Paste enabled for an empty clipboard")
+    }
+    board.string = text
+    guard view.keyCommands?.contains(where: { $0.input == "v" && $0.modifierFlags == .command && $0.action == action }) == true,
+          view.canPerformAction(action, withSender: nil),
+          UIApplication.shared.sendAction(action, to: nil, from: nil, for: nil) else {
+      throw DemoError.failed("Cmd-V paste action was not routed to the terminal")
+    }
+  }
+
+  private func checkPasteEncoding() throws {
+    let terminal = TerminalView(frame: .zero)
+    terminal.inputReady = true
+    var packets: [Data] = []
+    terminal.onInput = { packets.append($0) }
+    func check(_ input: String, _ expected: String) throws {
+      packets.removeAll()
+      terminal.pasteText(input)
+      guard packets == [Data(expected.utf8)] else { throw DemoError.failed("Paste encoding or packet length is incorrect") }
+    }
+    try check("one\r\ntwo\rthree\nfour", "one\rtwo\rthree\rfour")
+    terminal.feed(Data("\u{1b}[?2004h".utf8))
+    try check("π🙂\r\ncafé\tend", "\u{1b}[200~π🙂\ncafé\tend\u{1b}[201~")
+    try check("a\u{1b}[201~\u{0}b", "\u{1b}[200~a [201~ b\u{1b}[201~")
+    let large = String(repeating: "π🙂line\n", count: 10_000)
+    try check(large, "\u{1b}[200~" + large + "\u{1b}[201~")
+    terminal.feed(Data("\u{1b}[?2004l".utf8))
+    try check("plain\ntext", "plain\rtext")
+    packets.removeAll()
+    terminal.pasteText("")
+    terminal.inputReady = false
+    terminal.pasteText("ignored")
+    guard packets.isEmpty else { throw DemoError.failed("Empty or disabled paste emitted input") }
+  }
+
+  private func checkKeyboardFocus() async throws {
+    try await waitForKeyboardFocus()
+    // Exercise both picker return paths, including UIKit detaching/re-attaching
+    // the terminal. Direct insertText calls alone bypass responder routing.
+    for resumeSameExample in [false, true] {
+      view.resignFirstResponder()
+      showingExamples = true
+      let deadline = ContinuousClock.now + .seconds(5)
+      while view.window != nil {
+        guard ContinuousClock.now < deadline else { throw DemoError.failed("Picker did not detach terminal") }
+        try await Task.sleep(for: .milliseconds(50))
+      }
+      guard !view.isFirstResponder else { throw DemoError.failed("Hidden terminal retained keyboard focus") }
+      if resumeSameExample { await chooseExample(selectedExample) }
+      else { showingExamples = false }
+      try await waitForKeyboardFocus()
+    }
+  }
+
   private func runStorageSmokeTest(_ host: ShellRuntime) async {
     var report: [String: Any] = ["passed": false, "storage": storage.rawValue]
     let name = ".storage-test-" + UUID().uuidString

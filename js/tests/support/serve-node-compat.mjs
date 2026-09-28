@@ -13,7 +13,7 @@ export async function startNodeCompatibilityServer() {
   const config = {
     httpOrigin: host.url,
     wispUrl: `ws://127.0.0.1:${proxy.address().port}/`,
-    edgePackage: localPackage ? '/edge.webc' : 'wasmer/edge@=0.2.1',
+    edgePackage: localPackage ? '/edge.webc' : 'wasmer/edgejs@=0.2.4',
   };
   const app = await startAppServer({
     files: localPackage ? { '/edge.webc': await readFile(localPackage) } : {},

@@ -3,7 +3,7 @@
 A fast, browser-native command shell powered by Wasmer, WASIX, and the new
 [`@wasmer/sdk`](https://www.npmjs.com/package/@wasmer/sdk) sandbox API.
 
-The opening screen offers Node.js, Express, Next.js, Richards.js, Python HTTP, Flask, Django,
+The opening screen offers Pi, Node.js, Express, Next.js, Richards.js, Python HTTP, Flask, Django,
 FastAPI, PostgreSQL, Clang / C, FFmpeg, and yt-dlp templates. Selecting a template opens Bash at
 `/workspace`, with that example's source files directly in the root and only its
 required runtime packages. The terminal shows the install and run commands;
@@ -15,6 +15,45 @@ Use **Examples** to browse templates and **Resume terminal** to return without
 interrupting the current session. Selecting another template opens a fresh
 workspace. A template can also be linked directly, for example `?example=node-next`.
 The catalog in `examples.json` is shared with the native Swift WasmerShell app.
+
+Choose **Pi coding agent** under **AI** (`?example=pi`) for Pi's interactive terminal
+agent. Pi loads `wasmer/pi@=0.87.1` from the registry; run `pi`. Use `/login` inside Pi to connect
+your AI provider with a subscription or API key, then `/model` to choose a model.
+Its read, write, edit, Bash, grep, find, and ls tools run in the sandbox.
+The search commands use real WASIX builds of fd and ripgrep. See the
+[example README](workspace/pi/README.md) for authentication and session storage.
+
+Pi uses published `wasmer/edgejs@0.2.4`. Build the browser SDK from this checkout
+before serving the example; its pinned Wasmer sources include the required fixes.
+It also loads `wasmer/fd@10.5.1` and `wasmer/ripgrep@15.2.1` from the registry. The standard WISP transport and released
+WASIX libc work; a TCP socket-options proxy extension is unnecessary.
+
+```sh
+npm --prefix js run build
+cd wasmer-sh
+npm install --no-save --package-lock=false ../js
+WASMER_EXAMPLE=pi npm run test:examples
+npm run dev
+```
+
+Pi and its dependencies download from the registry in both the browser and
+native Swift app. No Pi WebC asset needs to be built or bundled locally. See
+[fd](https://github.com/wasix-org/fd/blob/codex/wasix/WASIX.md) and
+[ripgrep](https://github.com/wasix-org/ripgrep/blob/codex/wasix/WASIX.md) for reproducible tool builds, and
+[Pi runtime/package builds](../packages/pi/README.md) for the source fixes and
+preinstalled WebC recipe. Pi uses its upstream source and entrypoint, with no filesystem or networking
+shims. Edge.js handles the WASIX process behavior in its native bindings.
+The build scripts do not publish packages or deploy the site. Production use
+requires the rebuilt SDK and runtime assets, or releases containing those fixes.
+Edge enables basic TCP keepalive through its native WASIX binding; libuv's
+TCP implementation is unchanged. The standard WISP transport treats that flag
+as a no-op, so this Pi example works with an ordinary proxy.
+
+The Pi browser check uses a local streaming model fixture to exercise all seven
+tools and the real interactive UI, without provider credentials or paid calls.
+It does not verify external provider authentication.
+The full Pi WebC example is verified in Chromium. Pi's complete WebKit flow is
+not yet verified; the standalone SDK Node/HTTPS checks pass there.
 
 Choose **PostgreSQL** under **Databases** (`?example=postgres`) to run PGlite and
 psql together. The SDK starts the database alongside the shell; run `psql`,

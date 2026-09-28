@@ -29,3 +29,6 @@ bool wt_next_cell(WTTerminal *terminal, WTCell *cell);
 size_t wt_take_response(WTTerminal *terminal, uint8_t *bytes, size_t capacity);
 // 0 up, 1 down, 2 left, 3 right, 4 backspace, 5 enter, 6 tab, 7 escape.
 size_t wt_key(WTTerminal *terminal, int key, uint8_t *bytes, size_t capacity);
+// Encodes mutable UTF-8 text according to the terminal's bracketed-paste mode.
+// The output buffer needs length + 12 bytes for the optional framing.
+size_t wt_paste(WTTerminal *terminal, uint8_t *text, size_t length, uint8_t *bytes, size_t capacity);

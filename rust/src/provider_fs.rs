@@ -109,6 +109,10 @@ pub struct FileMetadata {
     pub file_type: FileType,
     pub len: u64,
     pub readonly: bool,
+    /// Nanoseconds since the Unix epoch; zero when unavailable.
+    pub accessed: u64,
+    pub modified: u64,
+    pub created: u64,
 }
 
 /// One immediate child returned by [`FileSystem::read_dir`].
@@ -156,6 +160,13 @@ pub trait File: Debug + Send + Sync + 'static {
     async fn set_len(&self, length: u64) -> FsResult<()>;
     async fn flush(&self) -> FsResult<()>;
     async fn close(&self) -> FsResult<()>;
+    async fn metadata(&self) -> FsResult<FileMetadata> {
+        Err(FsError::Unsupported)
+    }
+    /// Update timestamps in nanoseconds since the Unix epoch; `None` preserves a value.
+    async fn set_times(&self, _atime: Option<u64>, _mtime: Option<u64>) -> FsResult<()> {
+        Err(FsError::Unsupported)
+    }
 }
 
 /// Object-safe asynchronous filesystem provider mounted beneath a guest path.
@@ -169,6 +180,16 @@ pub trait FileSystem: Debug + Send + Sync + 'static {
     async fn remove(&self, path: &RelativePath, recursive: bool) -> FsResult<()>;
     async fn rename(&self, from: &RelativePath, to: &RelativePath) -> FsResult<()>;
     async fn flush(&self) -> FsResult<()>;
+    /// Update timestamps in nanoseconds since the Unix epoch; `None` preserves a value.
+    async fn set_times(
+        &self,
+        _path: &RelativePath,
+        _atime: Option<u64>,
+        _mtime: Option<u64>,
+        _follow_symlinks: bool,
+    ) -> FsResult<()> {
+        Err(FsError::Unsupported)
+    }
 }
 
 /// Guest rights applied on top of provider capabilities.
@@ -280,6 +301,9 @@ impl FileSystem for Directory {
             },
             len: metadata.len(),
             readonly: false,
+            accessed: metadata.accessed,
+            modified: metadata.modified,
+            created: metadata.created,
         })
     }
 
@@ -300,6 +324,9 @@ impl FileSystem for Directory {
                         },
                         len: metadata.len(),
                         readonly: false,
+                        accessed: metadata.accessed,
+                        modified: metadata.modified,
+                        created: metadata.created,
                     },
                 })
             })
@@ -352,6 +379,18 @@ impl FileSystem for Directory {
     async fn flush(&self) -> FsResult<()> {
         Ok(())
     }
+
+    async fn set_times(
+        &self,
+        path: &RelativePath,
+        atime: Option<u64>,
+        mtime: Option<u64>,
+        follow_symlinks: bool,
+    ) -> FsResult<()> {
+        self.inner
+            .set_times(&internal_path(path), atime, mtime, follow_symlinks)
+            .map_err(map_virtual_error)
+    }
 }
 
 #[derive(Debug)]
@@ -362,6 +401,27 @@ struct DirectoryFile {
 
 #[async_trait]
 impl File for DirectoryFile {
+    async fn metadata(&self) -> FsResult<FileMetadata> {
+        self.ensure_open()?;
+        let file = self.inner.lock().await;
+        Ok(FileMetadata {
+            file_type: FileType::File,
+            len: file.size(),
+            readonly: false,
+            accessed: file.last_accessed(),
+            modified: file.last_modified(),
+            created: file.created_time(),
+        })
+    }
+
+    async fn set_times(&self, atime: Option<u64>, mtime: Option<u64>) -> FsResult<()> {
+        self.ensure_open()?;
+        self.inner
+            .lock()
+            .await
+            .set_times(atime, mtime)
+            .map_err(map_virtual_error)
+    }
     async fn read_at(&self, offset: u64, length: usize) -> FsResult<Bytes> {
         self.ensure_open()?;
         let mut file = self.inner.lock().await;
@@ -618,6 +678,26 @@ impl VirtualFileSystem for ProviderAdapter {
         self.metadata(path)
     }
 
+    fn set_times(
+        &self,
+        path: &Path,
+        atime: Option<u64>,
+        mtime: Option<u64>,
+        follow_symlinks: bool,
+    ) -> virtual_fs::Result<()> {
+        if !self.writable() {
+            return Err(virtual_fs::FsError::PermissionDenied);
+        }
+        let provider_path = Self::path(path)?;
+        let provider = Arc::clone(&self.provider);
+        run_provider(&self.runtime, async move {
+            provider
+                .set_times(&provider_path, atime, mtime, follow_symlinks)
+                .await
+        })
+        .map_err(map_provider_error)
+    }
+
     fn remove_file(&self, path: &Path) -> virtual_fs::Result<()> {
         if !self.writable() {
             return Err(virtual_fs::FsError::PermissionDenied);
@@ -740,19 +820,31 @@ impl AsyncSeek for ProviderFile {
 
 impl VirtualFile for ProviderFile {
     fn last_accessed(&self) -> u64 {
-        0
+        self.metadata().map_or(0, |metadata| metadata.accessed)
     }
 
     fn last_modified(&self) -> u64 {
-        0
+        self.metadata().map_or(0, |metadata| metadata.modified)
     }
 
     fn created_time(&self) -> u64 {
-        0
+        self.metadata().map_or(0, |metadata| metadata.created)
     }
 
     fn size(&self) -> u64 {
         self.len
+    }
+
+    fn set_times(&mut self, atime: Option<u64>, mtime: Option<u64>) -> virtual_fs::Result<()> {
+        if !self.writable {
+            return Err(virtual_fs::FsError::PermissionDenied);
+        }
+        let file = Arc::clone(&self.file);
+        run_provider(
+            &self.runtime,
+            async move { file.set_times(atime, mtime).await },
+        )
+        .map_err(map_provider_error)
     }
 
     fn set_len(&mut self, length: u64) -> virtual_fs::Result<()> {
@@ -780,15 +872,22 @@ impl VirtualFile for ProviderFile {
     }
 }
 
+impl ProviderFile {
+    fn metadata(&self) -> FsResult<FileMetadata> {
+        let file = Arc::clone(&self.file);
+        run_provider(&self.runtime, async move { file.metadata().await })
+    }
+}
+
 fn to_virtual_metadata(metadata: FileMetadata) -> virtual_fs::Metadata {
     virtual_fs::Metadata {
         ft: match metadata.file_type {
             FileType::File => virtual_fs::FileType::new_file(),
             FileType::Directory => virtual_fs::FileType::new_dir(),
         },
-        accessed: 0,
-        created: 0,
-        modified: 0,
+        accessed: metadata.accessed,
+        created: metadata.created,
+        modified: metadata.modified,
         len: metadata.len,
     }
 }
@@ -867,4 +966,68 @@ where
     F: Future<Output = T>,
 {
     futures::executor::block_on(future)
+}
+
+#[cfg(all(test, feature = "sys"))]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn provider_timestamps_are_shared_and_respect_mount_permissions() {
+        let directory = Directory::new();
+        directory.write_text("file", "contents").await.unwrap();
+        let provider: Arc<dyn FileSystem> = Arc::new(directory.clone());
+        let writable = ProviderAdapter::new(
+            provider.clone(),
+            MountMode::ReadWrite,
+            ProviderRuntime::current(),
+        );
+        let readonly =
+            ProviderAdapter::new(provider, MountMode::ReadOnly, ProviderRuntime::current());
+        let path = Path::new("/lock");
+        writable.create_dir(path).unwrap();
+        writable
+            .set_times(
+                path,
+                Some(1_700_000_000_123_456_789),
+                Some(2_000_000_001),
+                true,
+            )
+            .unwrap();
+        writable
+            .set_times(path, None, Some(3_000_000_002), true)
+            .unwrap();
+        let stat = readonly.metadata(path).unwrap();
+        assert_eq!(stat.accessed, 1_700_000_000_123_456_789);
+        assert_eq!(stat.modified, 3_000_000_002);
+        assert_eq!(
+            readonly.set_times(path, Some(0), Some(0), true),
+            Err(virtual_fs::FsError::PermissionDenied)
+        );
+        assert_eq!(
+            writable.set_times(Path::new("/missing"), None, Some(0), true),
+            Err(virtual_fs::FsError::EntryNotFound)
+        );
+
+        let mut file = writable
+            .new_open_options()
+            .read(true)
+            .write(true)
+            .open("/file")
+            .unwrap();
+        file.set_times(Some(10), Some(20)).unwrap();
+        assert_eq!(file.last_accessed(), 10);
+        assert_eq!(file.last_modified(), 20);
+        assert_eq!(readonly.metadata(Path::new("/file")).unwrap().modified, 20);
+        let mut read_only_file = readonly
+            .new_open_options()
+            .read(true)
+            .open("/file")
+            .unwrap();
+        assert_eq!(
+            read_only_file.set_times(None, Some(0)),
+            Err(virtual_fs::FsError::PermissionDenied)
+        );
+        assert_eq!(read_only_file.last_modified(), 20);
+    }
 }

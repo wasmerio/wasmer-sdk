@@ -35,6 +35,9 @@ enum NativeFileSystemRequest: Sendable {
   }
 
   case stat(String)
+  case fileStat(Int)
+  case setTimes(String, UInt64?, UInt64?)
+  case setFileTimes(Int, UInt64?, UInt64?)
   case open(String, OpenOptions)
   case read(Int, offset: Int, count: Int, base64: Bool)
   case write(Int, offset: Int, WriteData)
@@ -63,8 +66,18 @@ enum NativeFileSystemRequest: Sendable {
       else { throw NativeIOError(EINVAL) }
       return value.intValue
     }
+    func timestamp(_ index: Int) throws -> UInt64? {
+      guard args.indices.contains(index) else { throw NativeIOError(EINVAL) }
+      if args[index] is NSNull { return nil }
+      // The bridge carries decimal strings to preserve all nanoseconds.
+      guard let text = args[index] as? String, let value = UInt64(text) else { throw NativeIOError(EINVAL) }
+      return value
+    }
     switch method {
     case "stat": self = .stat(try string(0))
+    case "fileStat": self = .fileStat(try integer(0))
+    case "setTimes": self = .setTimes(try string(0), try timestamp(1), try timestamp(2))
+    case "setFileTimes": self = .setFileTimes(try integer(0), try timestamp(1), try timestamp(2))
     case "open":
       guard args.count == 7 else { throw NativeIOError(EINVAL) }
       let options = args.dropFirst().map { ($0 as? Bool) ?? false }
@@ -104,7 +117,7 @@ enum NativeFileSystemRequest: Sendable {
   var writes: Bool {
     switch self {
     case .open(_, let options): options.writes
-    case .write, .setLen, .mkdir, .remove, .rename: true
+    case .write, .setLen, .mkdir, .remove, .rename, .setTimes, .setFileTimes: true
     default: false
     }
   }
@@ -113,7 +126,11 @@ enum NativeFileSystemRequest: Sendable {
 struct NativeFileMetadata: Sendable {
   let isDirectory: Bool
   let size: Int64
-  var object: [String: Any] { ["kind": isDirectory ? "directory" : "file", "size": size] }
+  let accessed, modified, created: UInt64
+  var object: [String: Any] {
+    ["kind": isDirectory ? "directory" : "file", "size": size,
+     "accessed": String(accessed), "modified": String(modified), "created": String(created)]
+  }
 }
 
 struct NativeDirectoryEntry: Sendable {
@@ -235,15 +252,50 @@ actor NativeFileSystem {
   private func metadata(_ directory: Int32, _ name: String) throws -> NativeFileMetadata {
     var info = stat()
     _ = try checked(fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW))
+    return try metadata(info)
+  }
+
+  private func metadata(_ info: stat) throws -> NativeFileMetadata {
     let type = info.st_mode & S_IFMT
     guard type == S_IFREG || type == S_IFDIR else { throw NativeIOError(EACCES) }
-    return NativeFileMetadata(isDirectory: type == S_IFDIR, size: info.st_size)
+    func nanoseconds(_ time: timespec) -> UInt64 {
+      guard time.tv_sec >= 0 else { return 0 }
+      let seconds = UInt64(time.tv_sec).multipliedReportingOverflow(by: 1_000_000_000)
+      let total = seconds.partialValue.addingReportingOverflow(UInt64(time.tv_nsec))
+      return seconds.overflow || total.overflow ? UInt64.max : total.partialValue
+    }
+    return NativeFileMetadata(isDirectory: type == S_IFDIR, size: info.st_size,
+      accessed: nanoseconds(info.st_atimespec), modified: nanoseconds(info.st_mtimespec), created: nanoseconds(info.st_birthtimespec))
+  }
+
+  private func setTimes(_ fd: Int32, _ accessed: UInt64?, _ modified: UInt64?) throws {
+    func time(_ nanoseconds: UInt64?) -> timespec {
+      guard let nanoseconds else { return timespec(tv_sec: 0, tv_nsec: Int(UTIME_OMIT)) }
+      return timespec(tv_sec: Int(nanoseconds / 1_000_000_000), tv_nsec: Int(nanoseconds % 1_000_000_000))
+    }
+    let times = [time(accessed), time(modified)]
+    _ = try checked(futimens(fd, times))
   }
 
   private func execute(_ request: NativeFileSystemRequest) throws -> NativeFileSystemValue {
     switch request {
     case .stat(let path):
       return .metadata(try withParent(path) { try metadata($0, $1) })
+    case .fileStat(let id):
+      var info = stat()
+      _ = try checked(fstat(file(id), &info))
+      return .metadata(try metadata(info))
+    case .setTimes(let path, let accessed, let modified):
+      // Resolve beneath the mount and keep the inode open, so rename/symlink
+      // races cannot redirect the timestamp update outside this filesystem.
+      let fd = try withParent(path) { try checked(openat($0, $1, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW)) }
+      defer { Darwin.close(fd) }
+      var info = stat()
+      _ = try checked(fstat(fd, &info))
+      _ = try metadata(info)
+      try setTimes(fd, accessed, modified)
+    case .setFileTimes(let id, let accessed, let modified):
+      try setTimes(file(id), accessed, modified)
     case .open(let path, let options):
       var flags = (options.read && (options.write || options.append)) ? O_RDWR :
         ((options.write || options.append) ? O_WRONLY : O_RDONLY)

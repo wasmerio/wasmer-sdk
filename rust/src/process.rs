@@ -12,7 +12,7 @@ use std::{
 use futures::future::Either;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use wasmer_wasix::{
-    os::task::{TaskJoinHandle, process::WasiProcess},
+    os::task::{TaskJoinHandle, process::WasiProcess, signal::SignalHandlerAbi},
     os::tty::{InputEvent, Tty},
     runtime::task_manager::VirtualTaskManager,
 };
@@ -262,7 +262,10 @@ impl Process {
         let terminal = self.terminal.as_ref().ok_or_else(|| Error::Execution {
             message: "the process has no terminal".to_owned(),
         })?;
-        terminal.resize(columns, rows);
+        if terminal.resize(columns, rows) {
+            // Use terminal signal routing so a shell's waited child is notified.
+            let _ = self.control.process.signal(Signal::Sigwinch as u8);
+        }
         Ok(())
     }
 
@@ -424,7 +427,10 @@ impl ProcessHandle {
         let terminal = self.terminal.as_ref().ok_or_else(|| Error::Execution {
             message: "the process has no terminal".to_owned(),
         })?;
-        terminal.resize(columns, rows);
+        if terminal.resize(columns, rows) {
+            // Use terminal signal routing so a shell's waited child is notified.
+            let _ = self.control.process.signal(Signal::Sigwinch as u8);
+        }
         Ok(())
     }
 

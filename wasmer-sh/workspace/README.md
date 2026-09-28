@@ -8,6 +8,7 @@ The commands below are for the full shell, where all examples have named folders
 
 | Example             | Start it                                      |
 | ------------------- | --------------------------------------------- |
+| Pi coding agent     | `cd pi && pi` |
 | Node.js HTTP server | `cd node && node server.js`                   |
 | Express             | `cd node-express && pnpm i && pnpm run start` |
 | Next.js             | `cd next && pnpm i && pnpm dev`               |

@@ -127,6 +127,7 @@ struct NativeFileSystemTests {
     let writes: [(String, [Any])] = [
       ("write", [id, 0, [1]]), ("writeBytes", [id, 0, "AA=="]), ("setLen", [id, 0]),
       ("mkdir", ["dir"]), ("remove", ["file"]), ("rename", ["file", "renamed"]),
+      ("setTimes", ["file", "1000", "2000"]), ("setFileTimes", [id, "1000", "2000"]),
       ("open", ["file", false, true, false, false, true, false]),
     ]
     for (method, args) in writes {
@@ -140,6 +141,8 @@ struct NativeFileSystemTests {
       ("readBytes", [id, true, 1]), ("readBytes", [id, NSNull(), 1]),
       ("readBytes", []), ("open", ["file"]), ("stat", ["bad\0path"]),
       ("write", [id, 0, [-1]]), ("write", [id, 0, [256]]),
+      ("setTimes", ["file", "-1", NSNull()]), ("setTimes", ["file", true, "0"]),
+      ("setTimes", ["file", "18446744073709551616", "0"]), ("setTimes", ["file"]),
     ]
     for (method, args) in invalid {
       let response = try await request(fs, method, args)
@@ -149,6 +152,45 @@ struct NativeFileSystemTests {
     #expect((unknown["error"] as? [String: String])?["code"] == "ENOTSUP")
     #expect(throws: NativeIOError.self) { try NativeFileSystemRequest(["args": []]) }
     #expect(try String(contentsOf: root.appendingPathComponent("file"), encoding: .utf8) == "unchanged")
+    await fs.shutdown()
+  }
+
+  @Test func timestampsPersistForDirectoriesAndOpenFiles() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fs = try NativeFileSystem(directory: root)
+    let atime = "1700000000123456789", mtime = "1700000000987654321"
+    _ = try await request(fs, "mkdir", ["lock"])
+    let update = try await request(fs, "setTimes", ["lock", atime, mtime])
+    #expect(update["error"] == nil)
+    let stat = try await request(fs, "stat", ["lock"])
+    let values = try #require(stat["value"] as? [String: Any])
+    #expect(values["accessed"] as? String == atime)
+    #expect(values["modified"] as? String == mtime)
+    _ = try await request(fs, "setTimes", ["lock", NSNull(), "2000000000"])
+    let changed = try await request(fs, "stat", ["lock"])
+    #expect((changed["value"] as? [String: Any])?["accessed"] as? String == atime)
+    #expect((changed["value"] as? [String: Any])?["modified"] as? String == "2000000000")
+    // A separate filesystem instance must see the timestamp used by Pi's lock heartbeat.
+    let other = try NativeFileSystem(directory: root)
+    let shared = try await request(other, "stat", ["lock"])
+    #expect((shared["value"] as? [String: Any])?["modified"] as? String == "2000000000")
+    await other.shutdown()
+
+    let opened = try await request(fs, "open", ["file", true, true, true, false, false, false])
+    let id = try #require(opened["value"] as? Int)
+    _ = try await request(fs, "rename", ["file", "renamed"])
+    let fileUpdate = try await request(fs, "setFileTimes", [id, atime, mtime])
+    #expect(fileUpdate["error"] == nil)
+    let fileStat = try await request(fs, "fileStat", [id])
+    #expect((fileStat["value"] as? [String: Any])?["modified"] as? String == mtime)
+    let renamedStat = try await request(fs, "stat", ["renamed"])
+    #expect((renamedStat["value"] as? [String: Any])?["modified"] as? String == mtime)
+
+    try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("link").path, withDestinationPath: "renamed")
+    let symlink = try await request(fs, "setTimes", ["link", "0", "0"])
+    #expect(symlink["error"] != nil)
     await fs.shutdown()
   }
 }

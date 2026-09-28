@@ -1,5 +1,17 @@
 [
   {
+    "id": "pi",
+    "source": "pi",
+    "title": "Pi coding agent",
+    "group": "AI",
+    "description": "Read, edit, and run code with an interactive AI agent.",
+    "icon": "pi.svg",
+    "dependencies": "Pi · Node.js · fd · ripgrep · grep · sed · findutils",
+    "packages": ["wasmer/pi@=0.87.1"],
+    "install": null,
+    "run": "pi"
+  },
+  {
     "id": "node",
     "source": "node",
     "title": "Node.js",

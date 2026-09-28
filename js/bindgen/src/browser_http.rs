@@ -379,54 +379,58 @@ impl VirtualNetworking for BrowserHttpNetworking {
     async fn listen_tcp(
         &self,
         address: SocketAddr,
-        _only_v6: bool,
+        only_v6: bool,
         _reuse_port: bool,
         _reuse_addr: bool,
     ) -> NetworkResult<Box<dyn VirtualTcpListener + Sync>> {
-        let address = normalize_listener_address(address);
-        let listener = BrowserHttpListener::new(address);
+        let addresses = listener_addresses(address, only_v6);
+        let listener = BrowserHttpListener::new(addresses[0]);
         let mut state = self.state.lock().expect("browser HTTP network poisoned");
         if state.closed {
             return Err(NetworkError::NotConnected);
         }
-        if state.bound.contains(&address)
-            || state
-                .listeners
-                .get(&address)
-                .is_some_and(|listener| listener.strong_count() > 0)
-        {
+        if addresses.iter().any(|address| {
+            state.bound.contains(address)
+                || state
+                    .listeners
+                    .get(address)
+                    .is_some_and(|listener| listener.strong_count() > 0)
+        }) {
             return Err(NetworkError::AddressInUse);
         }
-        state
-            .listeners
-            .insert(address, Arc::downgrade(&listener.state));
+        for address in addresses {
+            state
+                .listeners
+                .insert(address, Arc::downgrade(&listener.state));
+        }
         Ok(Box::new(listener))
     }
 
     async fn bind_tcp(
         &self,
         address: SocketAddr,
-        _only_v6: bool,
+        only_v6: bool,
         _reuse_port: bool,
         _reuse_addr: bool,
     ) -> NetworkResult<Box<dyn VirtualTcpBoundSocket + Sync>> {
-        let address = normalize_listener_address(address);
+        let addresses = listener_addresses(address, only_v6);
         let mut state = self.state.lock().expect("browser HTTP network poisoned");
         if state.closed {
             return Err(NetworkError::NotConnected);
         }
-        if state.bound.contains(&address)
-            || state
-                .listeners
-                .get(&address)
-                .is_some_and(|listener| listener.strong_count() > 0)
-        {
+        if addresses.iter().any(|address| {
+            state.bound.contains(address)
+                || state
+                    .listeners
+                    .get(address)
+                    .is_some_and(|listener| listener.strong_count() > 0)
+        }) {
             return Err(NetworkError::AddressInUse);
         }
-        state.bound.insert(address);
+        state.bound.extend(addresses.iter().copied());
         Ok(Box::new(BrowserHttpBoundSocket {
             networking: self.clone(),
-            address,
+            addresses,
             reserved: true,
             ttl: 64,
         }))
@@ -476,6 +480,15 @@ fn normalize_listener_address(address: SocketAddr) -> SocketAddr {
     }
 }
 
+fn listener_addresses(address: SocketAddr, only_v6: bool) -> Vec<SocketAddr> {
+    let mut addresses = vec![normalize_listener_address(address)];
+    // IPv6 wildcard sockets accept IPv4 too unless IPV6_V6ONLY is enabled.
+    if address.is_ipv6() && address.ip().is_unspecified() && !only_v6 {
+        addresses.push(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), address.port()));
+    }
+    addresses
+}
+
 #[derive(Debug, Default)]
 struct ListenerState {
     closed: bool,
@@ -493,7 +506,7 @@ struct BrowserHttpListener {
 #[derive(Debug)]
 struct BrowserHttpBoundSocket {
     networking: BrowserHttpNetworking,
-    address: SocketAddr,
+    addresses: Vec<SocketAddr>,
     reserved: bool,
     ttl: u32,
 }
@@ -501,12 +514,14 @@ struct BrowserHttpBoundSocket {
 impl BrowserHttpBoundSocket {
     fn release(&mut self) {
         if self.reserved {
-            self.networking
+            let mut state = self
+                .networking
                 .state
                 .lock()
-                .expect("browser HTTP network poisoned")
-                .bound
-                .remove(&self.address);
+                .expect("browser HTTP network poisoned");
+            for address in &self.addresses {
+                state.bound.remove(address);
+            }
             self.reserved = false;
         }
     }
@@ -520,25 +535,32 @@ impl Drop for BrowserHttpBoundSocket {
 
 impl VirtualTcpBoundSocket for BrowserHttpBoundSocket {
     fn addr_local(&self) -> NetworkResult<SocketAddr> {
-        Ok(self.address)
+        Ok(self.addresses[0])
     }
 
     fn listen(&mut self) -> NetworkResult<Box<dyn VirtualTcpListener + Sync>> {
         if !self.reserved {
             return Err(NetworkError::InvalidFd);
         }
-        let listener = BrowserHttpListener::new(self.address);
+        let listener = BrowserHttpListener::new(self.addresses[0]);
         let mut state = self
             .networking
             .state
             .lock()
             .expect("browser HTTP network poisoned");
-        if !state.bound.remove(&self.address) {
+        if !self
+            .addresses
+            .iter()
+            .all(|address| state.bound.contains(address))
+        {
             return Err(NetworkError::InvalidFd);
         }
-        state
-            .listeners
-            .insert(self.address, Arc::downgrade(&listener.state));
+        for address in &self.addresses {
+            state.bound.remove(address);
+            state
+                .listeners
+                .insert(*address, Arc::downgrade(&listener.state));
+        }
         self.reserved = false;
         Ok(Box::new(listener))
     }
@@ -550,7 +572,7 @@ impl VirtualTcpBoundSocket for BrowserHttpBoundSocket {
         if !peer.ip().is_loopback() {
             return Err(NetworkError::Unsupported);
         }
-        let socket = self.networking.connect_local(self.address, peer)?;
+        let socket = self.networking.connect_local(self.addresses[0], peer)?;
         self.release();
         Ok(Box::new(socket))
     }
@@ -1110,6 +1132,91 @@ mod tests {
                 client.connect_tcp(SocketAddr::new(ip, 0), address).await,
                 Err(NetworkError::ConnectionRefused)
             ));
+        }
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn dual_stack_listeners_accept_both_families_and_can_restart() {
+        for bind_first in [false, true] {
+            let group = BrowserNetworkGroup::default();
+            let server = group.create(None);
+            let client = group.create(None);
+            let wildcard = "[::]:5432".parse().unwrap();
+            let ipv4 = "127.0.0.1:5432".parse().unwrap();
+            let ipv6 = "[::1]:5432".parse().unwrap();
+            // Exercise both listener construction paths and reuse after close.
+            for _ in 0..2 {
+                let mut listener = if bind_first {
+                    let mut bound = server
+                        .bind_tcp(wildcard, false, false, false)
+                        .await
+                        .unwrap();
+                    assert!(matches!(
+                        server.bind_tcp(ipv4, false, false, false).await,
+                        Err(NetworkError::AddressInUse)
+                    ));
+                    bound.listen().unwrap()
+                } else {
+                    server
+                        .listen_tcp(wildcard, false, false, false)
+                        .await
+                        .unwrap()
+                };
+                assert!(matches!(
+                    server.listen_tcp(ipv4, false, false, false).await,
+                    Err(NetworkError::AddressInUse)
+                ));
+                for network in [&server, &client] {
+                    for address in [ipv4, ipv6] {
+                        let socket = network.connect_tcp(address, address).await.unwrap();
+                        assert_eq!(socket.addr_peer().unwrap(), address);
+                        let (accepted, _) = listener.try_accept().unwrap();
+                        assert_eq!(accepted.addr_local().unwrap(), address);
+                    }
+                }
+                drop(listener);
+                for address in [ipv4, ipv6] {
+                    assert!(matches!(
+                        client.connect_tcp(address, address).await,
+                        Err(NetworkError::ConnectionRefused)
+                    ));
+                }
+            }
+            let bound = server
+                .bind_tcp(wildcard, false, false, false)
+                .await
+                .unwrap();
+            drop(bound);
+            assert!(server.bind_tcp(ipv4, false, false, false).await.is_ok());
+        }
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn ipv6_only_and_explicit_loopback_do_not_claim_ipv4() {
+        for (address, only_v6) in [("[::]:5432", true), ("[::1]:5432", false)] {
+            for bind_first in [false, true] {
+                let network = BrowserHttpNetworking::new();
+                let address = address.parse().unwrap();
+                let ipv4 = "127.0.0.1:5432".parse().unwrap();
+                let _listener = if bind_first {
+                    network
+                        .bind_tcp(address, only_v6, false, false)
+                        .await
+                        .unwrap()
+                        .listen()
+                        .unwrap()
+                } else {
+                    network
+                        .listen_tcp(address, only_v6, false, false)
+                        .await
+                        .unwrap()
+                };
+                assert!(matches!(
+                    network.connect_tcp(ipv4, ipv4).await,
+                    Err(NetworkError::ConnectionRefused)
+                ));
+                assert!(network.listen_tcp(ipv4, false, false, false).await.is_ok());
+            }
         }
     }
 

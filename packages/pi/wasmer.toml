@@ -1,0 +1,32 @@
+[package]
+name = "wasmer/pi"
+version = "0.87.1"
+description = "Pi coding agent with Edge.js and shared WASIX command-line tools"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/wasmerio/wasmer-sdk"
+entrypoint = "pi"
+
+[dependencies]
+"wasmer/edgejs" = "=0.2.4"
+"wasmer/bash" = "=1.0.25"
+"wasmer/coreutils" = "=1.0.27"
+"wasmer/fd" = "=10.5.1"
+"wasmer/ripgrep" = "=15.2.1"
+"wasmer/grep" = "=3.12.0"
+"wasmer/sed" = "=4.9.0"
+"wasmer/findutils" = "=0.10.1"
+"curl/curl" = "=8.4.0"
+
+[fs]
+"/opt/pi" = ".build/runtime"
+"/opt/pi/licenses" = ".build/licenses"
+
+[[command]]
+name = "pi"
+module = "wasmer/edgejs:edgejs"
+runner = "wasi"
+
+[command.annotations.wasi]
+main-args = ["/opt/pi/dist/bundle/cli.js"]
+env = ["HOME=/home/pi", "PATH=/bin:/usr/bin"]

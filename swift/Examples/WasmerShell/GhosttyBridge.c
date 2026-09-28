@@ -154,3 +154,12 @@ size_t wt_key(WTTerminal *t, int key, uint8_t *bytes, size_t capacity) {
   if (ghostty_key_encoder_encode(t->encoder, t->event, (char *)bytes, capacity, &length) != GHOSTTY_SUCCESS) return 0;
   return length;
 }
+
+size_t wt_paste(WTTerminal *t, uint8_t *text, size_t length, uint8_t *bytes, size_t capacity) {
+  GhosttyTerminalModeConfig mode = { .mode = GHOSTTY_MODE_BRACKETED_PASTE };
+  if (ghostty_terminal_get(t->terminal, GHOSTTY_TERMINAL_DATA_MODE, &mode) != GHOSTTY_SUCCESS) return 0;
+  // Return the complete paste separately from the bounded VT-query reply buffer.
+  size_t written = 0;
+  if (ghostty_paste_encode((char *)text, length, mode.value, (char *)bytes, capacity, &written) != GHOSTTY_SUCCESS) return 0;
+  return written;
+}
