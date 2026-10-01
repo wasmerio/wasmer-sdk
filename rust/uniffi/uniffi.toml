@@ -5,3 +5,17 @@ cdylib_name = "wasmer_sdk_uniffi"
 module_name = "WasmerSDKCore"
 ffi_module_name = "WasmerSDKFFI"
 generate_immutable_records = true
+
+[bindings.kotlin]
+package_name = "io.wasmer.sdk.ffi"
+cdylib_name = "wasmer_sdk_uniffi"
+android = true
+# JNA's cleaner works on both JVM and Android, so one generated source is shared.
+android_cleaner = false
+
+# Avoid Kotlin's generated AutoCloseable.close() and Throwable.message members.
+# These names are Kotlin-only; the shared FFI and other SDKs keep their ABI.
+[bindings.kotlin.rename]
+"WasmerCore.close" = "shutdown"
+"SandboxCore.close" = "shutdown"
+"SdkError.Failure.message" = "detail"

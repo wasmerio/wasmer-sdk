@@ -26,13 +26,17 @@ tokio = { version = "1.49", features = ["io-util", "rt-multi-thread", "sync"] }
 uniffi = "0.32.0"
 wasmer-sdk = { path = "..", version = "=0.1.0", default-features = false }
 
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.22", default-features = false }
+rustls-platform-verifier = "0.7"
+
 [dev-dependencies]
 futures = "0.3"
 tempfile = "3.23"
 wat = "1.244"
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [lints.clippy]
 all = "warn"

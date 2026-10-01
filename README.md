@@ -1,7 +1,7 @@
 # Wasmer SDK
 
 Run real software inside lightweight WebAssembly sandboxes from JavaScript,
-Python, Swift (macOS preview), or Rust.
+Python, Swift, Kotlin (JVM / Android), or Rust.
 
 The Wasmer SDK turns packages from the
 [Wasmer registry](https://wasmer.io/products/registry) into composable
@@ -90,6 +90,7 @@ applications can inspect every exit reason directly.
 | Python | `pip install wasmer-sdk` | [Python SDK](python/README.md) |
 | Rust | Workspace/Git while crate publishing is disabled | [Rust SDK](rust/README.md) |
 | Swift | SwiftPM for macOS and iOS 27+ | [Swift SDK](swift/README.md) |
+| Kotlin | Gradle for JVM and Android (source preview) | [Kotlin SDK and Wasmer Shell](kotlin/README.md) |
 
 JavaScript runs Wasmer and WASIX directly in WebAssembly through
 `wasm-bindgen`; Node networking is bridged through `node:net` and `node:dns`,
