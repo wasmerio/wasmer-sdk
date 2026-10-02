@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-swift-v0.5.0...wasmer-sdk-swift-v0.6.0) (2026-10-02)
+
+
+### Features
+
+* **js:** connect browser sandboxes over local TCP and run PostgreSQL ([#530](https://github.com/wasmerio/wasmer-sdk/issues/530)) ([2478d31](https://github.com/wasmerio/wasmer-sdk/commit/2478d3175abe0dd2827be0901ebd80a0a8812050))
+* run published Pi in wasmer.sh and iOS WasmerShell ([#543](https://github.com/wasmerio/wasmer-sdk/issues/543)) ([829ab94](https://github.com/wasmerio/wasmer-sdk/commit/829ab94598bdabdd02af59c7fe9df9be0d71a2b1))
+
 ## [0.5.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-swift-v0.4.0...wasmer-sdk-swift-v0.5.0) (2026-09-24)
 
 
