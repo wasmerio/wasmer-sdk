@@ -288,7 +288,7 @@ node swift/Examples/WasmerShell/Tests/pi.mjs --storage native
 ```
 
 The runner requires the Node dependencies in `wasmer-sh` and resolves
-`wasmer/pi@=0.87.1` from the registry; no local Pi WebC build is required.
+`wasmer/pi@=1.0.0` from the registry; no local Pi WebC build is required.
 Clipboard checks route the native Paste action through the responder chain using
 an isolated test pasteboard, leaving the system clipboard untouched. They cover
 multiline Pi input, Unicode, newline normalization, and pastes larger than 64 KiB.
@@ -385,7 +385,7 @@ and sources are shared with
 `wasmer-sh/examples.json` and `wasmer-sh/workspace`.
 
 Choose **Pi coding agent** under **AI**, then run `pi`. The app downloads
-`wasmer/pi@=0.87.1` from the registry. Its WebC bundles the Pi CLI and resolves
+`wasmer/pi@=1.0.0` from the registry. Its WebC bundles the Pi CLI and resolves
 Edge.js and the command-line tools as registry dependencies; no local Pi asset
 is bundled in the app.
 Use `/login` and `/model` inside Pi to configure your provider. No installation

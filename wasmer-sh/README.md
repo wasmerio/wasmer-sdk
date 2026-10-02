@@ -17,7 +17,7 @@ workspace. A template can also be linked directly, for example `?example=node-ne
 The catalog in `examples.json` is shared with the native Swift WasmerShell app.
 
 Choose **Pi coding agent** under **AI** (`?example=pi`) for Pi's interactive terminal
-agent. Pi loads `wasmer/pi@=0.87.1` from the registry; run `pi`. Use `/login` inside Pi to connect
+agent. Pi loads `wasmer/pi@=1.0.0` from the registry; run `pi`. Use `/login` inside Pi to connect
 your AI provider with a subscription or API key, then `/model` to choose a model.
 Its read, write, edit, Bash, grep, find, and ls tools run in the sandbox.
 The search commands use real WASIX builds of fd and ripgrep. See the

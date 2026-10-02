@@ -103,7 +103,7 @@ test("production shell starts Bash, Python and Pi with an older SDK cached", { t
       await waitForPrompt(page);
       // Avoid Pi's update check opening the outbound-network setup dialog.
       await send(page, "pi --offline");
-      await page.waitForFunction(() => document.querySelector("#terminal").textContent.includes("pi v0.87.1"),
+      await page.waitForFunction(() => document.querySelector("#terminal").textContent.includes("v1.0.0"),
         undefined, { timeout: 60_000 });
       console.log("Production Pi UI ready");
       await send(page, "/login");
