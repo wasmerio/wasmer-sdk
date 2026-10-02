@@ -7,7 +7,7 @@
     "description": "Read, edit, and run code with an interactive AI agent.",
     "icon": "pi.svg",
     "dependencies": "Pi · Node.js · fd · ripgrep · grep · sed · findutils",
-    "packages": ["wasmer/pi@=0.87.1"],
+    "packages": ["wasmer/pi@=1.0.0"],
     "install": null,
     "run": "pi"
   },

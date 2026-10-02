@@ -97,7 +97,7 @@ export async function checkPiAgent({ page, command, waitForPrompt }) {
   const model = await startPiModelFixture();
   try {
     await command('test ! -f install.sh && test ! -f start-pi.sh && test ! -d .local/share/pnpm && test -f /opt/pi/dist/bundle/cli.js');
-    assert((await command('pi --version')).includes('0.87.1'));
+    assert((await command('pi --version')).includes('1.0.0'));
     await command('fd --version && rg --version');
     const lockTest = await readFile(new URL('./pi-locks.cjs', import.meta.url), 'utf8');
     await command(`printf '%s' ${quote(lockTest)} > pi-locks-test.cjs`);
@@ -113,7 +113,7 @@ export async function checkPiAgent({ page, command, waitForPrompt }) {
       .slice(after).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').includes(text),
     { after: setupStart, text }, { timeout: 120_000 });
     await send('PI_CODING_AGENT_DIR=/workspace/.pi-test pi --offline --provider wasmer-test --model test --thinking off --tools read,write,edit,bash,grep,find,ls --extension /workspace/pi-terminal-probe.mjs\r');
-    await waitForText('pi v0.87.1');
+    await waitForText('v1.0.0');
     await send('Exercise the workspace tools.\r');
     await waitForText('PI_AGENT_TOOLS_OK');
     model.assertComplete();
@@ -126,7 +126,7 @@ export async function checkPiAgent({ page, command, waitForPrompt }) {
     const before = await page.evaluate(() => window.__wasmerShell.snapshot().length);
     await send('pi\r');
     await page.waitForFunction(before => window.__wasmerShell.snapshot().slice(before)
-      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').includes('pi v0.87.1'), before, { timeout: 60_000 });
+      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').includes('v1.0.0'), before, { timeout: 60_000 });
     assert.equal(await page.locator('#preview-panel').isVisible(), false);
     await send('/login\r');
     await page.waitForFunction(before => window.__wasmerShell.snapshot().slice(before)

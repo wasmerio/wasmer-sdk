@@ -7,7 +7,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@wasmer/sdk": "0.18.0"
+    "@wasmer/sdk": "0.19.0"
   },
   "devDependencies": {
     "vite": "8.2.0"

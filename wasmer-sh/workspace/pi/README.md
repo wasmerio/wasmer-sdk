@@ -1,13 +1,16 @@
 # Pi in wasmer.sh
 
-This is the full Pi 0.87.1 terminal coding agent, running inside the Wasmer
+This is the full Pi 1.0.0 terminal coding agent, running inside the Wasmer
 sandbox with Node.js, Bash, fd, ripgrep, grep, sed, and findutils.
 
 ```sh
 pi
 ```
 
-Pi is already available from `wasmer/pi@=0.87.1` when the example opens. There is
+Pi 1.0 uses a fullscreen terminal interface by default. Run
+`pi --tui-mode regular` to keep normal terminal scrollback.
+
+Pi is already available from `wasmer/pi@=1.0.0` when the example opens. There is
 no npm installation step. The package contains upstream Pi's unchanged runtime
 files and CLI entrypoint, and depends on published `wasmer/edgejs@0.2.4` with
 the native WASIX spawn and signal fixes.

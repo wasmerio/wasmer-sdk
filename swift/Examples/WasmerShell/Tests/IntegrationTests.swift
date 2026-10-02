@@ -191,7 +191,7 @@ extension TerminalSession {
       view.sendKey(5); await inputTask?.value
       try await waitFor("\nPASTE_SHELL_OK\n", after: beforePaste)
       checks.append("Cmd-V responder action, Unicode, newline normalization and paste larger than 64 KiB")
-      try await shellCheck(host, command: "test -f hello.js && test ! -f start-pi.sh && test ! -f install.sh && pi --version", marker: "\n0.87.1\n")
+      try await shellCheck(host, command: "test -f hello.js && test ! -f start-pi.sh && test ! -f install.sh && pi --version", marker: "\n1.0.0\n")
       let runtime = try await shellCheck(host, command: "node -p process.versions.edge", marker: "\n0.0.0-ga04c84b\n")
       report["runtime"] = runtime
       checks.append("Pi WebC and Edge.js 0.2.4 without a wrapper")
@@ -210,7 +210,7 @@ extension TerminalSession {
       status = "Testing Pi agent tools…"
       let beforeAgent = text.count
       try await host.writeTerminal(Data("PI_CODING_AGENT_DIR=/workspace/\(directory) pi --offline --provider wasmer-test --model test --thinking off --tools read,write,edit,bash,grep,find,ls\r".utf8))
-      try await waitFor("pi v0.87.1", after: beforeAgent, timeout: 90)
+      try await waitFor("v1.0.0", after: beforeAgent, timeout: 90)
       view.insertText("Exercise the workspace tools.\n")
       await inputTask?.value
       try await waitFor("PI_AGENT_TOOLS_OK", after: beforeAgent, timeout: 120, failureMarker: "Credential store read failed")
@@ -255,7 +255,7 @@ extension TerminalSession {
       let beforeLogin = text.count
       runExample("pi"); await inputTask?.value
       try await waitForKeyboardFocus()
-      try await waitFor("pi v0.87.1", after: beforeLogin, timeout: 90)
+      try await waitFor("No models available.", after: beforeLogin, timeout: 90)
       view.insertText("/login\n"); await inputTask?.value
       try await waitFor("Select authentication method:", after: beforeLogin)
       report["loginVisibleText"] = view.visibleText
