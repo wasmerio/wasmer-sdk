@@ -121,7 +121,9 @@ impl NodeNetworking {
             notify_handler(&callback_handlers, id, &event)
         }) as Box<dyn FnMut(u32, String) -> bool>);
         bridge.set_wake_callback(callback.as_ref().unchecked_ref());
-        callback.forget();
+        // The bridge owns its wake callback; release Rust's externref root so
+        // closing the bridge lets JS GC reclaim the callback and handler map.
+        drop(callback.into_js_value());
         Self {
             bridge_id,
             handlers,

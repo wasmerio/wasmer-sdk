@@ -1,3 +1,4 @@
 [submodule "packages/napi"]
 	path = packages/napi
 	url = https://github.com/wasmerio/napi.git
+	branch = main

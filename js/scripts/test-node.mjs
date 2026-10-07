@@ -2,6 +2,20 @@ import { spawn } from "node:child_process";
 
 const tests = [
   {
+    name: "host-timer",
+    file: "tests/host-timer.test.mjs",
+    testTimeoutMs: 10_000,
+    processTimeoutMs: 15_000,
+    attempts: 1,
+  },
+  {
+    name: "client-lifetime",
+    file: "tests/client-lifetime.test.mjs",
+    testTimeoutMs: 30_000,
+    processTimeoutMs: 45_000,
+    attempts: 1,
+  },
+  {
     name: "terminal-resize",
     file: "tests/terminal-resize.test.mjs",
     testTimeoutMs: 90_000,
