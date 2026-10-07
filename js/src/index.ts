@@ -1600,24 +1600,24 @@ export class SandboxFileSystem {
     path: string,
     options: { recursive?: boolean } = {},
   ): Promise<void> {
-    await rethrow(this.#core.mkdir(path, options.recursive ?? false));
+    rethrowSync(() => this.#core.mkdir(path, options.recursive ?? false));
   }
 
   async readDir(path: string): Promise<readonly DirectoryEntry[]> {
-    return rethrow(
-      this.#core.readDir(path) as Promise<readonly DirectoryEntry[]>,
+    return rethrowSync(
+      () => this.#core.readDir(path) as readonly DirectoryEntry[],
     );
   }
 
   async stat(path: string): Promise<FileStat> {
-    return rethrow(this.#core.stat(path) as Promise<FileStat>);
+    return rethrowSync(() => this.#core.stat(path) as FileStat);
   }
 
   async remove(
     path: string,
     options: { recursive?: boolean } = {},
   ): Promise<void> {
-    await rethrow(this.#core.remove(path, options.recursive ?? false));
+    rethrowSync(() => this.#core.remove(path, options.recursive ?? false));
   }
 
   async rename(from: string, to: string): Promise<void> {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { Wasmer } from "../dist/node.js";
+import { Wasmer, WasmerError } from "../dist/node.js";
 
 const runtimeCache =
   process.env.WASMER_TEST_CACHE ??
@@ -100,6 +100,19 @@ test("reuses commands and preserves filesystem and stream semantics", async () =
       size: 5,
     });
     await sandbox.fs.remove("nested", { recursive: true });
+
+    // stat, readDir, mkdir and remove are synchronous in the core; their
+    // errors still need to come back as WasmerError.
+    for (const failing of [
+      () => sandbox.fs.stat("nested"),
+      () => sandbox.fs.readDir("nested"),
+      () => sandbox.fs.mkdir("nested/child"),
+      () => sandbox.fs.remove("nested"),
+    ]) {
+      await assert.rejects(failing(), (error) =>
+        WasmerError.is(error, "FILESYSTEM_ERROR"),
+      );
+    }
 
     const process = await sandbox
       .command("python", ["--version"])
