@@ -6,8 +6,8 @@ import PackageDescription
 let useLocalWebRuntime = Context.environment["WASMER_SDK_LOCAL_WEB_RUNTIME"] == "1"
 let webRuntimeTargets: [Target] = useLocalWebRuntime ? [] : [
     .binaryTarget(name: "WasmerWKRuntime",
-      url: "https://github.com/wasmerio/wasmer-sdk/releases/download/wasmer-sdk-swift-v0.5.0/WasmerWKRuntime-0.5.0.zip",
-      checksum: "2aa3e3d902e71145e8ec13eecc52edaa8e3ee7f5f8313e4b3c4d5dfbcea00c2b"),
+      url: "https://github.com/wasmerio/wasmer-sdk/releases/download/wasmer-sdk-swift-v0.6.0/WasmerWKRuntime-0.6.0.zip",
+      checksum: "7b06150d05b5caf39194cbd9826dcaba1db06abdb1a6de831d1ab3fef79a842f"),
   ]
 
 let package = Package(
@@ -17,8 +17,8 @@ let package = Package(
     .library(name: "WasmerSDK", type: .static, targets: ["WasmerSDK"]),
   ],
   targets: [
-    .binaryTarget(name: "WasmerSDKFFI", url: "https://github.com/wasmerio/wasmer-sdk/releases/download/wasmer-sdk-swift-v0.5.0/WasmerSDKFFI-0.5.0-macos-universal.zip",
-      checksum: "80ece9be41f8159773d27e90d46e531259b182b198f1d12514631f223bf51f8e"),
+    .binaryTarget(name: "WasmerSDKFFI", url: "https://github.com/wasmerio/wasmer-sdk/releases/download/wasmer-sdk-swift-v0.6.0/WasmerSDKFFI-0.6.0-macos-universal.zip",
+      checksum: "3e97bffa3585bd6d204466e065d84e4a9d38c084b8969d2ab2efeca38ecc028c"),
     .target(
       name: "WasmerSDKCore", dependencies: [.target(name: "WasmerSDKFFI", condition: .when(platforms: [.macOS]))],
       path: "swift/Sources/WasmerSDKCore",
