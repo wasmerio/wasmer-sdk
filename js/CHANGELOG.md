@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.19.0...wasmer-sdk-js-v0.19.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **js:** adopt NAPI cleanup and release canceled host resources ([#550](https://github.com/wasmerio/wasmer-sdk/issues/550)) ([f4c9679](https://github.com/wasmerio/wasmer-sdk/commit/f4c9679502ee868c468979326ac81f56e5679bdb))
+
 ## [0.19.0](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.18.0...wasmer-sdk-js-v0.19.0) (2026-09-28)
 
 
