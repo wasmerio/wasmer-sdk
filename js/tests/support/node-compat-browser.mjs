@@ -66,6 +66,21 @@ export async function checkNodeCompatibility({ httpOrigin, wispUrl, edgePackage 
     `)).includes('worker-ok'), 'Worker compatibility failed');
     record('PASS worker HTTP module, disposal symbols, and structured stack hook');
     assert((await run(`
+      const assert = require('node:assert/strict');
+      const vm = require('node:vm');
+      const context = vm.createContext({ answer:42 });
+      const global = vm.runInContext('this', context);
+      assert.equal(vm.runInContext('this === globalThis', context), true);
+      assert.equal(typeof global.RegExp, 'function');
+      assert.equal(new global.RegExp('released', 'g')[Symbol.replace]('released', 'closed'), 'closed');
+      assert.equal(vm.runInContext('this.answer += 1', context), 43);
+      const stream = new ReadableStream({ start(controller) { controller.close(); } });
+      stream.getReader().releaseLock();
+      assert.equal(stream.locked, false);
+      console.log('vm-streams-ok');
+    `)).includes('vm-streams-ok'), 'VM globals and stream reader cleanup failed');
+    record('PASS VM global builtins and stream reader cleanup');
+    assert((await run(`
       const rl = require('node:readline').createInterface({ input: process.stdin });
       rl.on('line', line => { console.log('readline:' + line); rl.close(); });
     `, 'hello\n')).includes('readline:hello'), 'Readline input failed');
