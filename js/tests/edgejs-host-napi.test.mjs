@@ -57,7 +57,10 @@ test(
     try {
       await client.ready();
       const edgejs = await loadEdgejs(client);
-      assert.deepEqual(edgejs.commands, ["edge", "edgejs", "node", "npm", "pnpm"]);
+      // Package.commands also includes commands exported by dependencies.
+      for (const alias of ["edge", "edgejs", "node", "npm", "pnpm"]) {
+        assert.ok(edgejs.commands.includes(alias), `missing Edge alias: ${alias}`);
+      }
 
       sandbox = await client.sandboxes.create({ packages: [edgejs] });
       for (const command of ["edge", "node"]) {

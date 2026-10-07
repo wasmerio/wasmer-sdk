@@ -48,7 +48,7 @@
     "check:size": "node scripts/check-wasm-size.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build:ts && node scripts/test-node.mjs",
-    "test:bindgen": "node scripts/test-bindgen.mjs && node scripts/test-bindgen.mjs browser_http::tests",
+    "test:bindgen": "node scripts/test-bindgen.mjs && node scripts/test-bindgen.mjs tasks::timer::tests && node scripts/test-bindgen.mjs browser_http::tests",
     "test:runtime": "npm run build:ts && node scripts/test-node.mjs runtime",
     "test:workers": "npm run build:ts && node --test --test-timeout=30000 tests/multi-worker.test.mjs",
     "test:browser": "npm run build:ts && node --test --test-timeout=90000 tests/browser-package-cors.test.mjs && node --test --test-timeout=90000 tests/browser-package-progress.test.mjs && node --test --test-timeout=90000 tests/browser-package-definition.test.mjs && node --test --test-timeout=300000 tests/browser-python.test.mjs && node --test --test-timeout=240000 tests/browser-service-worker.test.mjs && npm run test:browser-node && npm run test:browser-postgres",

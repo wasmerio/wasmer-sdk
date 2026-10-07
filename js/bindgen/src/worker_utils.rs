@@ -3,7 +3,9 @@ use std::{
     num::NonZeroUsize,
 };
 
-use js_sys::{JsString, Promise};
+use js_sys::JsString;
+#[cfg(test)]
+use js_sys::Promise;
 
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Window, WorkerGlobalScope};
@@ -43,6 +45,7 @@ impl GlobalScope {
         }
     }
 
+    #[cfg(test)]
     pub fn sleep(&self, milliseconds: i32) -> Promise {
         Promise::new(&mut |resolve, reject| match self {
             GlobalScope::Window(window) => {

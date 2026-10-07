@@ -5121,7 +5121,7 @@ dependencies = [
 [[package]]
 name = "wasmer-napi"
 version = "0.704.0"
-source = "git+https://github.com/wasmerio/wasmer.git?rev=5bd2b7d3182e816bd0ea330acc88e4e4733e167f#5bd2b7d3182e816bd0ea330acc88e4e4733e167f"
+source = "git+https://github.com/wasmerio/napi.git?rev=fe0bd104d01dd2b3c72f4789f6fc63690f2a670d#fe0bd104d01dd2b3c72f4789f6fc63690f2a670d"
 dependencies = [
  "anyhow",
  "cc",

@@ -18,8 +18,14 @@ virtual-net = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d31
 wasmer = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
 wasmer-c-api-imports = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
 wasmer-config = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
-wasmer-napi = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
+wasmer-napi = { git = "https://github.com/wasmerio/napi.git", rev = "fe0bd104d01dd2b3c72f4789f6fc63690f2a670d" }
 wasmer-package = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
 wasmer-types = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
 wasmer-wasix = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
 wasmer-wasix-types = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
+
+# NAPI's vendored manifest uses sibling Wasmer crates. Resolve those
+# dependencies from the same runtime revision as the rest of this workspace.
+[patch."https://github.com/wasmerio/napi.git"]
+wasmer = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
+wasmer-wasix = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
