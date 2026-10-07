@@ -1,0 +1,100 @@
+name: Kotlin and Android
+
+on:
+  pull_request:
+    paths: ['kotlin/**', 'rust/**', 'Cargo.*', 'swift/Tests/WasmerSDKTests/Fixtures/**', 'swift/Examples/WasmerShell/GhosttyBridge.*', 'wasmer-sh/examples.json', 'wasmer-sh/workspace/**', 'wasmer-sh/public/**', '.github/workflows/kotlin.yml']
+  push:
+    branches: [main]
+    paths: ['kotlin/**', 'rust/**', 'Cargo.*', 'swift/Tests/WasmerSDKTests/Fixtures/**', 'swift/Examples/WasmerShell/GhosttyBridge.*', 'wasmer-sh/examples.json', 'wasmer-sh/workspace/**', 'wasmer-sh/public/**', '.github/workflows/kotlin.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kotlin-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+
+jobs:
+  jvm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: kotlin-jvm-sys
+      - run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
+      - run: python3 kotlin/scripts/build.py
+        env:
+          RUSTUP_TOOLCHAIN: 1.95.0
+      - name: Verify generated Kotlin is current
+        run: git diff --exit-code -- kotlin/sdk/src/main/kotlin/io/wasmer/sdk/ffi
+      - name: Run the shared contract on the JVM
+        run: kotlin/gradlew -p kotlin -Pandroid=false :sdk:test :examples:compileKotlin
+
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: '0.16.0'
+      - uses: ./.github/actions/cache-sdk
+        with:
+          cargo-profile: kotlin-android
+      - run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
+      - run: sdkmanager 'ndk;28.2.13676358' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build ARM64 with Node-API and the Ghostty app
+        run: |
+          python3 kotlin/scripts/build.py --android --shell --release
+          kotlin/gradlew -p kotlin :android:assembleRelease :shell:assembleDebug
+        env:
+          RUSTUP_TOOLCHAIN: 1.95.0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasmer-android-arm64
+          path: |
+            kotlin/android/build/outputs/aar/*release.aar
+            kotlin/shell/build/outputs/apk/debug/*.apk
+      - name: Build x86_64 emulator libraries
+        run: python3 kotlin/scripts/build.py --android --shell --abi x86_64 --no-node
+        env:
+          RUSTUP_TOOLCHAIN: 1.95.0
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: kotlin/gradlew -p kotlin -Pwasmer.abis=x86_64 :android:connectedDebugAndroidTest :shell:connectedDebugAndroidTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-test-results
+          path: |
+            kotlin/*/build/reports/androidTests
+            kotlin/*/build/outputs/androidTest-results

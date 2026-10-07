@@ -1,6 +1,11 @@
 #![allow(clippy::missing_errors_doc, clippy::must_use_candidate)]
 
 mod error;
+// JNI is needed only to initialize Android's platform certificate verifier.
+// SDK calls themselves continue to use UniFFI.
+#[cfg(target_os = "android")]
+#[allow(unsafe_code)]
+mod android;
 mod package_progress;
 mod runtime;
 pub use package_progress::*;
@@ -150,6 +155,11 @@ pub struct WasmerCore {
 
 #[uniffi::export]
 impl WasmerCore {
+    /// Whether this library includes the Node-API / V8 runtime used by Edge.js.
+    pub fn supports_node_api(&self) -> bool {
+        cfg!(feature = "napi-v8")
+    }
+
     #[uniffi::constructor]
     pub fn new(options: ClientOptions) -> Result<Arc<Self>, SdkError> {
         let context = RuntimeContext::new()?;
@@ -459,8 +469,40 @@ impl CommandCore {
     }
 
     pub async fn spawn(&self, options: SpawnOptions) -> Result<Arc<ProcessCore>, SdkError> {
+        self.spawn_inner(options, None).await
+    }
+
+    /// Start a WASIX terminal with line discipline, echo and process-tree signals.
+    /// Terminal streams are always piped and must be drained concurrently.
+    pub async fn spawn_terminal(
+        &self,
+        options: SpawnOptions,
+        columns: u32,
+        rows: u32,
+    ) -> Result<Arc<ProcessCore>, SdkError> {
+        check_terminal_size(columns, rows)?;
+        self.spawn_inner(
+            options,
+            Some(wasmer_sdk::TerminalOptions::new(columns, rows)),
+        )
+        .await
+    }
+}
+
+impl CommandCore {
+    async fn spawn_inner(
+        &self,
+        mut options: SpawnOptions,
+        terminal: Option<wasmer_sdk::TerminalOptions>,
+    ) -> Result<Arc<ProcessCore>, SdkError> {
         let mut command = self.inner.clone();
         apply_common_options(&mut command, options.timeout_ms, options.output_bytes)?;
+        if let Some(terminal) = terminal {
+            command.terminal(terminal);
+            options.stdin = InputMode::Pipe;
+            options.stdout = OutputMode::Pipe;
+            options.stderr = OutputMode::Pipe;
+        }
         command
             .stdin(options.stdin.into())
             .stdout(options.stdout.into())
@@ -587,6 +629,22 @@ impl ProcessCore {
     pub fn kill(&self) {
         self.handle.kill();
     }
+
+    pub fn resize_terminal(&self, columns: u32, rows: u32) -> Result<(), SdkError> {
+        check_terminal_size(columns, rows)?;
+        self.handle
+            .resize_terminal(columns, rows)
+            .map_err(SdkError::from)
+    }
+}
+
+fn check_terminal_size(columns: u32, rows: u32) -> Result<(), SdkError> {
+    if columns == 0 || rows == 0 || columns > u32::from(u16::MAX) || rows > u32::from(u16::MAX) {
+        return Err(SdkError::invalid_argument(
+            "terminal dimensions must be between 1 and 65535",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, uniffi::Object)]
