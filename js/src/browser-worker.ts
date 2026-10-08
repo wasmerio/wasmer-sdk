@@ -1,6 +1,7 @@
 import "./node-compat.js";
 import type { NodeNetworkMethod } from "./node-network.js";
 import { installHostFileSystemWorkerBridge } from "./host-filesystem.js";
+import { installWebGpuCanvasWorkerBridge } from "./webgpu-canvas.js";
 import {
   NETWORK_RPC_CONTROL_BYTES,
   networkResponseBufferBytes,
@@ -30,6 +31,7 @@ interface InitMessage {
 Error.stackTraceLimit = 50;
 installNetworkProxy();
 installHostFileSystemWorkerBridge();
+installWebGpuCanvasWorkerBridge();
 installCapiObjectBridge((message) => globalThis.postMessage(message));
 let runtimeMemory: WebAssembly.Memory | undefined;
 globalThis.addEventListener("error", (event) => {

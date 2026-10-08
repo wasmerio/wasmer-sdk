@@ -82,6 +82,18 @@ struct ClientCacheOptions {
     read_only: Option<bool>,
 }
 
+/// The WebGPU grant of a sandbox, as the JavaScript facade passes it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebGpuOptions {
+    /// Names the page-side canvas registry of this sandbox.
+    canvas_scope: u32,
+    force_fallback_adapter: Option<bool>,
+    max_devices: Option<f64>,
+    max_objects: Option<f64>,
+    max_gpu_memory_bytes: Option<f64>,
+}
+
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const MAX_WASM32_SIZE: u64 = u32::MAX as u64;
 
@@ -320,6 +332,43 @@ impl JsSandboxBuilder {
     pub fn env(&mut self, key: String, value: String) -> Result<(), JsValue> {
         let builder = self.take()?.env(key, value);
         self.inner = Some(builder);
+        Ok(())
+    }
+
+    /// Grant guests WebGPU: programs built against `webgpu.h` then run on the
+    /// browser's GPU. The JavaScript facade owns the canvases a guest may
+    /// present to and names them with `canvasScope`.
+    pub fn webgpu(&mut self, options: JsValue) -> Result<(), JsValue> {
+        let options: WebGpuOptions = serde_wasm_bindgen::from_value(options)
+            .map_err(|error| custom_error("INVALID_ARGUMENT", &error.to_string()))?;
+        let limits = wasmer_sdk::webgpu::WebGpuLimits {
+            max_devices: options
+                .max_devices
+                .map(|value| validate_usize("webgpu.limits.maxDevices", value, 1))
+                .transpose()?,
+            max_objects: options
+                .max_objects
+                .map(|value| validate_usize("webgpu.limits.maxObjects", value, 1))
+                .transpose()?,
+            max_gpu_memory_bytes: options
+                .max_gpu_memory_bytes
+                .map(|value| {
+                    validate_integer(
+                        "webgpu.limits.maxGpuMemoryBytes",
+                        value,
+                        0,
+                        MAX_SAFE_INTEGER,
+                    )
+                })
+                .transpose()?,
+            ..wasmer_sdk::webgpu::WebGpuLimits::default()
+        };
+        let ctx = wasmer_sdk::webgpu::WebGpuCtx::builder()
+            .limits(limits)
+            .force_fallback_adapter(options.force_fallback_adapter.unwrap_or(false))
+            .canvas_scope(options.canvas_scope)
+            .build();
+        self.inner = Some(self.take()?.webgpu(ctx));
         Ok(())
     }
 

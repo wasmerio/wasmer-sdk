@@ -35,3 +35,10 @@ pub use provider_fs::{
 };
 pub use sandbox::{IntoFileSystem, NetworkPolicy, Ports, Sandbox, SandboxBuilder};
 pub use terminal::TerminalOptions;
+/// WebGPU for sandboxed guests. Hand a [`webgpu::WebGpuCtx`] to
+/// [`SandboxBuilder::webgpu`] to grant a sandbox the GPU.
+#[cfg(any(
+    all(target_arch = "wasm32", feature = "js-webgpu"),
+    all(not(target_arch = "wasm32"), feature = "webgpu")
+))]
+pub use wasmer_webgpu as webgpu;

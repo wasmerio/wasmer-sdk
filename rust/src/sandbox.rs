@@ -42,6 +42,11 @@ pub struct SandboxBuilder {
     workspace_provider: Option<Arc<dyn FileSystem>>,
     network: NetworkPolicy,
     network_provider: Option<DynVirtualNetworking>,
+    #[cfg(any(
+        all(target_arch = "wasm32", feature = "js-webgpu"),
+        all(not(target_arch = "wasm32"), feature = "webgpu")
+    ))]
+    webgpu: Option<wasmer_webgpu::WebGpuCtx>,
 }
 
 /// A value that can be mounted into a sandbox as an external filesystem.
@@ -79,6 +84,11 @@ impl SandboxBuilder {
             workspace_provider: None,
             network: NetworkPolicy::Disabled,
             network_provider: None,
+            #[cfg(any(
+                all(target_arch = "wasm32", feature = "js-webgpu"),
+                all(not(target_arch = "wasm32"), feature = "webgpu")
+            ))]
+            webgpu: None,
         }
     }
 
@@ -180,6 +190,22 @@ impl SandboxBuilder {
         self
     }
 
+    /// Grant the sandbox's commands the GPU, through WebGPU.
+    ///
+    /// Disabled by default: without it, a guest built against `webgpu.h`
+    /// fails to start because its imports are missing. The context carries the
+    /// embedder's policy (limits, where surfaces present) and can be shared by
+    /// several sandboxes.
+    #[cfg(any(
+        all(target_arch = "wasm32", feature = "js-webgpu"),
+        all(not(target_arch = "wasm32"), feature = "webgpu")
+    ))]
+    #[must_use]
+    pub fn webgpu(mut self, ctx: wasmer_webgpu::WebGpuCtx) -> Self {
+        self.webgpu = Some(ctx);
+        self
+    }
+
     /// Resolve packages and create the sandbox.
     ///
     /// # Errors
@@ -249,6 +275,17 @@ impl SandboxBuilder {
             NetworkPolicy::Host => host_networking(&self.client),
         });
         let runtime = build_sandbox_runtime(&self.client, Arc::clone(&networking));
+        #[cfg(any(
+            all(target_arch = "wasm32", feature = "js-webgpu"),
+            all(not(target_arch = "wasm32"), feature = "webgpu")
+        ))]
+        let runtime: Arc<dyn Runtime + Send + Sync> = match self.webgpu {
+            // This hook returns no imports for packages that do not use WebGPU.
+            Some(webgpu) => Arc::new(
+                OverriddenRuntime::new(runtime).with_instantiation_hook(webgpu.runtime_hooks()),
+            ),
+            None => runtime,
+        };
 
         Ok(Sandbox {
             inner: Arc::new(SandboxInner {

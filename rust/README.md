@@ -176,6 +176,36 @@ let sandbox = wasmer
 root. Registry and package data can be shared with Python and Node.js, while
 compiled artifacts are partitioned by native target.
 
+## WebGPU
+
+With the `webgpu` feature, a sandbox can be granted the GPU. Programs written
+in C or C++ against the standard `webgpu.h`, built for WASIX with the library
+from [wasmerio/webgpu](https://github.com/wasmerio/webgpu), then run on the
+machine's GPU through [wgpu](https://github.com/gfx-rs/wgpu):
+
+```rust
+use wasmer_sdk::webgpu::WebGpuCtx;
+
+let webgpu = WebGpuCtx::builder()
+    .max_devices(1)
+    .max_gpu_memory_bytes(512 << 20)
+    .build();
+let sandbox = wasmer
+    .sandboxes()
+    .create()
+    .package(app)
+    .webgpu(webgpu.clone())
+    .await?;
+let output = sandbox.command("main").run().await?;
+```
+
+The context is the grant: limits on what a guest process may hold, a
+software-adapter-only switch, and a `SurfaceProvider` that decides what a
+guest's surfaces present to (headless by default; frames can be captured or
+shown in windows). `webgpu.usage()` reports what guests hold, and
+`webgpu.runtime_control().terminate_all()` stops their GPU work. Without the
+grant a program that imports WebGPU does not start.
+
 ## Examples
 
 Run the same guest programs used by the JavaScript and Python SDK examples:

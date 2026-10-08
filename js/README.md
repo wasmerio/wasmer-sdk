@@ -211,6 +211,56 @@ browser can use `SharedArrayBuffer`. Serve the page with
 Browser package data is persisted with browser storage rather than the Node
 filesystem cache.
 
+### WebGPU
+
+Grant a sandbox the GPU and its commands can use WebGPU: programs written in
+C or C++ against the standard `webgpu.h`, built for WASIX with the library
+from [wasmerio/webgpu](https://github.com/wasmerio/webgpu), run on the browser's
+`navigator.gpu`.
+
+```javascript
+const sandbox = await wasmer.sandboxes.create({
+  packages: [app],
+  webgpu: { canvas: document.querySelector("canvas") },
+});
+await sandbox.command(app).run();
+```
+
+`webgpu: true` is enough for programs that only compute. A program that
+presents names its target with a selector; `canvas` answers for every
+selector and `canvases: { "#main": element }` for particular ones.
+`sandbox.webgpu.setCanvas(canvas, selector)` changes them later. `canvas` can
+also be a function: it is called with the selector when a guest creates a
+surface and returns the canvas for it, which is the moment to create or
+reveal one.
+
+- An `HTMLCanvasElement` stays with the page. The guest renders in its worker
+  and each frame it presents is shown in the element, so every command of the
+  sandbox can draw to it. The element's `width` and `height` are the size the
+  guest is asked to render at.
+- An `OffscreenCanvas` from `canvas.transferControlToOffscreen()` moves to
+  the first guest thread that asks for it, which then presents without
+  involving the page's thread. It cannot be given to another.
+
+`forceFallbackAdapter` restricts guests to a software adapter, and `limits`
+caps the devices, objects and GPU memory one guest process may hold.
+
+Guests need WebAssembly JavaScript Promise Integration (JSPI) to wait for the
+GPU; creating the sandbox fails with `CAPABILITY_UNAVAILABLE` where the
+engine does not have it. Without the `webgpu` option a program that imports
+WebGPU does not start.
+
+Run the example, a spinning triangle drawn by
+[`triangle.c`](https://github.com/wasmerio/webgpu/blob/main/examples/triangle.c)
+(the `packages/webgpu` submodule has it; `git submodule update --init packages/webgpu`):
+
+```sh
+make -C ../packages/webgpu examples
+npm run build
+node examples/serve-webgpu.mjs
+# Open the printed URL in a browser with WebGPU.
+```
+
 ### Local TCP between browser sandboxes
 
 Browser sandboxes with `network: { mode: "http" }` or `"wisp"` share virtual
@@ -458,6 +508,11 @@ npm run test:browser-http
 npm run test:browser-node
 npm run test:browser-postgres
 ```
+
+`npm run test:browser-webgpu` runs the WebGPU conformance programs of
+[wasmerio/webgpu](https://github.com/wasmerio/webgpu) through the SDK in the installed
+Chrome (build them first with `make -C ../packages/webgpu programs`). It is
+skipped where the browser has no WebGPU adapter.
 
 `npm run check` type-checks the handwritten TypeScript API without rebuilding
 the wasm module.

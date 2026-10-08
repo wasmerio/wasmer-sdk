@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebGPU from C in your browser · Wasmer</title>
+<style>
+  :root { color-scheme: dark; font: 16px system-ui, sans-serif; background: #0d1117; color: #e6edf3; }
+  body { max-width: 880px; margin: 3rem auto; padding: 0 1.5rem; }
+  h1 { font-size: 2rem; letter-spacing: -.04em; margin-bottom: .5rem; }
+  p { color: #9da8b6; line-height: 1.6; }
+  canvas { display: block; width: 100%; aspect-ratio: 16 / 10; background: #070b10; border: 1px solid #273140; border-radius: 8px; }
+  button { margin: .75rem .5rem 0 0; padding: .6rem 1rem; border: 1px solid #536277; border-radius: 6px; background: #253348; color: inherit; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  :focus-visible { outline: 2px solid #84b9ff; outline-offset: 3px; }
+  #error { color: #ffada5; }
+</style>
+<h1>WebGPU from C in your browser</h1>
+<p>A C program written against <code>webgpu.h</code> runs here as WebAssembly, in a worker, and draws to this canvas with your browser's GPU. The same binary opens a window under <code>wasmer run</code>.</p>
+<canvas id="view" aria-label="What the program draws"></canvas>
+<button id="start">Run</button>
+<button id="stop" disabled>Stop</button>
+<p id="status" role="status">Ready.</p>
+<p id="error" role="alert"></p>
+<script type="module">
+  import { startTriangle } from './webgpu-browser.mjs';
+  const view = document.querySelector('#view');
+  const start = document.querySelector('#start'), stop = document.querySelector('#stop');
+  const status = document.querySelector('#status'), error = document.querySelector('#error');
+  let session;
+
+  // The guest renders at the size of the element's bitmap; keep that at the
+  // size the element has on screen. The guest notices and reconfigures.
+  const fit = () => {
+    const scale = window.devicePixelRatio || 1;
+    view.width = Math.max(1, Math.round(view.clientWidth * scale));
+    view.height = Math.max(1, Math.round(view.clientHeight * scale));
+  };
+  new ResizeObserver(fit).observe(view);
+  fit();
+
+  start.onclick = async () => {
+    start.disabled = true;
+    error.textContent = '';
+    status.textContent = 'Starting…';
+    try {
+      session = await startTriangle(view);
+      status.textContent = 'Running.';
+      stop.disabled = false;
+      const current = session;
+      const output = await session.done;
+      if (session !== current) return;
+      status.textContent = output.ok ? output.stdout.text().trim() || 'Finished.' : 'Stopped.';
+      if (!output.ok && output.reason === 'exited') error.textContent = output.stderr.text();
+    } catch (cause) {
+      error.textContent = cause.message ?? String(cause);
+      status.textContent = 'Failed.';
+    } finally {
+      await session?.close();
+      session = undefined;
+      start.disabled = false;
+      stop.disabled = true;
+    }
+  };
+  stop.onclick = () => { stop.disabled = true; void session?.stop(); };
+</script>
+</html>

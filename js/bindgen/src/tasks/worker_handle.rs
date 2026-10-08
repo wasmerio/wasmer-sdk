@@ -379,12 +379,14 @@ fn handle_capi_delete(data: &JsValue, sender: &Scheduler, worker_id: u32) -> boo
 
 /// Give the JavaScript facade first refusal for host-service RPC messages.
 /// Browser networking uses this to keep the WISP connection on the main
-/// thread while a WASIX process blocks inside a worker.
+/// thread while a WASIX process blocks inside a worker; WebGPU uses it to
+/// fetch the page's canvases for a guest that creates a surface.
 fn handle_host_rpc(data: &JsValue) -> bool {
     let global = js_sys::global();
     for name in [
         "__wasmerHandleFileSystemRpc",
         "__wasmerHandleNetworkRpc",
+        "__wasmerHandleWebGpuRpc",
         "__wasmerHandleDiagnostic",
     ] {
         if let Ok(handler) = js_sys::Reflect::get(&global, &JsValue::from_str(name)) {

@@ -2,3 +2,7 @@
 	path = packages/napi
 	url = https://github.com/wasmerio/napi.git
 	branch = main
+[submodule "packages/webgpu"]
+	path = packages/webgpu
+	url = https://github.com/wasmerio/webgpu.git
+	branch = main

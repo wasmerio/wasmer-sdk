@@ -31,6 +31,20 @@ js-napi = [
   "wasmer-napi/js",
   "wasmer-napi/wasix",
 ]
+# WebGPU for guests built against webgpu.h: on wgpu natively, on the
+# JavaScript realm's `navigator.gpu` in a browser.
+webgpu = [
+  "sys",
+  "dep:wasmer-webgpu",
+  "wasmer-webgpu/wasix",
+]
+js-webgpu = [
+  "js",
+  "dep:wasmer-webgpu",
+  "wasmer/experimental-async",
+  "wasmer-webgpu/js",
+  "wasmer-webgpu/wasix",
+]
 
 [dependencies]
 anyhow = "1.0"
@@ -52,6 +66,7 @@ wasmer-types = { version = "=7.4.0", default-features = false }
 wasmer-wasix = { version = "=0.704.0", default-features = false }
 wasmer-wasix-types = "=0.704.0"
 webc = { version = "=12.0.1", default-features = false, features = ["v3"] }
+wasmer-webgpu = { version = "=0.704.0", optional = true, default-features = false }
 wasmparser = { version = "=0.257.1", default-features = false, features = ["std", "simd"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

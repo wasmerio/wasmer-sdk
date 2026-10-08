@@ -9,6 +9,14 @@ import init, {
   type ProcessCore,
   type SandboxCore,
 } from "../pkg/wasmer_sdk_js.js";
+import {
+  WebGpuCanvases,
+  webGpuGuestsSupported,
+  type WebGpuCanvas,
+  type WebGpuCanvasProvider,
+} from "./webgpu-canvas.js";
+
+export type { WebGpuCanvas, WebGpuCanvasProvider } from "./webgpu-canvas.js";
 
 export interface WasmerOptions {
   outputBytes?: number;
@@ -126,6 +134,56 @@ export interface SandboxOptions {
   network?: NetworkPolicy;
   /** The command used by `sandbox.shell()` and `sandbox.sh`. */
   shell?: CommandSelector;
+  /**
+   * Grant commands the GPU through WebGPU: programs built against `webgpu.h`
+   * with Wasmer's `libwebgpu.a` then run on the browser's `navigator.gpu`.
+   * Off by default, in which case such a program fails to start.
+   */
+  webgpu?: boolean | WebGpuOptions;
+}
+
+/** Ceilings on what one guest process may hold. Unset means unlimited. */
+export interface WebGpuLimits {
+  /** Devices alive at once. */
+  maxDevices?: number;
+  /** Live objects (buffers, textures, pipelines, ...). */
+  maxObjects?: number;
+  /** Bytes of buffer and texture storage. */
+  maxGpuMemoryBytes?: number;
+}
+
+export interface WebGpuOptions {
+  /**
+   * The canvas a guest presents to when it creates a surface for a selector
+   * that `canvases` does not list.
+   *
+   * An `HTMLCanvasElement` stays with the page: the guest renders in its
+   * worker and each presented frame is shown in the element, so every
+   * command of the sandbox can draw to it. An `OffscreenCanvas` (from
+   * `canvas.transferControlToOffscreen()`) moves to the first guest that asks
+   * for it, which then presents without involving this thread.
+   *
+   * A function is called with the selector whenever a guest creates such a
+   * surface and returns the canvas for it, or nothing to refuse. That is the
+   * moment to create or reveal the canvas.
+   */
+  canvas?: WebGpuCanvas | WebGpuCanvasProvider;
+  /** Canvases by the selector the guest names (`WGPUWasixSurfaceSourceCanvas`). */
+  canvases?: Readonly<Record<string, WebGpuCanvas>>;
+  /** Only ever hand guests a software adapter. */
+  forceFallbackAdapter?: boolean;
+  limits?: WebGpuLimits;
+}
+
+/** The canvases of a sandbox that was granted WebGPU. */
+export interface SandboxWebGpu {
+  /** Whether the sandbox was created with `webgpu`. */
+  readonly enabled: boolean;
+  /**
+   * Add, replace or (with `undefined`) remove a canvas. Without a selector it
+   * is the default canvas. Surfaces a guest already created keep theirs.
+   */
+  setCanvas(canvas: WebGpuCanvas | undefined, selector?: string): void;
 }
 
 export interface Packages {
@@ -532,6 +590,7 @@ export class Wasmer {
     }
     const network = options.network ?? { mode: "disabled" };
     let networkBridge: { close(): void } | undefined;
+    let canvases: WebGpuCanvases | undefined;
     if (network.mode === "wisp") {
       if (typeof window === "undefined") {
         throw new WasmerError(
@@ -552,6 +611,9 @@ export class Wasmer {
       builder.network(network.mode);
     }
     try {
+      if (options.webgpu) {
+        canvases = grantWebGpu(builder, options.webgpu === true ? {} : options.webgpu);
+      }
       if ((network.mode === "http" || network.mode === "wisp") && network.peers !== undefined) {
         builder.restrictNetworkPeers();
         for (const peer of new Set(network.peers)) {
@@ -562,9 +624,10 @@ export class Wasmer {
         }
       }
       const core = await rethrow(builder.start());
-      return new Sandbox(this, core, options.shell, networkBridge);
+      return new Sandbox(this, core, options.shell, networkBridge, canvases);
     } catch (error) {
       networkBridge?.close();
+      canvases?.close();
       throw error;
     }
   }
@@ -695,8 +758,11 @@ export class Sandbox {
   readonly fs: SandboxFileSystem;
   readonly ports: Ports;
   readonly network: SandboxNetwork;
+  /** The canvases guests may present to, when the sandbox has WebGPU. */
+  readonly webgpu: SandboxWebGpu;
   readonly #core: SandboxCore;
   readonly #networkBridge: NetworkBridge | undefined;
+  readonly #canvases: WebGpuCanvases | undefined;
   #shell: CommandSelector | undefined;
 
   constructor(
@@ -704,14 +770,17 @@ export class Sandbox {
     core: SandboxCore,
     shell?: CommandSelector,
     networkBridge?: NetworkBridge,
+    canvases?: WebGpuCanvases,
   ) {
     this.#core = core;
     sandboxCores.set(this, core);
     this.fs = new SandboxFileSystem(core);
     this.ports = new Ports(core);
     this.network = new SandboxNetworkService(networkBridge);
+    this.webgpu = new SandboxWebGpuService(canvases);
     this.#shell = shell;
     this.#networkBridge = networkBridge;
+    this.#canvases = canvases;
   }
 
   command(
@@ -786,6 +855,7 @@ export class Sandbox {
       await rethrow(this.#core.close());
     } finally {
       this.#networkBridge?.close();
+      this.#canvases?.close();
     }
   }
 
@@ -809,6 +879,72 @@ export class Sandbox {
 interface NetworkBridge {
   close(): void;
   setUrl?(url: string): void;
+}
+
+/** Validate a WebGPU grant and apply it to a sandbox under construction. */
+function grantWebGpu(
+  builder: { webgpu(options: unknown): void },
+  options: WebGpuOptions,
+): WebGpuCanvases {
+  if (!webGpuGuestsSupported()) {
+    throw new WasmerError(
+      "WebGPU for guests needs WebAssembly JavaScript Promise Integration " +
+        "(JSPI), which this JavaScript engine does not provide",
+      "CAPABILITY_UNAVAILABLE",
+    );
+  }
+  const canvases = new WebGpuCanvases();
+  try {
+    if (typeof options.canvas === "function") canvases.setProvider(options.canvas);
+    else if (options.canvas !== undefined) canvases.set(options.canvas);
+    for (const [selector, canvas] of Object.entries(options.canvases ?? {})) {
+      canvases.set(canvas, selector);
+    }
+    const grant: Record<string, unknown> = { canvasScope: canvases.scope };
+    if (options.forceFallbackAdapter !== undefined) {
+      grant.forceFallbackAdapter = Boolean(options.forceFallbackAdapter);
+    }
+    for (const [name, value] of Object.entries(options.limits ?? {})) {
+      if (value !== undefined) grant[name] = value;
+    }
+    rethrowSync(() => builder.webgpu(grant));
+  } catch (error) {
+    canvases.close();
+    if (error instanceof TypeError) {
+      throw new WasmerError(error.message, "INVALID_ARGUMENT", { cause: error });
+    }
+    throw error;
+  }
+  return canvases;
+}
+
+class SandboxWebGpuService implements SandboxWebGpu {
+  readonly #canvases: WebGpuCanvases | undefined;
+
+  constructor(canvases?: WebGpuCanvases) {
+    this.#canvases = canvases;
+  }
+
+  get enabled(): boolean {
+    return this.#canvases !== undefined;
+  }
+
+  setCanvas(canvas: WebGpuCanvas | undefined, selector?: string): void {
+    if (!this.#canvases) {
+      throw new WasmerError(
+        "this sandbox was not created with `webgpu`",
+        "CAPABILITY_UNAVAILABLE",
+      );
+    }
+    try {
+      this.#canvases.set(canvas, selector);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new WasmerError(error.message, "INVALID_ARGUMENT", { cause: error });
+      }
+      throw error;
+    }
+  }
 }
 
 /** Runtime controls for a sandbox's configured network provider. */

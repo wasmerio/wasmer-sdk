@@ -86,6 +86,64 @@ test("wasm facade rejects invalid retention values from direct callers", async (
   }
 });
 
+test("wasm facade validates a WebGPU grant before applying it", async () => {
+  const wasm = await readFile(
+    new URL("../pkg/wasmer_sdk_js_bg.wasm", import.meta.url),
+  );
+  await initCore({ module_or_path: wasm });
+
+  const client = WasmerCore.create({});
+  const builder = client.sandbox();
+  for (const grant of [
+    {},
+    { canvasScope: -1 },
+    { canvasScope: 1, maxDevices: 0 },
+    { canvasScope: 1, maxObjects: 1.5 },
+    { canvasScope: 1, maxGpuMemoryBytes: -1 },
+    { canvasScope: 1, maxDevices: Number.NaN },
+  ]) {
+    assert.throws(
+      () => builder.webgpu(grant),
+      (error) => error?.code === "INVALID_ARGUMENT",
+      JSON.stringify(grant),
+    );
+  }
+
+  // A refused grant leaves the builder usable.
+  builder.webgpu({
+    canvasScope: 1,
+    forceFallbackAdapter: true,
+    maxDevices: 1,
+    maxObjects: 1_000,
+    maxGpuMemoryBytes: 64 * 1024 * 1024,
+  });
+  const sandbox = await builder.start();
+  await sandbox.close();
+  await client.shutdown();
+});
+
+test("a sandbox without the WebGPU grant has no canvases to set", async () => {
+  const wasmer = new Wasmer({ cache: false });
+  const sandbox = await wasmer.sandboxes.create();
+  try {
+    assert.equal(sandbox.webgpu.enabled, false);
+    assert.throws(
+      () => sandbox.webgpu.setCanvas(undefined),
+      (error) => WasmerError.is(error, "CAPABILITY_UNAVAILABLE"),
+    );
+    await assert.rejects(
+      wasmer.sandboxes.create({ webgpu: { canvas: "#view" } }),
+      (error) =>
+        WasmerError.is(error, "INVALID_ARGUMENT") ||
+        // An engine without JSPI refuses the grant before looking at it.
+        WasmerError.is(error, "CAPABILITY_UNAVAILABLE"),
+    );
+  } finally {
+    await sandbox.close();
+    await wasmer.close();
+  }
+});
+
 test("client output retention rejects unsafe JavaScript numbers", () => {
   for (const value of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
     assert.throws(
