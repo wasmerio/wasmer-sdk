@@ -161,5 +161,19 @@
     ],
     "install": "pip install -r requirements.txt",
     "run": "/workspace/.python-packages/bin/yt-dlp --help"
+  },
+  {
+    "id": "webgpu",
+    "source": "webgpu",
+    "title": "WebGPU",
+    "group": "Graphics",
+    "description": "Compile a C program against webgpu.h and draw with your GPU.",
+    "icon": "webgpu.svg",
+    "dependencies": "Clang · webgpu.h",
+    "packages": ["clang/clang@=0.160000.1"],
+    "requires": ["webgpu"],
+    "env": { "CCC_OVERRIDE_OPTIONS": "#^-resource-dir=/lib/clang/16" },
+    "install": null,
+    "run": "clang -Iinclude triangle.c lib/*.c -o triangle.wasm && ./triangle.wasm"
   }
 ]

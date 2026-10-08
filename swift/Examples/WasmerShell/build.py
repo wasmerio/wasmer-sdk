@@ -76,8 +76,11 @@ def build(platform, edgejs_webc=None, integration_tests=False):
     examples = app / "Examples"
     examples.mkdir(exist_ok=True)
     # One catalog defines the templates and runtime packages for both shells.
+    # An example that requires more than a shell (WebGPU, in the browser) is
+    # left out here: this app provides none of those yet.
     catalog = ROOT.parents[2] / "wasmer-sh/examples.json"
-    shutil.copyfile(catalog, app / "examples.json")
+    templates = [example for example in json.loads(catalog.read_text()) if not example.get("requires")]
+    (app / "examples.json").write_text(json.dumps(templates, ensure_ascii=False, indent=2) + "\n")
     icons = catalog.parent / "public/example-icons"
     assets = ROOT / ".build/ExampleIcons.xcassets"
     if assets.exists():
@@ -93,7 +96,7 @@ def build(platform, edgejs_webc=None, integration_tests=False):
         "info": {"author": "xcode", "version": 1},
         "properties": {"preserves-vector-representation": True},
     }))
-    for example in json.loads(catalog.read_text()):
+    for example in templates:
         image_set = assets / f"example-{example['id']}.imageset"
         image_set.mkdir()
         shutil.copyfile(icons / example["icon"], image_set / example["icon"])

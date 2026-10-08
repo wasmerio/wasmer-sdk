@@ -32,6 +32,10 @@
           <span class="live-http-dot" aria-hidden="true"></span>
           <span id="live-http-label">Live HTTP</span>
         </button>
+        <button id="canvas-badge" class="live-http-badge" type="button" title="Show the canvas" aria-pressed="false" hidden>
+          <span class="live-http-dot" aria-hidden="true"></span>
+          <span>WebGPU</span>
+        </button>
         <span class="summary-divider" aria-hidden="true"></span>
         <span id="package-name">wasmer/bash</span>
       </div>
@@ -157,6 +161,24 @@
           </div>
         </header>
         <div id="preview-content" class="preview-content"></div>
+      </section>
+
+      <section id="canvas-panel" class="preview-panel canvas-panel" aria-label="WebGPU canvas" hidden>
+        <header class="preview-bar">
+          <p class="canvas-title">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5 3 15.5h14L10 3.5Z" /></svg>
+            <span>WebGPU</span>
+            <span id="canvas-size" class="canvas-size"></span>
+          </p>
+          <div class="preview-actions">
+            <button id="canvas-close" class="browser-button" type="button" aria-label="Close canvas" title="Close canvas">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
+            </button>
+          </div>
+        </header>
+        <div id="canvas-content" class="canvas-content">
+          <canvas id="gpu-canvas" aria-label="What the running program draws"></canvas>
+        </div>
       </section>
     </main>
 

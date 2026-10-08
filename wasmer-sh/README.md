@@ -4,7 +4,7 @@ A fast, browser-native command shell powered by Wasmer, WASIX, and the new
 [`@wasmer/sdk`](https://www.npmjs.com/package/@wasmer/sdk) sandbox API.
 
 The opening screen offers Pi, Node.js, Express, Next.js, Richards.js, Python HTTP, Flask, Django,
-FastAPI, PostgreSQL, Clang / C, FFmpeg, and yt-dlp templates. Selecting a template opens Bash at
+FastAPI, PostgreSQL, Clang / C, FFmpeg, yt-dlp, and WebGPU templates. Selecting a template opens Bash at
 `/workspace`, with that example's source files directly in the root and only its
 required runtime packages. The terminal shows the install and run commands;
 nothing is installed automatically. Python dependencies are isolated in each
@@ -92,6 +92,44 @@ The compiler, linker, and C library come from `clang/clang`. No dependency
 installation is needed. The [example README](workspace/clang/README.md) also
 shows how to compile, read the emitted bytes, and run them through the JavaScript
 and Swift SDK APIs. Generated binaries are not bundled with the example.
+
+Choose **WebGPU** under **Graphics** (`?example=webgpu`) to compile a C program
+written against the standard `webgpu.h` and watch it draw with your GPU:
+
+```sh
+clang -Iinclude triangle.c lib/*.c -o triangle.wasm
+./triangle.wasm
+```
+
+A canvas opens beside the terminal when the program creates its surface, and
+stays until you close it; the **WebGPU** badge in the header brings it back.
+Press Ctrl-C to stop the program. Every sandbox is granted WebGPU where the
+browser has it, so the same works in the full shell (`cd webgpu`), and for any
+program built against `webgpu.h` that you bring yourself. See the
+[example README](workspace/webgpu/README.md).
+
+The example carries the header and Wasmer's guest library as source, copied
+from [wasmerio/webgpu](https://github.com/wasmerio/webgpu) (the
+`packages/webgpu` submodule) by
+`node scripts/sync-webgpu-example.mjs`; `npm run test:examples` fails when the
+copy is out of date. Its catalog entry has `"requires": ["webgpu"]`: wasmer.sh
+refuses to start it in a browser without WebGPU and WebAssembly JSPI, and the
+native WasmerShell leaves such examples out.
+
+Before the SDK's WebGPU support is released to npm, run this example from
+`wasmer-sh/` with the SDK built from the same checkout:
+
+```sh
+npm --prefix ../js run build
+npm install --no-save --package-lock=false ../js
+WASMER_BROWSER_CHANNEL=chrome WASMER_EXAMPLE=webgpu npm run test:examples
+npm run dev
+```
+
+`WASMER_BROWSER_CHANNEL=chrome` runs the check in the installed Chrome.
+Playwright's own Chromium has no GPU adapter in headless mode; there the check
+stops after compiling the program. The published SDK dependency must include
+WebGPU before the example is deployed.
 
 The Django template is a standard `manage.py` / `mysite` starter based on
 [Wasmer's Django example](https://github.com/wasmerio/examples/tree/main/python-django).

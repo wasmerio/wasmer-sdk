@@ -20,9 +20,11 @@ The commands below are for the full shell, where all examples have named folders
 | Django              | `cd python-django && pip install -r requirements.txt && python manage.py runserver 0.0.0.0:8000 --noreload --nothreading` |
 | Python HTTP server  | `cd python && python server.py`               |
 | PHP site            | `cd php && php -S 0.0.0.0:8000 -t .`          |
+| WebGPU              | `cd webgpu && clang -Iinclude triangle.c lib/*.c -o triangle.wasm && ./triangle.wasm` |
 
 
 Starting a server opens its site beside the terminal. Press Ctrl-C to stop it
-and return to Bash.
+and return to Bash. A program that draws with WebGPU gets a canvas there
+instead.
 
 Wasmer package data is cached by the browser for faster future starts.

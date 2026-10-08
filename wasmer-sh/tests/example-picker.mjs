@@ -79,7 +79,9 @@ try {
   await app.listen();
   const browserType = { chromium, firefox, webkit }[process.env.WASMER_BROWSER ?? "chromium"];
   assert(browserType, "WASMER_BROWSER must be chromium, firefox, or webkit");
-  browser = await browserType.launch({ headless: true });
+  // WASMER_BROWSER_CHANNEL=chrome runs the installed Chrome instead of
+  // Playwright's own build, which is what the WebGPU example needs to draw.
+  browser = await browserType.launch({ headless: true, channel: process.env.WASMER_BROWSER_CHANNEL || undefined });
   page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
   if (selectedExamples.some(example => example.id === "pi")) await instrumentPiPage(page);
   page.on("pageerror", (error) => diagnostics.push(error.stack));
@@ -109,12 +111,13 @@ try {
   assert.equal(await page.locator("#resume-button").isVisible(), false);
   const fullShellPaths = await page.evaluate(async () => {
     const { exampleFiles } = await import("/src/examples.ts");
-    return Object.keys(exampleFiles());
+    return Object.keys(await exampleFiles());
   });
   for (const path of [
     "node/server.js", "python/server.py", "python-django/manage.py",
     "python-django/mysite/settings.py", "next/pages/index.js", "yt-dlp/yt-dlp.conf",
     "node-richards/richards.js", "clang/hello.c", "postgres/demo.sql", "pi/hello.js",
+    "webgpu/triangle.c", "webgpu/include/webgpu/webgpu.h", "webgpu/lib/webgpu_shim.c",
   ])
     assert(fullShellPaths.includes(path), `Missing full-shell source: ${path}`);
   assert(!fullShellPaths.includes("pi/start-pi.sh"), "Pi must launch without a workspace wrapper");
@@ -145,7 +148,7 @@ try {
     ),
     true,
   );
-  for (const id of ["pi", "postgres", "clang", "ffmpeg", "yt-dlp"]) {
+  for (const id of ["pi", "postgres", "clang", "ffmpeg", "yt-dlp", "webgpu"]) {
     const tool = page.locator(`[data-example="${id}"]`);
     await tool.scrollIntoViewIfNeeded();
     assert.equal(await tool.isVisible(), true);
@@ -198,7 +201,7 @@ try {
       );
     else if (example.id === "postgres")
       await command("command -v pglite && command -v psql && ! command -v node && ! command -v python && ! command -v ffmpeg");
-    else if (example.id === "clang")
+    else if (example.id === "clang" || example.id === "webgpu")
       await command(
         "command -v clang && ! command -v node && ! command -v python && ! command -v ffmpeg",
       );
@@ -340,6 +343,55 @@ try {
         }
       }, { sdkUrl: "/@fs" + fileURLToPath(import.meta.resolve("@wasmer/sdk/browser")), env: example.env });
       assert.equal(sdkOutput, "Hello from the JS SDK!\n");
+    } else if (example.id === "webgpu") {
+      const canvas = page.locator("#canvas-panel");
+      await command("test -f include/webgpu/webgpu.h && test -f lib/webgpu_shim.c");
+      assert.equal(await canvas.isVisible(), false, "The canvas must wait for a program to ask for it");
+      await command("clang -Iinclude triangle.c lib/*.c -o triangle.wasm", 300_000);
+      // Whether a browser can draw depends on the machine: Playwright's own
+      // Chromium has WebGPU but no adapter in headless mode.
+      const adapter = await page.evaluate(async () => Boolean(await navigator.gpu?.requestAdapter()));
+      if (adapter) {
+        assert((await command("./triangle.wasm 30", 120_000)).includes("presented 30 frames"));
+        assert.equal(await canvas.isVisible(), true);
+        const drawn = () => page.locator("#gpu-canvas").evaluate((element) => {
+          const copy = document.createElement("canvas");
+          copy.width = copy.height = 32;
+          const context = copy.getContext("2d");
+          context.drawImage(element, 0, 0, 32, 32);
+          return [...context.getImageData(0, 0, 32, 32).data].join();
+        });
+        const last = await drawn();
+        assert(/\b(1\d\d|2\d\d)\b/.test(last), "The canvas must show what the program drew");
+        // Without a frame count the program draws until it is interrupted.
+        await page.evaluate(() => window.__wasmerShell.send("./triangle.wasm\r"));
+        await page.waitForFunction(
+          async (last) => {
+            const element = document.querySelector("#gpu-canvas");
+            const copy = document.createElement("canvas");
+            copy.width = copy.height = 32;
+            const context = copy.getContext("2d");
+            context.drawImage(element, 0, 0, 32, 32);
+            return [...context.getImageData(0, 0, 32, 32).data].join() !== last;
+          },
+          last,
+          { timeout: 30_000 },
+        );
+        await page.evaluate(() => window.__wasmerShell.send("\x03"));
+        await command("echo INPUT_RECOVERED");
+        const stopped = await drawn();
+        await page.waitForTimeout(500);
+        assert.equal(await drawn(), stopped, "Nothing may draw after Ctrl-C");
+        await page.locator("#canvas-close").click();
+        assert.equal(await canvas.isVisible(), false);
+        await page.locator("#canvas-badge").click();
+        assert.equal(await canvas.isVisible(), true);
+      } else {
+        console.log("SKIP webgpu drawing: this browser has no WebGPU adapter");
+        // The example has no grep: Bash compares what the program said.
+        await command('said=$(./triangle.wasm 1 2>&1); [[ $said == *"no adapter"* ]]', 120_000);
+      }
+      assert.equal(await page.locator("#preview-panel").isVisible(), false);
     } else if (example.id === "ffmpeg") {
       await command(example.run, 180_000);
       const metadata = await command(

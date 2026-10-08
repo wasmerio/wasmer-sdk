@@ -25,6 +25,7 @@ runtime download is required.
   `pi-logo-on-light.svg`. Its artwork, colors, and view box are unchanged.
 
 `benchmark.svg` is an original speedometer illustration for the Richards.js
-performance example, shared under the repository license.
+performance example, and `webgpu.svg` an original triangle for the WebGPU
+example. Both are shared under the repository license.
 
 Project names and logos belong to their respective owners.
