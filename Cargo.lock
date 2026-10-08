@@ -5696,7 +5696,7 @@ dependencies = [
 [[package]]
 name = "wasmer-webgpu"
 version = "0.704.0"
-source = "git+https://github.com/wasmerio/webgpu.git?rev=3c691e405a1bbe9d381bef79e5c77dbf9a7fa19c#3c691e405a1bbe9d381bef79e5c77dbf9a7fa19c"
+source = "git+https://github.com/wasmerio/webgpu.git?rev=f1c1d4ec943a0f7623a33bee496ccb1a5a0a2ee4#f1c1d4ec943a0f7623a33bee496ccb1a5a0a2ee4"
 dependencies = [
  "anyhow",
  "js-sys",
