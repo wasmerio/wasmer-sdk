@@ -6212,7 +6212,7 @@ dependencies = [
 [[package]]
 name = "wasmer-gui"
 version = "0.704.0"
-source = "git+https://github.com/wasmerio/gui.git?rev=d109be82f004dc408376306e768cb46622ca9714#d109be82f004dc408376306e768cb46622ca9714"
+source = "git+https://github.com/wasmerio/gui.git?rev=2be6ec4dbfe14628deac7e252771cd42c4f8298b#2be6ec4dbfe14628deac7e252771cd42c4f8298b"
 dependencies = [
  "anyhow",
  "arboard",
