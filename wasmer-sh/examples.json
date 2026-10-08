@@ -175,5 +175,19 @@
     "env": { "CCC_OVERRIDE_OPTIONS": "#^-resource-dir=/lib/clang/16" },
     "install": null,
     "run": "clang -Iinclude triangle.c lib/*.c -o triangle.wasm && ./triangle.wasm"
+  },
+  {
+    "id": "gui",
+    "source": "gui",
+    "title": "Windows and input",
+    "group": "Graphics",
+    "description": "A window to click, drag and type in, drawn with your GPU from C.",
+    "icon": "gui.svg",
+    "dependencies": "Clang · gui.h · webgpu.h",
+    "packages": ["clang/clang@=0.160000.1"],
+    "requires": ["webgpu", "gui"],
+    "env": { "CCC_OVERRIDE_OPTIONS": "#^-resource-dir=/lib/clang/16" },
+    "install": null,
+    "run": "clang -Iinclude triangle.c lib/*.c -o triangle.wasm && ./triangle.wasm"
   }
 ]

@@ -40,6 +40,8 @@ const DEFAULT_WISP_URL = "ws://localhost:4000/";
 const DEFAULT_SERVICE_WORKER_ORIGIN = "https://default.local.wasmer.site/";
 const LOCAL_WISP_COMMAND = "wasmer run wasmer/wisp-server --net";
 const DEFAULT_CANVAS_SIZE = [640, 480] as const;
+/** What the canvas panel is called while no program has named its window. */
+const CANVAS_NAME = "WebGPU";
 
 type WispSetupMode = "deploy" | "local";
 
@@ -144,6 +146,7 @@ const elements = {
   canvasBadge: requiredElement<HTMLButtonElement>("canvas-badge"),
   canvasPanel: requiredElement<HTMLElement>("canvas-panel"),
   canvasContent: requiredElement<HTMLDivElement>("canvas-content"),
+  canvasName: requiredElement<HTMLSpanElement>("canvas-name"),
   canvasSize: requiredElement<HTMLSpanElement>("canvas-size"),
   canvasClose: requiredElement<HTMLButtonElement>("canvas-close"),
   canvas: requiredElement<HTMLCanvasElement>("gpu-canvas"),
@@ -332,6 +335,15 @@ elements.previewClose.addEventListener("click", () => {
   if (session) void closePreview(session);
 });
 elements.canvasClose.addEventListener("click", () => showCanvas(false));
+// A window's canvas is kept at the size the panel shows it, by the SDK. The
+// header says what that is.
+new ResizeObserver(() => {
+  requestAnimationFrame(() => {
+    if (elements.canvasSize.textContent !== "") {
+      elements.canvasSize.textContent = `${elements.canvas.width} × ${elements.canvas.height}`;
+    }
+  });
+}).observe(elements.canvas);
 elements.canvasBadge.addEventListener("click", () => showCanvas(elements.canvasPanel.hidden));
 elements.previewBack.addEventListener("click", () => sendPreviewCommand("back"));
 elements.previewForward.addEventListener("click", () =>
@@ -416,6 +428,7 @@ async function start(): Promise<void> {
 
     assertBrowserCapabilities();
     const drawsWithWebGpu = selectedExample?.requires?.includes("webgpu") === true;
+    const opensWindows = selectedExample?.requires?.includes("gui") === true;
     if (drawsWithWebGpu && !webGpuAvailable) {
       throw new Error(
         "This example draws with WebGPU. It needs a browser with WebGPU and WebAssembly JSPI, such as a recent Chrome or Edge.",
@@ -449,10 +462,16 @@ async function start(): Promise<void> {
 
     setState("loading", "Creating sandbox");
     setBootMessage("Preparing your workspace…");
-    // The published SDK's types do not know `webgpu` yet, and its runtime
-    // ignores the option. Declare it here until the dependency does.
+    // The published SDK's types do not know `webgpu` and `gui` yet, and its
+    // runtime ignores the options. Declare them here until the dependency
+    // does.
     const options: SandboxOptions & {
       webgpu?: { canvas: (selector: string) => HTMLCanvasElement };
+      gui?: {
+        canvas: (target: string) => HTMLCanvasElement;
+        onTitle: (title: string) => void;
+        resizable: boolean;
+      };
     } = {
       packages: [mainPackage, ...uses],
       files: await workspaceFiles(),
@@ -479,6 +498,10 @@ async function start(): Promise<void> {
     // Programs built against webgpu.h get the GPU, and the canvas beside the
     // terminal to present to.
     if (webGpuAvailable) options.webgpu = { canvas: provideCanvas };
+    // Programs built against <wasmer/gui.h> get the same canvas as their
+    // window: what is clicked and typed there is theirs. The panel decides
+    // how big it is.
+    options.gui = { canvas: provideCanvas, onTitle: showCanvasTitle, resizable: false };
     const sandbox = await wasmer.sandboxes.create(options);
 
     if (currentGeneration !== generation) {
@@ -489,6 +512,12 @@ async function start(): Promise<void> {
       await sandbox.close();
       throw new Error(
         "This example needs a Wasmer SDK with WebGPU. Build the SDK from this checkout and install it here; see the README.",
+      );
+    }
+    if (opensWindows && !(sandbox as Sandbox & { gui?: { enabled: boolean } }).gui?.enabled) {
+      await sandbox.close();
+      throw new Error(
+        "This example needs a Wasmer SDK with windows. Build the SDK from this checkout and install it here; see the README.",
       );
     }
 
@@ -758,8 +787,10 @@ async function closePreview(session: ActiveSession): Promise<void> {
 }
 
 /**
- * The SDK asks for the canvas when a program creates a WebGPU surface, which
- * is the moment to show it. The program draws at the size the panel has now.
+ * The SDK asks for the canvas when a program creates a WebGPU surface or
+ * opens a window, which is the moment to show it. A program that only draws
+ * does so at the size the panel has now; one with a window is told when the
+ * panel changes, and the canvas with it.
  */
 function provideCanvas(): HTMLCanvasElement {
   showCanvas(true);
@@ -777,6 +808,11 @@ function provideCanvas(): HTMLCanvasElement {
   return elements.canvas;
 }
 
+/** A program named its window: that is what the panel is called meanwhile. */
+function showCanvasTitle(title: string): void {
+  elements.canvasName.textContent = title || CANVAS_NAME;
+}
+
 function showCanvas(show: boolean): void {
   elements.canvasPanel.hidden = !show;
   elements.stage.classList.toggle("has-canvas", show);
@@ -790,6 +826,7 @@ function resetCanvas(): void {
   showCanvas(false);
   elements.canvasBadge.hidden = true;
   elements.canvasSize.textContent = "";
+  elements.canvasName.textContent = CANVAS_NAME;
   elements.canvas.getContext("bitmaprenderer")?.transferFromImageBitmap(null);
 }
 
@@ -1296,7 +1333,7 @@ function normalizeWispUrl(value: string): string {
   return endpoint.href;
 }
 
-async function workspaceFiles(): Promise<Record<string, string>> {
+async function workspaceFiles(): Promise<Record<string, string | Uint8Array>> {
   return {
     ...(await exampleFiles(selectedExample)),
     ".bashrc": `PS1='\\[\\033[1;38;5;141m\\]➜\\[\\033[0m\\] \\[\\033[1;38;5;117m\\]\\W\\[\\033[0m\\] \\[\\033[1m\\]$\\[\\033[0m\\] '

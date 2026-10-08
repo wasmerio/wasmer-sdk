@@ -6,3 +6,5 @@ node_modules
 .wasmer
 !service-worker/.wasmer/
 !service-worker/.wasmer/**
+# Programs built in this checkout, copied here to try them (scripts/sync-gui-demos.mjs).
+workspace/gui/demos/
