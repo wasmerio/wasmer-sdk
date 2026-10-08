@@ -10,6 +10,7 @@
 
 mod browser_http;
 mod browser_tcp;
+mod gui;
 mod host_filesystem;
 mod module_cache;
 mod node_network;
@@ -369,6 +370,17 @@ impl JsSandboxBuilder {
             .canvas_scope(options.canvas_scope)
             .build();
         self.inner = Some(self.take()?.webgpu(ctx));
+        Ok(())
+    }
+
+    /// Grant guests windows and input: programs built against
+    /// `<wasmer/gui.h>` then get canvases of the page as their windows.
+    /// `settings` is plain data (what guests may do, and how much); `page`
+    /// holds the functions with which the JavaScript facade finds the
+    /// canvases.
+    pub fn gui(&mut self, settings: JsValue, page: JsValue) -> Result<(), JsValue> {
+        let ctx = gui::context(settings, &page)?;
+        self.inner = Some(self.take()?.gui(ctx));
         Ok(())
     }
 

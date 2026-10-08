@@ -47,6 +47,11 @@ pub struct SandboxBuilder {
         all(not(target_arch = "wasm32"), feature = "webgpu")
     ))]
     webgpu: Option<wasmer_webgpu::WebGpuCtx>,
+    #[cfg(any(
+        all(target_arch = "wasm32", feature = "js-gui"),
+        all(not(target_arch = "wasm32"), feature = "gui")
+    ))]
+    gui: Option<wasmer_gui::GuiCtx>,
 }
 
 /// A value that can be mounted into a sandbox as an external filesystem.
@@ -89,6 +94,11 @@ impl SandboxBuilder {
                 all(not(target_arch = "wasm32"), feature = "webgpu")
             ))]
             webgpu: None,
+            #[cfg(any(
+                all(target_arch = "wasm32", feature = "js-gui"),
+                all(not(target_arch = "wasm32"), feature = "gui")
+            ))]
+            gui: None,
         }
     }
 
@@ -206,6 +216,25 @@ impl SandboxBuilder {
         self
     }
 
+    /// Let the sandbox's commands open windows and read input, through
+    /// `<wasmer/gui.h>`.
+    ///
+    /// Disabled by default: without it, a guest that uses the GUI fails to
+    /// start because its imports are missing. The context carries the
+    /// embedder's policy and the window system, which is headless unless one
+    /// is given; it can be shared by several sandboxes. Every command gets a
+    /// scope of its own on it, so that killing a command also stops it where
+    /// it waits for input, and takes its windows away.
+    #[cfg(any(
+        all(target_arch = "wasm32", feature = "js-gui"),
+        all(not(target_arch = "wasm32"), feature = "gui")
+    ))]
+    #[must_use]
+    pub fn gui(mut self, ctx: wasmer_gui::GuiCtx) -> Self {
+        self.gui = Some(ctx);
+        self
+    }
+
     /// Resolve packages and create the sandbox.
     ///
     /// # Errors
@@ -297,6 +326,11 @@ impl SandboxBuilder {
                 mounts,
                 networking,
                 runtime,
+                #[cfg(any(
+                    all(target_arch = "wasm32", feature = "js-gui"),
+                    all(not(target_arch = "wasm32"), feature = "gui")
+                ))]
+                gui: self.gui,
                 processes: Mutex::new(Vec::new()),
                 closed: AtomicBool::new(false),
             }),
@@ -329,6 +363,11 @@ pub(crate) struct SandboxInner {
     pub(crate) mounts: Vec<MountSpec>,
     pub(crate) networking: DynVirtualNetworking,
     pub(crate) runtime: Arc<dyn Runtime + Send + Sync>,
+    #[cfg(any(
+        all(target_arch = "wasm32", feature = "js-gui"),
+        all(not(target_arch = "wasm32"), feature = "gui")
+    ))]
+    pub(crate) gui: Option<wasmer_gui::GuiCtx>,
     processes: Mutex<Vec<Weak<ProcessControl>>>,
     closed: AtomicBool,
 }

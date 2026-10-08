@@ -8,6 +8,11 @@ mod client;
 mod command;
 mod error;
 mod fs;
+#[cfg(any(
+    all(target_arch = "wasm32", feature = "js-gui"),
+    all(not(target_arch = "wasm32"), feature = "gui")
+))]
+pub mod gui;
 mod package;
 mod package_progress;
 pub use package_progress::{

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const wasmPath = resolve(packageRoot, "pkg/wasmer_sdk_js_bg.wasm");
-const maximumRawBytes = 5_000_000;
+const maximumRawBytes = 5_250_000;
 const maximumBrotliBytes = 1_500_000;
 
 const rawBytes = statSync(wasmPath).size;

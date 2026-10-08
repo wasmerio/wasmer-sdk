@@ -58,7 +58,10 @@
     "test:postgres": "npm run build:ts && node --test --test-timeout=90000 tests/postgres-psql.test.mjs",
     "test:browser-postgres": "npm run build:ts && node --test --test-timeout=180000 tests/browser-postgres.test.mjs",
     "test:browser-node": "node --test --test-timeout=240000 tests/browser-node-compat.test.mjs",
-    "test:browser-webgpu": "npm run build:ts && node --test --test-timeout=300000 tests/browser-webgpu.test.mjs"
+    "test:browser-webgpu": "npm run build:ts && node --test --test-timeout=300000 tests/browser-webgpu.test.mjs",
+    "test:browser-gui": "npm run build:ts && node --test --test-timeout=300000 tests/browser-gui.test.mjs",
+    "test:browser-gui-sdl": "npm run build:ts && node --test --test-timeout=300000 tests/browser-gui-sdl.test.mjs",
+    "test:browser-gui-winit": "npm run build:ts && node --test --test-timeout=300000 tests/browser-gui-winit.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.1.0",

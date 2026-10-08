@@ -91,6 +91,15 @@ export class WebGpuCanvases {
     this.#given.delete(keyOf(selector));
   }
 
+  /**
+   * The element set for a selector (or as the default canvas), if it is one
+   * that stays with the page. It is not given away by being looked at.
+   */
+  element(selector?: string): HTMLCanvasElement | undefined {
+    const canvas = selector === undefined ? this.#fallback : this.#bySelector.get(selector);
+    return canvas !== undefined && isElement(canvas) ? canvas : undefined;
+  }
+
   /** Who is asked for the canvas of a selector that none was set for. */
   setProvider(provider: WebGpuCanvasProvider | undefined): void {
     if (provider !== undefined && typeof provider !== "function") {

@@ -31,12 +31,43 @@ js-napi = [
   "wasmer-napi/js",
   "wasmer-napi/wasix",
 ]
+# Windows and input for guests built against <wasmer/gui.h>. Headless unless
+# the embedder gives its `GuiCtx` a window system.
+gui = [
+  "sys",
+  "dep:wasmer-gui",
+  "wasmer-gui/wasix",
+]
+# The desktop's windows for GUI guests, through winit, with the system
+# clipboard, and with frames that guests without a GPU draw themselves. A
+# window system wants the process's main thread: see `gui::run_main`.
+gui-window = [
+  "gui",
+  "wasmer-gui/winit",
+  "wasmer-gui/clipboard",
+  "wasmer-gui/pixels",
+]
+# Lets WebGPU guests draw on GUI windows. On the desktop's windows
+# (`gui-window`) this needs a wasmer-webgpu whose `WindowTarget` has
+# `pre_present` and `wait_presentable`.
+gui-webgpu = [
+  "gui",
+  "webgpu",
+  "wasmer-gui/webgpu",
+]
 # WebGPU for guests built against webgpu.h: on wgpu natively, on the
 # JavaScript realm's `navigator.gpu` in a browser.
 webgpu = [
   "sys",
   "dep:wasmer-webgpu",
   "wasmer-webgpu/wasix",
+]
+# Windows and input in a browser: canvases of the page as guests' windows.
+js-gui = [
+  "js",
+  "dep:wasmer-gui",
+  "wasmer-gui/js",
+  "wasmer-gui/wasix",
 ]
 js-webgpu = [
   "js",
@@ -66,6 +97,7 @@ wasmer-types = { version = "=7.4.0", default-features = false }
 wasmer-wasix = { version = "=0.704.0", default-features = false }
 wasmer-wasix-types = "=0.704.0"
 webc = { version = "=12.0.1", default-features = false, features = ["v3"] }
+wasmer-gui = { version = "=0.704.0", optional = true, default-features = false }
 wasmer-webgpu = { version = "=0.704.0", optional = true, default-features = false }
 wasmparser = { version = "=0.257.1", default-features = false, features = ["std", "simd"] }
 
@@ -82,6 +114,14 @@ http = "1.4"
 serde_json = "1.0"
 tempfile = "3.23"
 wat = "1.244"
+
+# Opens a real window, so it has a `main` of its own for the window system
+# to have the main thread, and only runs when asked to (see the file).
+[[test]]
+name = "gui_window"
+path = "tests/gui_window.rs"
+harness = false
+required-features = ["gui-window"]
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -206,6 +206,53 @@ shown in windows). `webgpu.usage()` reports what guests hold, and
 `webgpu.runtime_control().terminate_all()` stops their GPU work. Without the
 grant a program that imports WebGPU does not start.
 
+## Windows and input
+
+With the `gui` feature, a sandbox can be given a GUI. Programs built against
+`<wasmer/gui.h>` ([wasmerio/gui](https://github.com/wasmerio/gui)) then open
+windows and read keys, pointers, text and the clipboard.
+
+```rust
+use wasmer_sdk::gui::GuiCtx;
+
+let gui = GuiCtx::default(); // headless: windows work, and nobody sees them
+let sandbox = wasmer
+    .sandboxes()
+    .create()
+    .package(app)
+    .gui(gui.clone())
+    .await?;
+let output = sandbox.command("main").run().await?;
+```
+
+The context is the grant: what guests may do (`GuiPolicy`), how much
+(`GuiLimits`), and the window system their windows are in. Every command gets
+a scope of its own on it, so killing a command also stops it where it waits
+for input, and takes its windows away. Without the grant a program that
+opens windows does not start.
+
+With `gui-window`, the windows are the desktop's. A window system wants the
+process's main thread, so `main` hands it over and does its own work
+asynchronously:
+
+```rust
+fn main() -> wasmer_sdk::Result<()> {
+    wasmer_sdk::gui::run_main(|windows| async move {
+        let gui = GuiCtx::builder()
+            .window_system(std::sync::Arc::new(windows))
+            .build();
+        // ... create a sandbox with `.gui(gui)` and run its commands ...
+        Ok(())
+    })?
+}
+```
+
+`gui-webgpu` lets WebGPU guests draw on those windows: give the `WebGpuCtx`
+`windows.surfaces(None)` as its surface provider. On the desktop's windows
+(`gui-window`) it needs a wasmer-webgpu newer than the revision this
+workspace pins: the `webgpu-gui` branch of
+[wasmerio/webgpu](https://github.com/wasmerio/webgpu) has it.
+
 ## Examples
 
 Run the same guest programs used by the JavaScript and Python SDK examples:

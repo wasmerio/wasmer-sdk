@@ -1,5 +1,6 @@
 import "./node-compat.js";
 import init, {
+  closeGui,
   setSDKUrl,
   setWorkerUrl,
   WasmerCore,
@@ -16,7 +17,16 @@ import {
   type WebGpuCanvasProvider,
 } from "./webgpu-canvas.js";
 
+import { GuiWindows, type GuiOptions, type SandboxGui } from "./gui.js";
+
 export type { WebGpuCanvas, WebGpuCanvasProvider } from "./webgpu-canvas.js";
+export type {
+  GuiCanvasProvider,
+  GuiLimits,
+  GuiOptions,
+  GuiPermissions,
+  SandboxGui,
+} from "./gui.js";
 
 export interface WasmerOptions {
   outputBytes?: number;
@@ -140,6 +150,15 @@ export interface SandboxOptions {
    * Off by default, in which case such a program fails to start.
    */
   webgpu?: boolean | WebGpuOptions;
+  /**
+   * Grant commands windows and input: programs built against
+   * `<wasmer/gui.h>` then get canvases of the page as their windows, with
+   * the keyboard, pointers, text entry and the clipboard. With `webgpu`
+   * they draw on the same canvases. Off by default, in which case such a
+   * program fails to start. Needs a page: it is not available in Node or in
+   * a worker.
+   */
+  gui?: boolean | GuiOptions;
 }
 
 /** Ceilings on what one guest process may hold. Unset means unlimited. */
@@ -610,9 +629,13 @@ export class Wasmer {
     } else {
       builder.network(network.mode);
     }
+    let windows: GuiWindows | undefined;
     try {
       if (options.webgpu) {
         canvases = grantWebGpu(builder, options.webgpu === true ? {} : options.webgpu);
+      }
+      if (options.gui) {
+        windows = grantGui(builder, options.gui === true ? {} : options.gui, canvases);
       }
       if ((network.mode === "http" || network.mode === "wisp") && network.peers !== undefined) {
         builder.restrictNetworkPeers();
@@ -624,9 +647,10 @@ export class Wasmer {
         }
       }
       const core = await rethrow(builder.start());
-      return new Sandbox(this, core, options.shell, networkBridge, canvases);
+      return new Sandbox(this, core, options.shell, networkBridge, canvases, windows);
     } catch (error) {
       networkBridge?.close();
+      windows?.close();
       canvases?.close();
       throw error;
     }
@@ -760,9 +784,12 @@ export class Sandbox {
   readonly network: SandboxNetwork;
   /** The canvases guests may present to, when the sandbox has WebGPU. */
   readonly webgpu: SandboxWebGpu;
+  /** The canvases guests may have as windows, when the sandbox has a GUI. */
+  readonly gui: SandboxGui;
   readonly #core: SandboxCore;
   readonly #networkBridge: NetworkBridge | undefined;
   readonly #canvases: WebGpuCanvases | undefined;
+  readonly #windows: GuiWindows | undefined;
   #shell: CommandSelector | undefined;
 
   constructor(
@@ -771,6 +798,7 @@ export class Sandbox {
     shell?: CommandSelector,
     networkBridge?: NetworkBridge,
     canvases?: WebGpuCanvases,
+    windows?: GuiWindows,
   ) {
     this.#core = core;
     sandboxCores.set(this, core);
@@ -778,9 +806,11 @@ export class Sandbox {
     this.ports = new Ports(core);
     this.network = new SandboxNetworkService(networkBridge);
     this.webgpu = new SandboxWebGpuService(canvases);
+    this.gui = new SandboxGuiService(windows);
     this.#shell = shell;
     this.#networkBridge = networkBridge;
     this.#canvases = canvases;
+    this.#windows = windows;
   }
 
   command(
@@ -855,6 +885,8 @@ export class Sandbox {
       await rethrow(this.#core.close());
     } finally {
       this.#networkBridge?.close();
+      // The windows before the canvases: a window lets go of its canvas.
+      this.#windows?.close();
       this.#canvases?.close();
     }
   }
@@ -916,6 +948,58 @@ function grantWebGpu(
     throw error;
   }
   return canvases;
+}
+
+/** Validate a GUI grant and apply it to a sandbox under construction. */
+function grantGui(
+  builder: { gui(settings: unknown, page: unknown): void },
+  options: GuiOptions,
+  canvases: WebGpuCanvases | undefined,
+): GuiWindows {
+  if (typeof document === "undefined") {
+    throw new WasmerError(
+      "windows for guests are canvases of a page, and there is no page here",
+      "CAPABILITY_UNAVAILABLE",
+    );
+  }
+  let windows: GuiWindows;
+  try {
+    windows = new GuiWindows(options, canvases);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new WasmerError(error.message, "INVALID_ARGUMENT", { cause: error });
+    }
+    throw error;
+  }
+  rethrowSync(() => builder.gui(windows.settings(), windows.page()));
+  windows.opened(closeGui);
+  return windows;
+}
+
+class SandboxGuiService implements SandboxGui {
+  readonly #windows: GuiWindows | undefined;
+
+  constructor(windows?: GuiWindows) {
+    this.#windows = windows;
+  }
+
+  get enabled(): boolean {
+    return this.#windows !== undefined;
+  }
+
+  setCanvas(canvas: HTMLCanvasElement | undefined, target?: string): void {
+    if (!this.#windows) {
+      throw new WasmerError("this sandbox was not created with `gui`", "CAPABILITY_UNAVAILABLE");
+    }
+    try {
+      this.#windows.set(canvas, target);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new WasmerError(error.message, "INVALID_ARGUMENT", { cause: error });
+      }
+      throw error;
+    }
+  }
 }
 
 class SandboxWebGpuService implements SandboxWebGpu {

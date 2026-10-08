@@ -6,3 +6,7 @@
 	path = packages/webgpu
 	url = https://github.com/wasmerio/webgpu.git
 	branch = main
+[submodule "packages/gui"]
+	path = packages/gui
+	url = https://github.com/wasmerio/gui.git
+	branch = main

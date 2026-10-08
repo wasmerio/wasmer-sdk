@@ -33,7 +33,7 @@ virtual-mio = { version = "=0.704.0", default-features = false }
 wasm-bindgen = "0.2.120"
 wasm-bindgen-futures = "0.4"
 wasmer = { version = "=7.4.0", default-features = false, features = ["js", "js-default"] }
-wasmer-sdk = { path = "../../rust", default-features = false, features = ["js-napi", "js-webgpu"] }
+wasmer-sdk = { path = "../../rust", default-features = false, features = ["js-napi", "js-webgpu", "js-gui"] }
 wasmer-package = { version = "=0.704.0", default-features = false, features = ["execution", "webc-v3"] }
 wasmer-wasix = { version = "=0.704.0", default-features = false, features = ["js", "js-default"] }
 wasmer-wasix-types = "=0.704.0"

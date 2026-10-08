@@ -7,6 +7,7 @@ members = [
 default-members = ["rust"]
 exclude = [
     "packages/edgejs",
+    "packages/gui",
     "packages/napi",
     "packages/webgpu",
 ]
@@ -19,6 +20,7 @@ virtual-net = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d31
 wasmer = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
 wasmer-c-api-imports = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
 wasmer-config = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
+wasmer-gui = { git = "https://github.com/wasmerio/gui.git", rev = "d109be82f004dc408376306e768cb46622ca9714" }
 wasmer-napi = { git = "https://github.com/wasmerio/napi.git", rev = "bdc85884f24cd4d56976316bc778250dce4d5fc1" }
 wasmer-package = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }
 wasmer-types = { git = "https://github.com/wasmerio/wasmer.git", rev = "5bd2b7d3182e816bd0ea330acc88e4e4733e167f" }

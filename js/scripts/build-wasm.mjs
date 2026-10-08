@@ -67,6 +67,10 @@ run(
     "build-std=std,panic_abort",
     ...(localWasmer ? [] : ["--locked"]),
     ...localWasmerPatches,
+    // Windows and input are not where a guest's time goes: their host is
+    // built for size, which is what it costs every page that loads the SDK.
+    "--config",
+    'profile.release.package.wasmer-gui.opt-level="z"',
     "-p",
     "wasmer-sdk-js",
     "--target",

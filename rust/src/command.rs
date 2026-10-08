@@ -297,6 +297,29 @@ impl Command {
         let process_stderr = stderr_stream.map(ProcessStderr::new);
 
         let runtime: Arc<dyn Runtime + Send + Sync> = Arc::clone(&self.sandbox.inner.runtime);
+        // The command and whatever it spawns are one scope for the GUI: what
+        // is stopped as one, and whose windows go together.
+        #[cfg(any(
+            all(target_arch = "wasm32", feature = "js-gui"),
+            all(not(target_arch = "wasm32"), feature = "gui")
+        ))]
+        let gui_scope = self
+            .sandbox
+            .inner
+            .gui
+            .as_ref()
+            .map(wasmer_gui::GuiCtx::scope);
+        #[cfg(any(
+            all(target_arch = "wasm32", feature = "js-gui"),
+            all(not(target_arch = "wasm32"), feature = "gui")
+        ))]
+        let runtime: Arc<dyn Runtime + Send + Sync> = match &gui_scope {
+            Some(scope) => Arc::new(
+                wasmer_wasix::runtime::OverriddenRuntime::new(runtime)
+                    .with_instantiation_hook(scope.hooks()),
+            ),
+            None => runtime,
+        };
         let mut env = self.sandbox.inner.env.clone();
         env.extend(
             self.env
@@ -428,6 +451,13 @@ impl Command {
             stderr_capture,
             terminal_bridge,
         );
+        #[cfg(any(
+            all(target_arch = "wasm32", feature = "js-gui"),
+            all(not(target_arch = "wasm32"), feature = "gui")
+        ))]
+        if let Some(scope) = gui_scope {
+            process.control().attach_gui(scope);
+        }
         self.sandbox.register_process(process.control())?;
 
         if let Some(duration) = self.timeout {
