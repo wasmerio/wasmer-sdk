@@ -69,6 +69,22 @@ export interface GuiOptions {
    * canvas's CSS size, which the layout may still overrule.
    */
   resizable?: boolean;
+  /**
+   * `true` lets a guest that waits for events leave its worker free: the
+   * wait suspends (with JSPI and `Atomics.waitAsync`) instead of blocking.
+   * Whatever else the worker has to do then runs during the wait, such as
+   * completing the guest's WebGPU work, which ends the wait. Where the
+   * browser lacks either, waits block as they do by default.
+   */
+  suspendingWaits?: boolean;
+  /**
+   * `true` answers a window's request to redraw at once, instead of at the
+   * browser's next animation frame, when the user did something to the
+   * window since its last redraw: what the user did is shown about a frame
+   * sooner. A guest that draws frame after frame on its own still keeps to
+   * the animation frames. By default every redraw waits for one.
+   */
+  eagerRedraw?: boolean;
 }
 
 /** The windows of a sandbox that was granted a GUI. */
@@ -112,6 +128,11 @@ export class GuiWindows {
     if (options.onTitle !== undefined && typeof options.onTitle !== "function") {
       throw new TypeError("gui.onTitle must be a function");
     }
+    for (const name of ["suspendingWaits", "eagerRedraw"] as const) {
+      if (options[name] !== undefined && typeof options[name] !== "boolean") {
+        throw new TypeError(`gui.${name} must be a boolean`);
+      }
+    }
   }
 
   set(canvas: HTMLCanvasElement | undefined, target?: string): void {
@@ -131,6 +152,9 @@ export class GuiWindows {
     }
     for (const [name, value] of Object.entries(this.#options.limits ?? {})) {
       if (value !== undefined) settings[name] = value;
+    }
+    if (this.#options.suspendingWaits !== undefined) {
+      settings.suspendingWaits = this.#options.suspendingWaits;
     }
     return settings;
   }
@@ -155,6 +179,7 @@ export class GuiWindows {
       },
       title: this.#options.onTitle,
       resizable: this.#options.resizable !== false,
+      eagerRedraw: this.#options.eagerRedraw === true,
     };
   }
 

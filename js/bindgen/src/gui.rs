@@ -25,6 +25,8 @@ struct GuiSettings {
     /// `"deny"`, `"on-paste"` or `"allow"`.
     clipboard_read: Option<String>,
     raw_input: Option<bool>,
+    /// Waits that leave the guest's worker free (`GuiCtxBuilder::suspending_waits`).
+    suspending_waits: Option<bool>,
     max_windows: Option<f64>,
     max_pending_events: Option<f64>,
 }
@@ -76,6 +78,7 @@ impl GuiSettings {
                 )
             },
             raw_input: flag("rawInput")?,
+            suspending_waits: flag("suspendingWaits")?,
             max_windows: number("maxWindows")?,
             max_pending_events: number("maxPendingEvents")?,
         })
@@ -132,6 +135,7 @@ pub(crate) fn context(settings: JsValue, page: &JsValue) -> Result<GuiCtx, JsVal
         .window_system(Arc::new(windows))
         .policy(policy)
         .limits(limits)
+        .suspending_waits(settings.suspending_waits.unwrap_or(false))
         .build())
 }
 

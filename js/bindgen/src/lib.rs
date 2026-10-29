@@ -267,6 +267,8 @@ impl JsWasmer {
             inner: Some(self.inner.sandboxes().create()),
             browser_http: None,
             browser_networks: self.browser_networks.clone(),
+            webgpu: None,
+            gui_waker: None,
         }
     }
 
@@ -314,6 +316,11 @@ pub struct JsSandboxBuilder {
     inner: Option<SandboxBuilder>,
     browser_http: Option<BrowserHttpRequestHandler>,
     browser_networks: BrowserNetworkGroup,
+    /// The WebGPU grant, built at `start`: the GUI grant may come after it,
+    /// and WebGPU then wakes the guests' GUI waits.
+    webgpu: Option<wasmer_sdk::webgpu::WebGpuCtxBuilder>,
+    /// Ends the GUI waits of the sandbox's guests, once it has a GUI.
+    gui_waker: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 #[wasm_bindgen(js_class = SandboxBuilderCore)]
@@ -364,12 +371,15 @@ impl JsSandboxBuilder {
                 .transpose()?,
             ..wasmer_sdk::webgpu::WebGpuLimits::default()
         };
-        let ctx = wasmer_sdk::webgpu::WebGpuCtx::builder()
-            .limits(limits)
-            .force_fallback_adapter(options.force_fallback_adapter.unwrap_or(false))
-            .canvas_scope(options.canvas_scope)
-            .build();
-        self.inner = Some(self.take()?.webgpu(ctx));
+        if self.inner.is_none() {
+            return Err(consumed());
+        }
+        self.webgpu = Some(
+            wasmer_sdk::webgpu::WebGpuCtx::builder()
+                .limits(limits)
+                .force_fallback_adapter(options.force_fallback_adapter.unwrap_or(false))
+                .canvas_scope(options.canvas_scope),
+        );
         Ok(())
     }
 
@@ -380,7 +390,9 @@ impl JsSandboxBuilder {
     /// canvases.
     pub fn gui(&mut self, settings: JsValue, page: JsValue) -> Result<(), JsValue> {
         let ctx = gui::context(settings, &page)?;
+        let waker = ctx.event_waker();
         self.inner = Some(self.take()?.gui(ctx));
+        self.gui_waker = Some(waker);
         Ok(())
     }
 
@@ -489,7 +501,17 @@ impl JsSandboxBuilder {
     }
 
     pub async fn start(mut self) -> Result<JsSandbox, JsValue> {
-        let builder = self.take()?;
+        let mut builder = self.take()?;
+        if let Some(webgpu) = self.webgpu.take() {
+            // A guest waiting for window events also wakes for its WebGPU
+            // events, as a native embedder arranges by handing WebGPU the
+            // GUI's waker.
+            let webgpu = match self.gui_waker.take() {
+                Some(wake) => webgpu.event_waker(wake),
+                None => webgpu,
+            };
+            builder = builder.webgpu(webgpu.build());
+        }
         builder
             .await
             .map(|inner| JsSandbox {
@@ -502,10 +524,12 @@ impl JsSandboxBuilder {
 
 impl JsSandboxBuilder {
     fn take(&mut self) -> Result<SandboxBuilder, JsValue> {
-        self.inner
-            .take()
-            .ok_or_else(|| custom_error("TARGET_ERROR", "sandbox builder was already consumed"))
+        self.inner.take().ok_or_else(consumed)
     }
+}
+
+fn consumed() -> JsValue {
+    custom_error("TARGET_ERROR", "sandbox builder was already consumed")
 }
 
 #[derive(serde::Serialize)]

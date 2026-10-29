@@ -309,6 +309,13 @@ SDK does. They need a page: creating the sandbox fails with
 `CAPABILITY_UNAVAILABLE` in Node and in a worker. Without the `gui` option a
 program that opens windows does not start.
 
+Two options trade that default for speed. With `gui.suspendingWaits: true` a
+guest waiting for input leaves its worker free, where the browser has JSPI
+and `Atomics.waitAsync`: whatever else the worker has to do runs meanwhile,
+and with `webgpu` a GPU result the guest is owed ends the wait. With
+`gui.eagerRedraw: true` a window is told to redraw at once, rather than at
+the next animation frame, when that answers something the user did.
+
 ### Local TCP between browser sandboxes
 
 Browser sandboxes with `network: { mode: "http" }` or `"wisp"` share virtual

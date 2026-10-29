@@ -320,7 +320,13 @@ test("a sandbox without a GUI has no windows to give", { timeout: 120_000, skip 
       } catch (error) {
         unknown = error.code;
       }
-      return { enabled: sandbox.gui.enabled, refused, invalid, unknown };
+      let notBoolean;
+      try {
+        await client.sandboxes.create({ gui: { suspendingWaits: "yes" } });
+      } catch (error) {
+        notBoolean = error.code;
+      }
+      return { enabled: sandbox.gui.enabled, refused, invalid, unknown, notBoolean };
     } finally {
       await sandbox?.close();
       await client.close();
@@ -332,6 +338,7 @@ test("a sandbox without a GUI has no windows to give", { timeout: 120_000, skip 
     refused: "CAPABILITY_UNAVAILABLE",
     invalid: "INVALID_ARGUMENT",
     unknown: "INVALID_ARGUMENT",
+    notBoolean: "INVALID_ARGUMENT",
   });
   assert.deepEqual(errors, []);
 });
