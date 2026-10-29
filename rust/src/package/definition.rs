@@ -79,8 +79,6 @@ impl PackageDefinition {
                 )
             })
             .collect();
-        let file_system_memory_footprint =
-            self.files.values().map(|bytes| bytes.len() as u64).sum();
         let package_mounts = if self.files.is_empty() {
             None
         } else {
@@ -102,7 +100,6 @@ impl PackageDefinition {
             package_mounts,
             commands,
             uses: vec![],
-            file_system_memory_footprint,
             additional_host_mapped_directories: vec![],
         }))
     }

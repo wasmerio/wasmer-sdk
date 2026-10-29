@@ -2,7 +2,7 @@
 name = "wasmer-sdk-js"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.96"
 description = "wasm-bindgen facade for wasmer-sdk"
 license-file = "LICENSE"
 publish = false
@@ -28,16 +28,16 @@ serde_bytes = "0.11"
 serde-wasm-bindgen = "0.6"
 tokio = { version = "1.49", default-features = false, features = ["io-util", "sync"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
-virtual-net = { version = "=0.704.0", default-features = false }
-virtual-mio = { version = "=0.704.0", default-features = false }
+virtual-net = { version = "=0.705.0", default-features = false }
+virtual-mio = { version = "=0.705.0", default-features = false }
 wasm-bindgen = "0.2.120"
 wasm-bindgen-futures = "0.4"
-wasmer = { version = "=7.4.0", default-features = false, features = ["js", "js-default"] }
+wasmer = { version = "=7.5.0", default-features = false, features = ["js", "js-default"] }
 wasmer-sdk = { path = "../../rust", default-features = false, features = ["js-napi", "js-webgpu", "js-gui"] }
-wasmer-package = { version = "=0.704.0", default-features = false, features = ["execution", "webc-v3"] }
-wasmer-wasix = { version = "=0.704.0", default-features = false, features = ["js", "js-default"] }
-wasmer-wasix-types = "=0.704.0"
-wasmer-types = "=7.4.0"
+wasmer-package = { version = "=0.705.0", default-features = false, features = ["execution"] }
+wasmer-wasix = { version = "=0.705.0", default-features = false, features = ["js", "js-default"] }
+wasmer-wasix-types = "=0.705.0"
+wasmer-types = "=7.5.0"
 webc = { version = "=12.0.1", default-features = false, features = ["v3"] }
 
 [dependencies.web-sys]
