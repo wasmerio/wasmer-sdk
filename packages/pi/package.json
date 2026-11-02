@@ -2,5 +2,5 @@
   "name": "wasmer-pi-runtime",
   "version": "0.87.1",
   "private": true,
-  "dependencies": { "@earendil-works/pi-coding-agent": "0.87.1" }
+  "dependencies": { "@earendil-works/pi-coding-agent": "1.5.0" }
 }
