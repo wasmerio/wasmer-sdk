@@ -13,6 +13,11 @@ license-file = "../../LICENSE"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+bytes = "=1.12.1"
+semver = "1"
+sha2 = "=0.11.0"
+wasmparser = { version = "=0.259.0", default-features = false }
+webc = { version = "=12.0.1", default-features = false, features = ["v2", "v3"] }
 futures-util = "0.3"
 js-sys = "=0.3.106"
 serde = { version = "1", features = ["derive"] }

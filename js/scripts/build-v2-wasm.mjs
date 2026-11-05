@@ -49,7 +49,7 @@ const rustflags = [
   ...["__wasm_init_tls", "__tls_size", "__tls_align", "__tls_base"].map(name => `-Clink-arg=--export=${name}`),
 ].join(" ");
 run("taskset", ["-c", process.env.WASIX_BROWSER_CPUS ?? "4-7", cargo,
-  "build", "--locked", "--offline", "--manifest-path", manifest, ...patches,
+  "build", "--offline", "--locked", "--manifest-path", manifest, ...patches,
   "-Zbuild-std=std,panic_abort", "--target", "wasm32-unknown-unknown", "-j3"], {
   env: { RUSTC: rustc, CARGO_INCREMENTAL: "0", CARGO_TARGET_DIR: taskTarget, RUSTFLAGS: rustflags },
 });

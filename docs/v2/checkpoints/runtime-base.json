@@ -1,0 +1,9 @@
+{
+  "runtime": "/home/user/dev/github.com/wasmerio/wasmer-wt/parity-delivery",
+  "revision": "25e60218af5d165727f7cdb06439fd61464ef8e4",
+  "files": {
+    "lib/wasixv2/api/src/browser.rs": "39329460924c1ba9479c7f48e13d785d4fb37394c1ed7aa5bfb11d520f8e9dc9",
+    "lib/wasixv2/api/src/package.rs": "409c2387f4fc1f8307844972fa0eb2907597389bd096f7ec330484f84f238de8",
+    "lib/wasixv2/api/src/lib.rs": "2cd81e11bc3d049fc6e1c8468699256613dca6e914b19470152cdec7a42f02ff"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "sdk": "/home/user/dev/github.com/wasmerio/wasmer-sdk-wt/parity-browser-core",
+  "sdkHead": "c352b08566e1564362c747758e3fe440e9d01a33",
+  "files": {
+    ".gitignore": "6a4ed03c6e4753e1559c0c698c43351592a1a07e385cf8d2340a330f7b912654",
+    "js/package.json": "846934eb56b180937b4526a137672f8f9dc340f0148347bb903366bbcdeb77ca",
+    "js/src/index.ts": "ae6dfe3e08139fa7cb0fed5eefe0b65653fa259b58cdcd2d55236e3a96e3122a",
+    "js/src/core.ts": "633824b626e1d68b7091eec449be9e2786a2463fe466b790651a1910605661b5",
+    "docs/v2/browser-core-adaptation.md": "2806df76ea982d401629ca7d5d05650cf7ed3f65d5aa9e73ead856b0588a67fc",
+    "js/scripts/build-v2-wasm.mjs": "0ea16030bdb76bfdfc36368c8e04756c78d12259d9f365505c20cf90cb44c76f",
+    "js/tsconfig.v2.json": "cd6260baa12f7765257e1401f16784e0da6cfaab780a381f2519687006ca4cf3",
+    "js/src/v2/runtime.ts": "defe54ebe2337852b2245f91bbf19299676c474918f55c92be5d4d3aebef7565",
+    "js/src/v2/raw-core.ts": "43ebd8405ceedaab184552ca0463a95c87e153594b82fe74b8dd2b5bde9b37ff",
+    "js/tests/browser-v2-core.test.mjs": "ad75dfb91edcd38280bc9a3efee4f088fb33b1abb42b5e8d892fc0c2f1b7b7fc",
+    "js/v2-bindgen/Cargo.toml": "d58d2dc1f042d4226cf4752252bf4469d8103ab17a2ba141fbdeadd6084b40c6",
+    "js/v2-bindgen/src/lib.rs": "2170b58e1cd981eb1a090918b2bb35af2b23749c49bdda6bf153ae73af3b6749",
+    "js/v2-bindgen/src/driver.rs": "ea990fa124709e8e6a94304000e8253b4c15668959762cb57ef287d4ea43e69d",
+    "js/v2-bindgen/src/resources.rs": "79a7db0c6c3561b4dc222fe09fcdd3fea7d53f376f2f503a4811c30542fa1f57",
+    "js/v2-bindgen/Cargo.lock": "2009282a23b2d52cd6e8d49fa231336c5caaaf1cf8cfadfe70c393f205f2b1ad",
+    "js/tsconfig.json": "5deb9b585922d543a15cdace49a5d522632bb4c558c5c459f627a236bf471f69",
+    "LICENSE": "6350e730ed61a3ec83b5843634aa0a476505ec9b96792600606ced736835b45c"
+  },
+  "state": "RAM source candidate only; no compiler/build/browser/default activation"
+}

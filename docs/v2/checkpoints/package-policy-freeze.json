@@ -1,0 +1,33 @@
+{
+  "stage": "RAM source-only package/public Core policy candidate, not executable public activation",
+  "runtimeBase": "25e60218af5d165727f7cdb06439fd61464ef8e4",
+  "files": {
+    "js/src/api-types.ts": "bb15c1c34148dca0288204e81f3e0dc0851e4c49b727e89eaa98e9ca66df1fca",
+    "js/src/core.ts": "147282c5f9cdeb056492dfc2c2bf0ddeccacf7a639e46af9cb287c2bdbc69400",
+    "js/src/index.ts": "3837b4eb562042490fdaf2418ea32e7df4fc16d6a966bc1f88b482f2c4d19c84",
+    "js/src/v2/packages.ts": "729ce5a0a4e152f60f573828a9c26fe47c774b8bde7d6dbeafba92a88a97febf",
+    "js/src/v2/commands.ts": "0a369278e855a6df402b46b1aea82478dd83d3ed103828de9dd28cbd53f67995",
+    "js/v2-bindgen/Cargo.toml": "9c34d21cf9f1c570323c7461e20004055f12e6010984c45b6e26097d5f9e4529",
+    "js/v2-bindgen/src/lib.rs": "aa0171c4dd4ce5993dd5d4b3d12ca3b17d0e26311357b41233929f9e8dc1ff82",
+    "js/v2-bindgen/src/resources.rs": "d8f41a44aa788d0ddfd85772e8e5dacce9dd596dbe1f999b42df6217438e55dc",
+    "js/v2-bindgen/src/package.rs": "9d37ad8ee44e41bbd7fc76db9609a7e11b73588b9dca1fc54face5139a68238b",
+    "js/v2-bindgen/src/capture.rs": "e895a04c215f88ed5bf3916b1d0dd4432901644f2c9ddbfdf7d3fe2258e4008d",
+    "js/scripts/build-v2-wasm.mjs": "3ba83f17305113058ee11844546859624b5d3889f6f0162777ae7bea4d5d76b4",
+    "fixture-producer/Cargo.toml": "6e83b7ae4fb4daa321c6a741216baaf64ce43fb8d4c80051691068464f3c2878",
+    "fixture-producer/src/main.rs": "43234b6ffa06cba0249262ddd275bb8f3f504f6bd31e47ba97a649b7c54c5096",
+    "docs/v2/public-package-candidate.md": "1f489e4df3e516594607c43ae4775a18b987dcf09bbf725143fef1b52ced640f"
+  },
+  "patchSha256": "0abf81600053904ee7b39d9a31772ddd3782ab73166ec756ce4bec7146fbace0",
+  "runtimeSeamsSha256": "9953f25d16bc6328f196a8a26cf6e0ea39afc46d562435e282d00395256278e0",
+  "lockStatus": "Candidate Cargo.toml has new pure dependencies. RAM Cargo.lock remains validated raw baseline and needs a scheduled offline resolver refresh after source review. Runtime seam symbols also need a reviewed published producer pin.",
+  "checks": [
+    "existing direct Rust1.96 rustfmt --check only; no compiler or browser"
+  ],
+  "pending": [
+    "independent facade seam CODE review",
+    "mutable assembly cancellation marker agreement",
+    "public retained-output producer-seal agreement",
+    "actual execution binding, full Sandbox/Core composition and acquisition adaptation",
+    "scheduled raw browser baseline and package acceptance"
+  ]
+}

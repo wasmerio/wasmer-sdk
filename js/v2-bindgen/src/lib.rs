@@ -3,6 +3,8 @@
 mod driver;
 #[cfg(target_arch = "wasm32")]
 mod resources;
+#[cfg(target_arch = "wasm32")]
+mod package;
 
 #[cfg(target_arch = "wasm32")]
 pub use driver::*;

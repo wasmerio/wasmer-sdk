@@ -3,7 +3,7 @@ import type {
   FileStat,
   PackageDefinition,
   PackageLoadProgress,
-} from "./index.js";
+} from "./api-types.js";
 
 // The handwritten API depends on this seam, not wasm-bindgen object ownership.
 // Browser v2 and the existing target adapters implement the same contracts.

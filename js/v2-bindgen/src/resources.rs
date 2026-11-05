@@ -1,6 +1,6 @@
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     future::poll_fn,
     io,
     rc::Rc,
@@ -14,6 +14,7 @@ use std::{
 
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use wasixv2::{Engine, Machine, Net, NetConfig, ProcessConfig, browser};
 use wasixv2_abi::OpenFlags;
 use wasixv2_host::{
@@ -29,7 +30,7 @@ type Reply = Result<(Value, Vec<u8>), String>;
 
 enum Buffer {
     Uploading(Vec<u8>),
-    Ready(Arc<[u8]>),
+    Ready(bytes::Bytes),
 }
 
 struct Reservation {
@@ -228,6 +229,7 @@ pub(crate) struct Resources {
     buffers: HashMap<u32, Buffer>,
     directories: HashMap<u32, Arc<browser::WebFs>>,
     files: HashMap<u32, Arc<File>>,
+    packages: HashMap<u32, Arc<crate::package::Package>>,
     reservations: HashMap<u32, Reservation>,
     processes: HashMap<u32, Rc<Process>>,
     launches: HashMap<u32, Rc<Launch>>,
@@ -248,6 +250,7 @@ impl Resources {
             buffers: HashMap::new(),
             directories: HashMap::new(),
             files: HashMap::new(),
+            packages: HashMap::new(),
             reservations: HashMap::new(),
             processes: HashMap::new(),
             launches: HashMap::new(),
@@ -276,10 +279,16 @@ impl Resources {
             Ok(id) => id,
             Err(error) => return Value::String(error),
         };
-        let bytes: Arc<[u8]> = error.into_bytes().into();
+        let bytes: bytes::Bytes = error.into_bytes().into();
         let size = bytes.len();
         self.buffers.insert(id, Buffer::Ready(bytes));
         json!({"buffer":id,"size":size})
+    }
+    fn buffer(&self, id: u32) -> Result<wasixv2::OwnedBuffer, String> {
+        match self.buffers.get(&id) {
+            Some(Buffer::Ready(bytes)) => Ok(wasixv2::OwnedBuffer::from_bytes(bytes.clone())),
+            _ => Err("unknown SDK sealed buffer".into()),
+        }
     }
     fn process(&self, id: u32) -> Result<Rc<Process>, String> {
         self.processes
@@ -349,6 +358,9 @@ pub(crate) async fn execute(owner: Rc<RefCell<Resources>>, request: Request) -> 
         return Err("SDK client is closing".into());
     }
     match operation.as_str() {
+        "package_create" | "package_load" | "package_binary" => {
+            package_operation(owner, &operation, handle, metadata).await
+        }
         "buffer_new" => {
             let mut state = owner.borrow_mut();
             let id = state.id()?;
@@ -576,6 +588,7 @@ pub(crate) async fn execute(owner: Rc<RefCell<Resources>>, request: Request) -> 
             state.files.clear();
             state.buffers.clear();
             state.directories.clear();
+            state.packages.clear();
             // Retain completed handles until the driver drops Resources, so
             // already-admitted kill/control requests remain idempotent.
             // Unused reservations never constructed a Machine or service.
@@ -903,4 +916,155 @@ fn finish_launch(
         }
     }
     launch.finish();
+}
+
+#[derive(Deserialize)]
+struct DefinitionHandles {
+    modules: BTreeMap<String, u32>,
+    commands: BTreeMap<String, crate::package::CommandDefinition>,
+    entrypoint: Option<String>,
+    #[serde(default)]
+    files: BTreeMap<String, u32>,
+}
+
+#[derive(Deserialize)]
+struct ArchiveHandles {
+    buffer: u32,
+    #[serde(default)]
+    dependencies: BTreeMap<String, u32>,
+}
+
+async fn package_operation(
+    owner: Rc<RefCell<Resources>>,
+    operation: &str,
+    handle: u32,
+    metadata: Value,
+) -> Reply {
+    use crate::package::{Archive, DefinitionInput, Package, PackageError};
+    let result: crate::package::Result<Value> = async {
+        let metadata = if let Some(config) = metadata.get("config") {
+            let config = config
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok())
+                .ok_or_else(|| PackageError {
+                    code: "INVALID_ARGUMENT",
+                    message: "invalid package configuration".into(),
+                })?;
+            let bytes = owner.borrow().buffer(config).map_err(PackageError::load)?;
+            serde_json::from_slice(&bytes).map_err(|e| PackageError {
+                code: "INVALID_ARGUMENT",
+                message: e.to_string(),
+            })?
+        } else {
+            metadata
+        };
+        if operation == "package_binary" {
+            let name = text(&metadata, "command").map_err(PackageError::load)?;
+            let package = owner
+                .borrow()
+                .packages
+                .get(&handle)
+                .cloned()
+                .ok_or_else(|| PackageError::load("unknown SDK package"))?;
+            let bytes = package.binary(name)?;
+            let hash = Sha256::digest(&bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            let mut state = owner.borrow_mut();
+            let id = state.id().map_err(PackageError::load)?;
+            state.buffers.insert(id, Buffer::Ready(bytes.into_bytes()));
+            return Ok(json!({"buffer":id,"hash":hash}));
+        }
+        let clock = Arc::new(HostClock(owner.borrow().host.clone()));
+        let package = if operation == "package_create" {
+            let config: DefinitionHandles =
+                serde_json::from_value(metadata).map_err(|e| PackageError {
+                    code: "INVALID_ARGUMENT",
+                    message: e.to_string(),
+                })?;
+            let (modules, files) = {
+                let state = owner.borrow();
+                let read = |items: BTreeMap<String, u32>| {
+                    items
+                        .into_iter()
+                        .map(|(name, id)| {
+                            state
+                                .buffer(id)
+                                .map(|bytes| (name, bytes))
+                                .map_err(PackageError::load)
+                        })
+                        .collect::<crate::package::Result<BTreeMap<_, _>>>()
+                };
+                (read(config.modules)?, read(config.files)?)
+            };
+            DefinitionInput {
+                modules,
+                commands: config.commands,
+                entrypoint: config.entrypoint,
+                files,
+            }
+            .materialize(clock)
+            .await?
+        } else {
+            let config: ArchiveHandles =
+                serde_json::from_value(metadata).map_err(PackageError::load)?;
+            let bytes = owner
+                .borrow()
+                .buffer(config.buffer)
+                .map_err(PackageError::load)?;
+            if bytes.starts_with(b"\0asm") {
+                if !config.dependencies.is_empty() {
+                    return Err(PackageError::load(
+                        "raw module sources do not declare WEBC dependency aliases",
+                    ));
+                }
+                DefinitionInput::raw(bytes).materialize(clock).await?
+            } else {
+                let dependencies = {
+                    let state = owner.borrow();
+                    config
+                        .dependencies
+                        .into_iter()
+                        .map(
+                            |(alias, id)| match state.packages.get(&id).map(Arc::as_ref) {
+                                Some(Package::Webc(package)) => Ok((alias, package.clone())),
+                                _ => Err(PackageError::load(
+                                    "supplied WEBC dependency is not an archive package",
+                                )),
+                            },
+                        )
+                        .collect::<crate::package::Result<BTreeMap<_, _>>>()?
+                };
+                Package::Webc(Arc::new(Archive::from_bytes(bytes, dependencies)?))
+            }
+        };
+        let mut state = owner.borrow_mut();
+        if state.closing {
+            return Err(PackageError {
+                code: "CLIENT_CLOSED",
+                message: "SDK client is closing".into(),
+            });
+        }
+        let id = state.id().map_err(PackageError::load)?;
+        let mut metadata = serde_json::to_value(package.metadata()).map_err(PackageError::load)?;
+        metadata
+            .as_object_mut()
+            .expect("package metadata object")
+            .insert("handle".into(), json!(id));
+        state.packages.insert(id, Arc::new(package));
+        Ok(metadata)
+    }
+    .await;
+    // All package metadata/diagnostics use the existing owned-buffer channel,
+    // so command lists and source names cannot widen the root/event frame.
+    let payload = match result {
+        Ok(value) => json!({"ok":true,"value":value}),
+        Err(error) => json!({"ok":false,"error":error}),
+    };
+    let bytes = serde_json::to_vec(&payload).map_err(error)?;
+    let mut state = owner.borrow_mut();
+    let id = state.id()?;
+    state.buffers.insert(id, Buffer::Ready(bytes.into()));
+    done(json!({"payload":id}))
 }
