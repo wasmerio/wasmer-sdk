@@ -2,13 +2,16 @@ import "./node-compat.js";
 import init, {
   setSDKUrl,
   setWorkerUrl,
-  WasmerCore,
+  WasmerCore as BindgenWasmerCore,
   PackageLoadCancellation as CorePackageLoadCancellation,
-  type CommandCore,
-  type PackageCore,
-  type ProcessCore,
-  type SandboxCore,
 } from "../pkg/wasmer_sdk_js.js";
+import type {
+  CommandCore,
+  PackageCore,
+  ProcessCore,
+  SandboxCore,
+  WasmerCore,
+} from "./core.js";
 
 export interface WasmerOptions {
   outputBytes?: number;
@@ -404,7 +407,7 @@ export class Wasmer {
     await browserInitialization;
     setSDKUrl(new URL("../pkg/wasmer_sdk_js.js", import.meta.url).href);
     setWorkerUrl(new URL("./browser-worker.js", import.meta.url).href);
-    return WasmerCore.create({
+    return BindgenWasmerCore.create({
       outputBytes: options.outputBytes,
       parallelism: options.parallelism ?? 2,
       cache: browserCacheOptions(options.cache),

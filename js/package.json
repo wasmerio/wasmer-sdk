@@ -43,6 +43,8 @@
   ],
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
+    "build:wasm:v2": "node scripts/build-v2-wasm.mjs",
+    "build:ts:v2": "tsc -p tsconfig.v2.json",
     "build:ts": "tsc -p tsconfig.json",
     "build": "npm run build:wasm && npm run check:size && npm run build:ts",
     "check:size": "node scripts/check-wasm-size.mjs",
