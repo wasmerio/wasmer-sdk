@@ -225,7 +225,12 @@ jobs:
     name: Browser
     needs: javascript
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
+    container:
+      # Match the Playwright versions in js/ and wasmer-sh/. The image
+      # includes browser libraries, avoiding slow apt mirrors on each run.
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@v6
 
@@ -239,9 +244,16 @@ jobs:
         working-directory: js
         run: npm ci
 
-      - name: Install browsers
+      - name: Verify installed browsers
         working-directory: js
-        run: npx playwright install --with-deps chromium firefox webkit
+        run: |
+          node --input-type=module -e '
+            import { accessSync } from "node:fs";
+            import { chromium, firefox, webkit } from "playwright";
+            for (const browser of [chromium, firefox, webkit]) {
+              accessSync(browser.executablePath());
+            }
+          '
 
       - uses: actions/download-artifact@v4
         with:
@@ -257,7 +269,6 @@ jobs:
         run: |
           npm ci
           npm install --no-save --package-lock=false ../js
-          npx playwright install --with-deps chromium
           WASMER_EXAMPLE=postgres,pi npm run test:examples
 
   python:
