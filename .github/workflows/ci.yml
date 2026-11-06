@@ -46,6 +46,10 @@ jobs:
     name: Shell (published SDK)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    container:
+      # Match wasmer-sh/pnpm-lock.yaml; avoid downloading system libraries.
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -60,9 +64,14 @@ jobs:
       - name: Build deployment output
         working-directory: wasmer-sh
         run: pnpm run build
-      - name: Install browser
+      - name: Verify installed browser
         working-directory: wasmer-sh
-        run: pnpm exec playwright install --with-deps chromium
+        run: |
+          node --input-type=module -e '
+            import { accessSync } from "node:fs";
+            import { chromium } from "playwright";
+            accessSync(chromium.executablePath());
+          '
       - name: Test production shell startup
         working-directory: wasmer-sh
         run: pnpm run test:production
