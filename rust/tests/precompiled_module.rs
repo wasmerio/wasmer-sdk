@@ -78,3 +78,45 @@ async fn missing_precompiled_modules_have_a_distinct_error_even_with_a_compiler(
     }
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_artifact_does_not_fall_back_to_compiling_empty_bytes() -> Result<()> {
+    fn artifact(dir: &std::path::Path) -> std::path::PathBuf {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                return artifact(&path);
+            }
+            if path.extension().is_some_and(|extension| extension == "bin") {
+                return path;
+            }
+        }
+        panic!("missing compiled artifact in {}", dir.display());
+    }
+    let cache = TempDir::new()?;
+    let engine = wasmer::Engine::default();
+    let bytes =
+        wat::parse_str("(module (memory (export \"memory\") 1) (func (export \"_start\")))")
+            .unwrap();
+    let digest: [u8; 32] = Sha256::digest(&bytes).into();
+    let compiler = Wasmer::with_engine(config(&cache), engine.clone())?;
+    compiler.packages().precompile(bytes).await?;
+    compiler.shutdown().await?;
+    std::fs::write(
+        artifact(&cache.path().join("cache-v1/compiled")),
+        b"invalid artifact",
+    )?;
+    let runtime = Wasmer::with_engine(config(&cache), runtime_engine(&engine))?;
+    let sandbox = runtime
+        .sandboxes()
+        .create()
+        .package(PackageSource::precompiled_module(digest))
+        .await?;
+    assert_eq!(
+        sandbox.command("main").run().await.unwrap_err().code(),
+        "MODULE_NOT_COMPILED"
+    );
+    sandbox.close().await?;
+    runtime.shutdown().await?;
+    Ok(())
+}
