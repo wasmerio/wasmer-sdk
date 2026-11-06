@@ -2,13 +2,20 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { chromium } from "playwright";
+import { chromium, firefox, webkit } from "playwright";
 import { startAppServer } from "./support/browser-servers.mjs";
 
-test("raw module loading uses native digests, preserves snapshots, and falls back", { timeout: 60_000 }, async context => {
+const browsers = { chromium, firefox, webkit };
+for (const name of (process.env.WASMER_TEST_BROWSERS ?? "chromium,firefox,webkit").split(",")) {
+  test(`raw module loading uses native digests, preserves snapshots, and falls back in ${name}`,
+    { timeout: 60_000 }, context => checkDigests(context, browsers[name]));
+}
+
+async function checkDigests(context, browserType) {
   const server = await startAppServer();
-  const browser = await chromium.launch({ headless: true });
-  context.after(async () => { await browser.close(); await server.close(); });
+  let browser;
+  context.after(async () => { await browser?.close(); await server.close(); });
+  browser = await browserType.launch({ headless: true });
   const page = await browser.newPage();
   await page.goto(server.url);
   const bytes = await readFile(new URL("../../swift/Tests/WasmerSDKTests/Fixtures/hello.wasm", import.meta.url));
@@ -85,4 +92,4 @@ test("raw module loading uses native digests, preserves snapshots, and falls bac
   assert.equal(result.text, "Hello from Swift!\n");
   assert.equal(result.rawHash, createHash("sha256").update(bytes).digest("hex"));
   assert.equal(result.cancellation, "AbortError");
-});
+}
