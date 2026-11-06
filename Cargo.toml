@@ -12,20 +12,20 @@ exclude = [
 resolver = "2"
 
 [patch.crates-io]
-virtual-fs = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
-virtual-mio = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
-virtual-net = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
-wasmer = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
-wasmer-c-api-imports = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
-wasmer-config = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
-wasmer-napi = { git = "https://github.com/wasmerio/napi.git", rev = "8426b5ecfa89211f18d2df7976ea3a3d9ec6109b" }
-wasmer-package = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
-wasmer-types = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
-wasmer-wasix = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
-wasmer-wasix-types = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
+virtual-fs = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
+virtual-mio = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
+virtual-net = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
+wasmer = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
+wasmer-c-api-imports = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
+wasmer-config = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
+wasmer-napi = { git = "https://github.com/wasmerio/napi.git", rev = "f82229cc9cc794448ac0df94cebed5cf8ed4b761" }
+wasmer-package = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
+wasmer-types = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
+wasmer-wasix = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
+wasmer-wasix-types = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
 
 # NAPI's vendored manifest uses sibling Wasmer crates. Resolve those
 # dependencies from the same runtime revision as the rest of this workspace.
 [patch."https://github.com/wasmerio/napi.git"]
-wasmer = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
-wasmer-wasix = { git = "https://github.com/wasmerio/wasmer.git", rev = "26230b0676ccf07def18586b5d0781b66d96ec9c" }
+wasmer = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
+wasmer-wasix = { git = "https://github.com/wasmerio/wasmer.git", rev = "33949cba0410b783790fa66b14faf8a6e9ef430a" }
