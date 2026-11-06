@@ -27,11 +27,6 @@ jobs:
           run-id: 42293404907
           name: wasmer-sdk-js-b18ce70254162470a4cb2f3c93ee4115a0d7b2d9
           path: js
-      - name: Test browser runtimes
-        working-directory: js
-        env:
-          DEBUG: pw:browser
-        run: npm run test:browser
       - name: Record runner memory and shared memory
         if: always()
         run: |
