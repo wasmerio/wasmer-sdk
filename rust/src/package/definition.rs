@@ -46,17 +46,42 @@ impl PackageDefinition {
         }
     }
 
-    pub(crate) async fn into_package(mut self) -> Result<Package> {
-        self.validate()?;
+    pub(crate) async fn into_package(self) -> Result<Package> {
+        self.into_package_with_digests(BTreeMap::new(), false).await
+    }
+
+    /// `into_package`, with the SHA-256 of some modules already known. Each
+    /// module is hashed at most once: its digest is both its `ModuleHash` and
+    /// its part of the package hash.
+    pub(crate) async fn into_package_with_digests(
+        mut self,
+        mut digests: BTreeMap<String, [u8; 32]>,
+        validated: bool,
+    ) -> Result<Package> {
+        // Only the single raw module can carry a caller's validation result.
+        // Definitions created by the public package API always validate all
+        // module formats and exports.
+        let checked = validated && self.modules.len() == 1 && digests.len() == 1;
+        self.validate(if checked {
+            digests.keys().next().map(String::as_str)
+        } else {
+            None
+        })?;
         if self.entrypoint.is_none() && self.commands.len() == 1 {
             self.entrypoint = self.commands.keys().next().cloned();
         }
-        let id = PackageId::Hash(PackageHash::from_sha256_bytes(self.hash()));
+        digests.retain(|name, _| self.modules.contains_key(name));
+        for (name, bytes) in &self.modules {
+            digests
+                .entry(name.clone())
+                .or_insert_with(|| Sha256::digest(bytes).into());
+        }
+        let id = PackageId::Hash(PackageHash::from_sha256_bytes(self.hash(&digests)));
         let atoms: BTreeMap<_, _> = self
             .modules
             .into_iter()
             .map(|(name, bytes)| {
-                let hash = ModuleHash::sha256(&bytes);
+                let hash = ModuleHash::from_bytes(digests[&name]);
                 (name, (webc::compat::SharedBytes::from(bytes), hash))
             })
             .collect();
@@ -104,7 +129,7 @@ impl PackageDefinition {
         }))
     }
 
-    fn validate(&self) -> Result<()> {
+    fn validate(&self, checked_module: Option<&str>) -> Result<()> {
         if self.commands.is_empty() {
             return Err(invalid(
                 "a package definition must contain at least one command",
@@ -113,7 +138,10 @@ impl PackageDefinition {
         let mut starts = BTreeMap::new();
         for (name, bytes) in &self.modules {
             validate_name("module", name)?;
-            starts.insert(name, module_has_start(name, bytes)?);
+            starts.insert(
+                name,
+                checked_module == Some(name.as_str()) || module_has_start(name, bytes)?,
+            );
         }
         for (name, command) in &self.commands {
             validate_name("command", name)?;
@@ -163,13 +191,15 @@ impl PackageDefinition {
         Ok(())
     }
 
-    fn hash(&self) -> [u8; 32] {
+    /// `digests` holds the SHA-256 of every module. v2 hashes modules by
+    /// their digest, so the package hash does not read module bytes again.
+    fn hash(&self, digests: &BTreeMap<String, [u8; 32]>) -> [u8; 32] {
         let mut hash = Sha256::new();
-        hash.update(b"wasmer-sdk:package-definition:v1\0");
+        hash.update(b"wasmer-sdk:package-definition:v2\0");
         hash.update((self.modules.len() as u64).to_le_bytes());
-        for (name, bytes) in &self.modules {
+        for name in self.modules.keys() {
             hash_field(&mut hash, name.as_bytes());
-            hash_field(&mut hash, bytes);
+            hash_field(&mut hash, &digests[name]);
         }
         hash.update((self.commands.len() as u64).to_le_bytes());
         for (name, command) in &self.commands {

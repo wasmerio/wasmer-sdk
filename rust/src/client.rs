@@ -453,6 +453,19 @@ impl Wasmer {
                 }
                 return Ok(package);
             }
+            PackageSource::WasmModule {
+                bytes,
+                sha256,
+                validated,
+            } => {
+                let package = PackageDefinition::from_wasm(bytes)
+                    .into_package_with_digests([("main".to_owned(), sha256)].into(), validated)
+                    .await?;
+                if let Some(progress) = &progress {
+                    progress.local(&package, false);
+                }
+                return Ok(package);
+            }
             PackageSource::Bytes(bytes) | PackageSource::Webc(bytes) => {
                 let container = wasmer_package::utils::from_bytes(bytes).map_err(|error| {
                     Error::PackageLoad {

@@ -57,6 +57,14 @@ fn initialize() {
     console_error_panic_hook::set_once();
 }
 
+/// Hash program bytes without depending on a host Worker SubtleCrypto API.
+#[wasm_bindgen(js_name = hashBrowserModule)]
+pub fn hash_browser_module(bytes: &[u8]) -> String {
+    wasmer_types::ModuleHash::sha256(bytes)
+        .to_string()
+        .to_ascii_lowercase()
+}
+
 #[wasm_bindgen(js_name = setSDKUrl)]
 pub fn set_sdk_url(url: String) {
     *CUSTOM_SDK_URL.lock().expect("SDK URL lock poisoned") = Some(url);
