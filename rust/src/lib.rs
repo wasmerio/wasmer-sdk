@@ -13,6 +13,8 @@ mod fs;
     all(not(target_arch = "wasm32"), feature = "gui")
 ))]
 pub mod gui;
+#[cfg(feature = "sys-runtime")]
+mod module_cache;
 mod package;
 mod package_progress;
 pub use package_progress::{

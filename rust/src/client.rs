@@ -209,8 +209,10 @@ impl Wasmer {
                 })?;
             Arc::new(TokioTaskManager::new(tokio_runtime))
         };
-        let module_cache = SharedCache::default()
-            .with_fallback(FileSystemCache::new(compiled_cache, Arc::clone(&tasks)));
+        let module_cache = crate::module_cache::SingleFlight::new(
+            SharedCache::default()
+                .with_fallback(FileSystemCache::new(compiled_cache, Arc::clone(&tasks))),
+        );
         let mut source = MultiSource::new();
         source.add_source(
             BackendSource::new(
@@ -247,6 +249,27 @@ impl Wasmer {
                 registry_packages: RwLock::new(HashMap::new()),
                 closed: AtomicBool::new(false),
             }),
+        })
+    }
+
+    /// Start reading a compiled module into this client's memory cache.
+    /// Concurrent commands share that read. This never compiles or writes;
+    /// the handle returns false for a miss, load error, or closed client.
+    /// Dropping the handle detaches the preload; abort it to cancel its waiter.
+    #[cfg(feature = "sys-runtime")]
+    pub fn preload_module(&self, sha256: [u8; 32]) -> tokio::task::JoinHandle<bool> {
+        let closed = self.inner.closed.load(Ordering::Acquire);
+        let runtime = Arc::clone(&self.inner.runtime);
+        self.inner.tasks.runtime_handle().spawn(async move {
+            if closed {
+                return false;
+            }
+            let engine = runtime.engine();
+            runtime
+                .module_cache()
+                .load(wasmer_types::ModuleHash::from_bytes(sha256), &engine)
+                .await
+                .is_ok()
         })
     }
 

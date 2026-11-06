@@ -15,6 +15,13 @@ their default Cranelift engine.
 
 ## Precompiled native execution
 
+`Wasmer::preload_module(sha256)` starts reading an existing compiled artifact
+into memory before commands need it. Its join handle reports a cache hit;
+misses and errors return false and leave later commands free to load or compile.
+Overlapping reads share one result per module, engine identity, and artifact
+format. Cancelling the last waiter releases the pending entry so a later
+request can retry.
+
 `Packages::precompile(source)` fills the selected engine's compiled-module
 cache without running guest code. A later client with the same cache root
 and engine identity can load `PackageSource::precompiled_module(sha256)`
