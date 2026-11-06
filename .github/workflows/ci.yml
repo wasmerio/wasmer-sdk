@@ -1,27 +1,17 @@
-name: SDK WebKit diagnostics
+name: SDK browser verification
 on:
   workflow_dispatch:
 permissions:
   contents: read
   actions: read
 jobs:
-  webkit:
-    name: WebKit (${{ matrix.sdk }})
+  browser:
+    name: Complete browser suite
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     container:
       image: mcr.microsoft.com/playwright:v1.62.1-noble
       options: --init --ipc=host
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - sdk: base-570
-            run: 42283480835
-            artifact: wasmer-sdk-js-37eb156d02e76aeb4589e449a433eb3c89720431
-          - sdk: pr-572
-            run: 42284193382
-            artifact: wasmer-sdk-js-a607ed7973c222308e0c3fdb5eb64387ed437620
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -29,46 +19,20 @@ jobs:
           node-version: '24'
       - run: npm ci
         working-directory: js
+      - name: Align home ownership
+        run: chown "$(id -u):$(id -g)" "$HOME"
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ matrix.run }}
-          name: ${{ matrix.artifact }}
+          run-id: 42293404907
+          name: wasmer-sdk-js-b18ce70254162470a4cb2f3c93ee4115a0d7b2d9
           path: js
-      - name: Diagnose missing Wasm exports
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('js/pkg/wasmer_sdk_js.js')
-          s=p.read_text()
-          old='const ret = Reflect.get(arg0, arg1);'
-          new='''const ret = Reflect.get(arg0, arg1);
-            if (ret === undefined && typeof arg1 === 'string' && arg0 && typeof arg0 === 'object' && Object.getPrototypeOf(arg0) === null && ('memory' in arg0 || '__indirect_function_table' in arg0 || '_start' in arg0 || '__wasm_call_ctors' in arg0)) {
-              console.error('[missing-wasm-export]', JSON.stringify(arg1), Object.prototype.toString.call(arg0), Object.keys(arg0).length, JSON.stringify(Object.keys(arg0).slice(0, 24)));
-            }'''
-          assert s.count(old) == 2
-          p.write_text(s.replace(old,new))
-          PY
-      - name: Repeat Node and Express lifecycle
+      - name: Test browser runtimes
         working-directory: js
-        env:
-          WASMER_TEST_BROWSERS: webkit
+        run: npm run test:browser
+      - name: Test PostgreSQL and Pi shell examples with the built SDK
+        working-directory: wasmer-sh
         run: |
-          mkdir -p results
-          failed=0
-          for attempt in $(seq 1 12); do
-            if timeout --kill-after=5s 90s node --test --test-timeout=60000 tests/browser-node-compat.test.mjs > "results/$attempt.log" 2>&1; then
-              echo "PASS repetition $attempt"
-            else
-              failed=1
-              echo "FAIL repetition $attempt"
-              tail -n 120 "results/$attempt.log"
-              pkill -TERM -f '/ms-playwright/webkit' || true
-            fi
-          done
-          exit "$failed"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: webkit-diagnostics-${{ matrix.sdk }}-${{ github.run_id }}
-          path: js/results
+          npm ci
+          npm install --no-save --package-lock=false ../js
+          WASMER_EXAMPLE=postgres,pi npm run test:examples
