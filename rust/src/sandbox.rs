@@ -1,4 +1,4 @@
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 use std::borrow::Cow;
 use std::{
     collections::BTreeMap,
@@ -15,9 +15,9 @@ use std::{
 };
 
 use futures::future::Either;
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 use wasmer_wasix::runtime::ModuleInput;
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 use wasmer_wasix::virtual_net::host::LocalNetworking;
 use wasmer_wasix::{
     Runtime, UnsupportedVirtualNetworking,
@@ -266,9 +266,9 @@ impl SandboxBuilder {
 
         let workspace: Arc<dyn virtual_fs::FileSystem + Send + Sync> =
             if let Some(provider) = self.workspace_provider {
-                #[cfg(feature = "sys")]
+                #[cfg(feature = "sys-runtime")]
                 let runtime = self.client.inner.tasks.runtime_handle();
-                #[cfg(not(feature = "sys"))]
+                #[cfg(not(feature = "sys-runtime"))]
                 let runtime = crate::provider_fs::ProviderRuntime;
                 Arc::new(crate::provider_fs::ProviderAdapter::new(
                     provider,
@@ -353,7 +353,7 @@ pub struct Sandbox {
     pub(crate) inner: Arc<SandboxInner>,
 }
 
-#[cfg_attr(not(feature = "sys"), allow(dead_code))]
+#[cfg_attr(not(feature = "sys-runtime"), allow(dead_code))]
 pub(crate) struct SandboxInner {
     pub(crate) client: Wasmer,
     pub(crate) packages: RwLock<Vec<Package>>,
@@ -383,7 +383,7 @@ pub enum NetworkPolicy {
 }
 
 #[derive(Clone, Debug)]
-#[cfg_attr(not(feature = "sys"), allow(dead_code))]
+#[cfg_attr(not(feature = "sys-runtime"), allow(dead_code))]
 pub(crate) struct MountSpec {
     pub(crate) guest_path: PathBuf,
     pub(crate) filesystem: Arc<dyn FileSystem>,
@@ -654,7 +654,7 @@ mod napi_hook_tests {
     }
 }
 
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 fn resolve_capi_module(
     runtime: &(dyn Runtime + Send + Sync),
     bytes: Vec<u8>,
@@ -664,7 +664,7 @@ fn resolve_capi_module(
         .map_err(anyhow::Error::from)
 }
 
-#[cfg(all(not(feature = "sys"), feature = "js"))]
+#[cfg(all(not(feature = "sys-runtime"), feature = "js"))]
 fn resolve_capi_module(
     runtime: &(dyn Runtime + Send + Sync),
     bytes: Vec<u8>,
@@ -673,12 +673,12 @@ fn resolve_capi_module(
     wasmer::Module::new(&store, bytes).map_err(anyhow::Error::from)
 }
 
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 fn host_networking(_client: &Wasmer) -> DynVirtualNetworking {
     Arc::new(LocalNetworking::default())
 }
 
-#[cfg(not(feature = "sys"))]
+#[cfg(not(feature = "sys-runtime"))]
 fn host_networking(client: &Wasmer) -> DynVirtualNetworking {
     Arc::clone(client.inner.runtime.networking())
 }

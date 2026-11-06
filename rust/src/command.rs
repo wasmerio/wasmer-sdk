@@ -328,13 +328,13 @@ impl Command {
         );
         let selected = package.clone();
         let mut runner = WasiRunner::new();
-        #[cfg(feature = "sys")]
+        #[cfg(feature = "sys-runtime")]
         let root_fs = apply_local_package_mounts(
             &mut runner,
             &selected,
             &self.sandbox.inner.client.inner.tasks.runtime_handle(),
         )?;
-        #[cfg(not(feature = "sys"))]
+        #[cfg(not(feature = "sys-runtime"))]
         let root_fs = apply_local_package_mounts(&mut runner, &selected)?;
         runner
             .with_args(self.args.clone())
@@ -355,9 +355,9 @@ impl Command {
             .with_stdout(guest_stdout)
             .with_stderr(guest_stderr);
         for mount in &self.sandbox.inner.mounts {
-            #[cfg(feature = "sys")]
+            #[cfg(feature = "sys-runtime")]
             let provider_runtime = self.sandbox.inner.client.inner.tasks.runtime_handle();
-            #[cfg(not(feature = "sys"))]
+            #[cfg(not(feature = "sys-runtime"))]
             let provider_runtime = crate::provider_fs::ProviderRuntime;
             runner.with_mount(
                 mount.guest_path.to_string_lossy().into_owned(),
@@ -376,6 +376,8 @@ impl Command {
             .ok_or_else(|| Error::CommandNotFound {
                 command: command_name.clone(),
             })?;
+        #[cfg(feature = "sys-runtime")]
+        require_compiled_module(runtime.as_ref(), binary_command).await?;
         #[cfg(feature = "napi-v8")]
         configure_wasi_runner_for_napi(runtime.as_ref(), binary_command, &mut runner).await?;
         #[cfg(all(target_arch = "wasm32", feature = "js"))]
@@ -631,6 +633,34 @@ fn tolerate_early_exit(result: std::io::Result<()>) -> std::io::Result<()> {
     }
 }
 
+/// A command whose module came by its hash alone, with no bytes (compiled
+/// ahead of time into the compiled-module cache: `PackageSource::module`
+/// with empty bytes), loads from that cache, or fails with
+/// [`Error::ModuleNotCompiled`]. Otherwise a miss would go on to compile the
+/// empty bytes, and fail with a parse error that names neither the cache
+/// nor the module. A hit is in the in-memory module cache afterwards, where
+/// the command's own load finds it.
+#[cfg(feature = "sys-runtime")]
+pub(crate) async fn require_compiled_module(
+    runtime: &(dyn Runtime + Send + Sync),
+    command: &wasmer_wasix::bin_factory::BinaryPackageCommand,
+) -> Result<()> {
+    use wasmer_wasix::runtime::module_cache::ModuleCache;
+    if !command.atom_ref().is_empty() {
+        return Ok(());
+    }
+    let engine = runtime.engine();
+    let cache = runtime.module_cache();
+    match ModuleCache::load(cache.as_ref(), *command.hash(), &engine).await {
+        Ok(_) => Ok(()),
+        Err(error) => Err(Error::ModuleNotCompiled {
+            module_hash: command.hash().to_string(),
+            engine: engine.deterministic_id(),
+            message: error.to_string(),
+        }),
+    }
+}
+
 #[cfg(feature = "napi-v8")]
 async fn configure_wasi_runner_for_napi(
     runtime: &(dyn Runtime + Send + Sync),
@@ -653,7 +683,7 @@ async fn configure_wasi_runner_for_napi(
     Ok(())
 }
 
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 fn apply_local_package_mounts(
     runner: &mut WasiRunner,
     package: &Package,
@@ -733,7 +763,7 @@ fn apply_local_package_mounts(
     Ok(Some(WasiFsRoot::from_filesystem(Arc::new(root))))
 }
 
-#[cfg(not(feature = "sys"))]
+#[cfg(not(feature = "sys-runtime"))]
 fn apply_local_package_mounts(
     _runner: &mut WasiRunner,
     package: &Package,

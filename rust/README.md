@@ -13,6 +13,21 @@ engine's deterministic identity; clients using the same engine identity and
 cache root can reuse their artifacts. `Wasmer::new` and `with_config` keep
 their default Cranelift engine.
 
+## Precompiled native execution
+
+`Packages::precompile(source)` fills the selected engine's compiled-module
+cache without running guest code. A later client with the same cache root
+and engine identity can load `PackageSource::precompiled_module(sha256)`
+without retaining the original Wasm bytes. A missing or unreadable artifact
+returns `MODULE_NOT_COMPILED`; this source never falls back to compilation.
+
+For a compiler-free native consumer, disable default features, enable
+`sys-runtime`, and provide a headless engine through `Wasmer::with_engine`.
+Its identity must match the engine used for the compile step. The
+`precompiled` example demonstrates both processes. Optional provider crates
+can enable additional compiler features through their own dependencies;
+`sys-runtime` itself does not enable a compiler backend.
+
 ## Module digests
 
 Raw modules can reuse a digest computed by their caller:

@@ -18,6 +18,10 @@ pub enum PackageSource {
     /// In-memory WEBC or raw WASI/WASIX module bytes, detected by their contents.
     /// A raw module becomes a package with one command and entrypoint, `main`.
     Bytes(Bytes),
+    /// A previously compiled raw module, identified by its original SHA-256.
+    /// Its artifact must already exist in this client's compiled-module cache.
+    #[cfg(feature = "sys-runtime")]
+    PrecompiledModule { sha256: [u8; 32] },
     /// Raw WASI/WASIX module bytes with their SHA-256, already computed by
     /// the caller (the browser bindings use the host's native digest). The
     /// SDK uses it instead of hashing the module again. It must be the
@@ -35,6 +39,14 @@ pub enum PackageSource {
 }
 
 impl PackageSource {
+    /// Select a compiled raw module without retaining or reading its bytes.
+    /// Cache misses report [`Error::ModuleNotCompiled`] when it is executed.
+    #[cfg(feature = "sys-runtime")]
+    #[must_use]
+    pub fn precompiled_module(sha256: [u8; 32]) -> Self {
+        Self::PrecompiledModule { sha256 }
+    }
+
     #[must_use]
     pub fn registry(specifier: impl Into<String>) -> Self {
         Self::Registry(specifier.into())
@@ -81,6 +93,8 @@ impl PackageSource {
         match self {
             Self::Registry(specifier) => specifier.clone(),
             Self::Path(path) => path.display().to_string(),
+            #[cfg(feature = "sys-runtime")]
+            Self::PrecompiledModule { .. } => "<precompiled module>".to_owned(),
             Self::Bytes(bytes) | Self::WasmModule { bytes, .. } => {
                 format!("<{} in-memory package bytes>", bytes.len())
             }
