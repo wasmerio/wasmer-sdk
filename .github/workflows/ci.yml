@@ -29,7 +29,15 @@ jobs:
           path: js
       - name: Test browser runtimes
         working-directory: js
+        env:
+          DEBUG: pw:browser
         run: npm run test:browser
+      - name: Record runner memory and shared memory
+        if: always()
+        run: |
+          cat /sys/fs/cgroup/memory.events
+          free -m
+          df -h /dev/shm
       - name: Test PostgreSQL and Pi shell examples with the built SDK
         working-directory: wasmer-sh
         run: |
