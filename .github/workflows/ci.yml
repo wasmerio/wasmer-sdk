@@ -92,8 +92,13 @@ jobs:
           cargo +1.99.1 test --locked -p wasmer-sdk-uniffi --lib
           cargo +1.99.1 build --locked -p wasmer-sdk-uniffi --features bindgen-cli
 
-      - name: Verify the Rust source package
-        run: cargo +1.99.1 package --locked -p wasmer-sdk --no-verify
+      # The integration branch consumes unreleased GUI/WebGPU crates from
+      # Git. Cargo's upload archive resolves normalized dependencies on
+      # crates.io; verify the source archive until those crates are published.
+      - name: Verify the Rust source archive
+        run: |
+          git archive --format=tar --output "$RUNNER_TEMP/wasmer-sdk-source.tar" HEAD rust
+          tar -tf "$RUNNER_TEMP/wasmer-sdk-source.tar"
 
   swift:
     name: Swift (macOS)
