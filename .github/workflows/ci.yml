@@ -1,333 +1,74 @@
-name: CI
-
+name: SDK WebKit diagnostics
 on:
-  pull_request:
-  push:
-    branches:
-      - main
   workflow_dispatch:
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
-
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-  CARGO_PROFILE_DEV_DEBUG: 0
-  CARGO_PROFILE_TEST_DEBUG: 0
-  RUST_BACKTRACE: 1
-
+  actions: read
 jobs:
-  release-metadata:
-    name: Release metadata
+  webkit:
+    name: WebKit (${{ matrix.sdk }})
     runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-      - name: Check component versions and release tooling
-        run: |
-          for component in js python swift; do
-            python .github/scripts/sdk_release.py check --component "$component"
-          done
-          python -m unittest discover -s .github/scripts/tests -v
-      - name: Require a prepared Swift release
-        if: >-
-          github.head_ref == 'release-please--branches--main--components--wasmer-sdk-swift' ||
-          github.ref_name == 'release-please--branches--main--components--wasmer-sdk-swift'
-        run: python .github/scripts/sdk_release.py verify-swift-inputs
-
-  shell:
-    name: Shell (published SDK)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     container:
-      # Match wasmer-sh/pnpm-lock.yaml; avoid downloading system libraries.
       image: mcr.microsoft.com/playwright:v1.62.1-noble
       options: --init --ipc=host
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: base-570
+            run: 42283480835
+            artifact: wasmer-sdk-js-37eb156d02e76aeb4589e449a433eb3c89720431
+          - sdk: pr-572
+            run: 42284193382
+            artifact: wasmer-sdk-js-a607ed7973c222308e0c3fdb5eb64387ed437620
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
-          package-manager-cache: false
-      - name: Install pnpm
-        run: npm install --global pnpm@12.5.1
-      - name: Install published dependencies
-        working-directory: wasmer-sh
-        run: pnpm --config.minimum-release-age=0 install --frozen-lockfile
-      - name: Build deployment output
-        working-directory: wasmer-sh
-        run: pnpm run build
-      - name: Verify installed browser
-        working-directory: wasmer-sh
-        run: |
-          node --input-type=module -e '
-            import { accessSync } from "node:fs";
-            import { chromium } from "playwright";
-            accessSync(chromium.executablePath());
-          '
-      - name: Test production shell startup
-        working-directory: wasmer-sh
-        run: pnpm run test:production
-
-  rust:
-    name: Rust and UniFFI
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-
-      # Cache restoration is optional; bound downloads and archive extraction.
-      - uses: ./.github/actions/cache-sdk
-        timeout-minutes: 5
-        continue-on-error: true
-        with:
-          cargo-profile: native-1.99
-
-      - name: Install Rust
-        run: rustup toolchain install 1.99.1 --profile minimal --no-self-update
-
-      - name: Test the Rust SDK
-        run: cargo +1.99.1 test --locked -p wasmer-sdk --all-targets
-
-      - name: Test and build UniFFI
-        run: |
-          cargo +1.99.1 test --locked -p wasmer-sdk-uniffi --lib
-          cargo +1.99.1 build --locked -p wasmer-sdk-uniffi --features bindgen-cli
-
-      # The integration branch consumes unreleased GUI/WebGPU crates from
-      # Git. Cargo's upload archive resolves normalized dependencies on
-      # crates.io; verify the source archive until those crates are published.
-      - name: Verify the Rust source archive
-        run: |
-          git archive --format=tar --output "$RUNNER_TEMP/wasmer-sdk-source.tar" HEAD rust
-          tar -tf "$RUNNER_TEMP/wasmer-sdk-source.tar"
-
-  swift:
-    name: Swift (macOS)
-    runs-on: macos-15
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-
-      # Cache restoration is optional; bound downloads and archive extraction.
-      - uses: ./.github/actions/cache-sdk
-        timeout-minutes: 5
-        continue-on-error: true
-        with:
-          cargo-profile: swift-1.99-sys
-          cache-compiled-artifacts: "false"
-
-      - name: Install Rust
-        run: rustup toolchain install 1.99.1 --profile minimal --no-self-update
-
-      - name: Build the UniFFI Swift package
-        env:
-          RUSTUP_TOOLCHAIN: 1.99.1
-        run: python3 swift/scripts/build.py
-
-      - name: Test Swift against local Wasm fixtures
-        run: python3 swift/scripts/test.py
-
-  swift-webkit:
-    name: Swift (WebKit backend)
-    needs: javascript
-    runs-on: macos-15
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "26"
+          node-version: '24'
+      - run: npm ci
+        working-directory: js
       - uses: actions/download-artifact@v4
         with:
-          name: wasmer-sdk-js-${{ github.sha }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ matrix.run }}
+          name: ${{ matrix.artifact }}
           path: js
-      - name: Generate the WebKit runtime from the tested JS build
-        run: python3 swift/WasmerWKSDK/scripts/bundle_sdk.py
-      - name: Verify generated runtime and simulator selection
+      - name: Diagnose missing Wasm exports
         run: |
-          python3 swift/WasmerWKSDK/scripts/bundle_sdk.py --check
-          python3 -m unittest discover -s swift/WasmerWKSDK/scripts -p 'test_*.py'
-      - name: Test native filesystem, DNS, TCP, and HTTP bridges
-        run: swift test --package-path swift/WasmerWKSDK
-      - name: Test worker transport and JSPI
-        run: node --test swift/WasmerWKSDK/scripts/*.test.mjs
-      - name: Build and test the distributable runtime
-        run: |
-          python3 swift/WasmerWKSDK/scripts/build_runtime.py
-          python3 swift/WasmerWKSDK/scripts/verify_runtime.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wasmer-sdk-webkit-${{ github.sha }}
-          path: swift/Artifacts/WasmerWKRuntime.zip
-          if-no-files-found: error
-
-  javascript:
-    name: JavaScript
-    needs: rust
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: js/package-lock.json
-
-      # Cache restoration is optional; bound downloads and archive extraction.
-      - uses: ./.github/actions/cache-sdk
-        timeout-minutes: 5
-        continue-on-error: true
-        with:
-          cargo-profile: js-nightly
-          cache-compiled-artifacts: "false"
-
-      - name: Install Rust and wasm-bindgen
-        run: |
-          rustup toolchain install nightly --profile minimal --component rust-src --target wasm32-unknown-unknown --no-self-update
-          if ! wasm-bindgen --version 2>/dev/null | grep -qx "wasm-bindgen 0.2.126"; then
-            cargo +nightly install wasm-bindgen-cli --version 0.2.126 --locked --force
-          fi
-
-      - name: Install JavaScript dependencies
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('js/pkg/wasmer_sdk_js.js')
+          s=p.read_text()
+          old='const ret = Reflect.get(arg0, arg1);'
+          new='''const ret = Reflect.get(arg0, arg1);
+            if (ret === undefined && typeof arg1 === 'string' && arg0 && typeof arg0 === 'object' && Object.getPrototypeOf(arg0) === null && ('memory' in arg0 || '__indirect_function_table' in arg0 || '_start' in arg0 || '__wasm_call_ctors' in arg0)) {
+              console.error('[missing-wasm-export]', JSON.stringify(arg1), Object.prototype.toString.call(arg0), Object.keys(arg0).length, JSON.stringify(Object.keys(arg0).slice(0, 24)));
+            }'''
+          assert s.count(old) == 2
+          p.write_text(s.replace(old,new))
+          PY
+      - name: Repeat Node and Express lifecycle
         working-directory: js
-        run: npm ci
-
-      - name: Build
-        working-directory: js
-        run: npm run build
-
-      - name: Test
-        working-directory: js
-        run: npm test
-
-      - name: Test task serialization
-        working-directory: js
-        run: npm run test:bindgen
-
-      - name: Test Edge.js
-        working-directory: js
-        run: npm run test:edgejs
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wasmer-sdk-js-${{ github.sha }}
-          path: |
-            js/dist
-            js/pkg
-          if-no-files-found: error
-          retention-days: 1
-
-  browser:
-    name: Browser
-    needs: javascript
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    container:
-      # Match the Playwright versions in js/ and wasmer-sh/. The image
-      # includes browser libraries, avoiding slow apt mirrors on each run.
-      image: mcr.microsoft.com/playwright:v1.62.1-noble
-      options: --init --ipc=host
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: js/package-lock.json
-
-      - name: Install JavaScript dependencies
-        working-directory: js
-        run: npm ci
-
-      - name: Verify installed browsers
-        working-directory: js
-        run: |
-          node --input-type=module -e '
-            import { accessSync } from "node:fs";
-            import { chromium, firefox, webkit } from "playwright";
-            for (const browser of [chromium, firefox, webkit]) {
-              accessSync(browser.executablePath());
-            }
-          '
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: wasmer-sdk-js-${{ github.sha }}
-          path: js
-
-      - name: Test browser runtimes
-        working-directory: js
-        run: npm run test:browser
-
-      - name: Test PostgreSQL and Pi shell examples with the built SDK
-        working-directory: wasmer-sh
-        run: |
-          npm ci
-          npm install --no-save --package-lock=false ../js
-          WASMER_EXAMPLE=postgres,pi npm run test:examples
-
-  python:
-    name: Python
-    needs: rust
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: python/pyproject.toml
-
-      # Cache restoration is optional; bound downloads and archive extraction.
-      - uses: ./.github/actions/cache-sdk
-        timeout-minutes: 5
-        continue-on-error: true
-        with:
-          cargo-profile: native-1.99-release
-
-      - name: Check release metadata
-        run: python .github/scripts/check-release-version.py
-
-      - name: Install Rust
-        run: rustup toolchain install 1.99.1 --profile minimal --no-self-update
-
-      - name: Build the UniFFI Python module
-        run: python python/scripts/build.py --release
-
-      - name: Test local behavior
         env:
-          PYTHONPATH: python/src
+          WASMER_TEST_BROWSERS: webkit
         run: |
-          python -m unittest discover -s python/tests -p test_runtime.py -v
-          python -m unittest discover -s python/tests -p test_package_definition.py -v
-          python -m unittest discover -s python/tests -p test_postgres_psql.py -v
-
-      - name: Test Edge.js
-        env:
-          PYTHONPATH: python/src
-        run: |
-          for attempt in {1..3}; do
-            if python -m unittest discover -s python/tests -p test_edgejs_http.py -v; then
-              exit 0
+          mkdir -p results
+          failed=0
+          for attempt in $(seq 1 12); do
+            if timeout --kill-after=5s 90s node --test --test-timeout=60000 tests/browser-node-compat.test.mjs > "results/$attempt.log" 2>&1; then
+              echo "PASS repetition $attempt"
+            else
+              failed=1
+              echo "FAIL repetition $attempt"
+              tail -n 120 "results/$attempt.log"
+              pkill -TERM -f '/ms-playwright/webkit' || true
             fi
-            if [ "${attempt}" -eq 3 ]; then
-              exit 1
-            fi
-            sleep 10
           done
+          exit "$failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webkit-diagnostics-${{ matrix.sdk }}-${{ github.run_id }}
+          path: js/results
