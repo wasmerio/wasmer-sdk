@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const wasmPath = resolve(packageRoot, "pkg/wasmer_sdk_js_bg.wasm");
-const maximumRawBytes = 5_250_000;
+// Native digest dispatch, batch snapshots and cancellation add about 30 KB.
+const maximumRawBytes = 5_300_000;
 const maximumBrotliBytes = 1_500_000;
 
 const rawBytes = statSync(wasmPath).size;
