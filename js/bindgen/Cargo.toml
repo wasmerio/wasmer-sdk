@@ -2,7 +2,7 @@
 name = "wasmer-sdk-js"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.99"
 description = "wasm-bindgen facade for wasmer-sdk"
 license-file = "LICENSE"
 publish = false
