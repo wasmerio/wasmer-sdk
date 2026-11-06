@@ -928,6 +928,9 @@ mod tests {
                     && p.download.downloaded_bytes < http.bytes.len() as u64));
                 let partial = events
                     .iter()
+                    // The aliases can finish resolution at different times,
+                    // so aggregate progress can still have an unknown total.
+                    .flat_map(|event| &event.packages)
                     .find(|p| {
                         p.download.downloaded_bytes > 0
                             && p.download.downloaded_bytes < http.bytes.len() as u64
