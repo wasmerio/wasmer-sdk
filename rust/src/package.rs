@@ -18,6 +18,16 @@ pub enum PackageSource {
     /// In-memory WEBC or raw WASI/WASIX module bytes, detected by their contents.
     /// A raw module becomes a package with one command and entrypoint, `main`.
     Bytes(Bytes),
+    /// Raw WASI/WASIX module bytes with their SHA-256, already computed by
+    /// the caller (the browser bindings use the host's native digest). The
+    /// SDK uses it instead of hashing the module again. It must be the
+    /// SHA-256 of `bytes`: compiled modules are cached by it.
+    WasmModule {
+        bytes: Bytes,
+        sha256: [u8; 32],
+        /// The caller has already checked the module format and `_start` export.
+        validated: bool,
+    },
     /// An in-memory WEBC container.
     Webc(Bytes),
     /// An already resolved package.
@@ -45,11 +55,35 @@ impl PackageSource {
         Self::Bytes(bytes.into())
     }
 
+    /// Raw module bytes and their SHA-256 (see [`PackageSource::WasmModule`]).
+    #[must_use]
+    pub fn wasm_module(bytes: impl Into<Bytes>, sha256: [u8; 32]) -> Self {
+        Self::module(bytes, sha256, false)
+    }
+
+    /// Raw module bytes with a trusted digest and optional prior validation.
+    ///
+    /// `sha256` must identify these exact bytes. Set `validated` only after
+    /// checking that they encode a core Wasm module exporting a `_start`
+    /// function. Package metadata is always checked; compilation still
+    /// validates executable code. Use [`Self::wasm_module`] to have the SDK
+    /// check the module format and exports.
+    #[must_use]
+    pub fn module(bytes: impl Into<Bytes>, sha256: [u8; 32], validated: bool) -> Self {
+        Self::WasmModule {
+            bytes: bytes.into(),
+            sha256,
+            validated,
+        }
+    }
+
     pub(crate) fn label(&self) -> String {
         match self {
             Self::Registry(specifier) => specifier.clone(),
             Self::Path(path) => path.display().to_string(),
-            Self::Bytes(bytes) => format!("<{} in-memory package bytes>", bytes.len()),
+            Self::Bytes(bytes) | Self::WasmModule { bytes, .. } => {
+                format!("<{} in-memory package bytes>", bytes.len())
+            }
             Self::Webc(bytes) => format!("<{} in-memory WEBC bytes>", bytes.len()),
             Self::Package(package) => package.id(),
         }

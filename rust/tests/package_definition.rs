@@ -76,6 +76,35 @@ async fn loads_raw_wasm_with_an_automatic_main_entrypoint() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_known_module_digest_loads_the_same_package() -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let (client, _dir) = client();
+    let wasm = wat::parse_str(HELLO).unwrap();
+    let sha256: [u8; 32] = Sha256::digest(&wasm).into();
+    let plain = client.packages().load(wasm.clone()).await?;
+    let known = client
+        .packages()
+        .load(PackageSource::wasm_module(wasm, sha256))
+        .await?;
+    assert_eq!(known.id(), plain.id());
+    let validated = client
+        .packages()
+        .load(PackageSource::module(
+            wat::parse_str(HELLO).unwrap(),
+            sha256,
+            true,
+        ))
+        .await?;
+    assert_eq!(validated.id(), plain.id());
+    assert_eq!(known.commands(), ["main"]);
+    let sandbox = client.sandboxes().create().package(known).await?;
+    assert_eq!(sandbox.command("main").run().await?.text()?, "hello");
+    sandbox.close().await?;
+    client.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn byte_detection_preserves_webc_commands_and_entrypoint() -> Result<()> {
     let (client, _dir) = client();
     let fixture = TempDir::new().unwrap();
@@ -119,6 +148,27 @@ module = "app"
         .await?;
     assert_eq!(sandbox.command(detected).run().await?.text()?, "hello");
     sandbox.close().await?;
+    client.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_known_digest_does_not_bypass_module_validation() -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let (client, _dir) = client();
+    for bytes in [
+        wat::parse_str("(module)").unwrap(),
+        b"\0asm\x0d\0\x01\0".to_vec(),
+        b"\0asm".to_vec(),
+    ] {
+        let digest: [u8; 32] = Sha256::digest(&bytes).into();
+        let error = client
+            .packages()
+            .load(PackageSource::wasm_module(bytes, digest))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "PACKAGE_LOAD_FAILED");
+    }
     client.shutdown().await?;
     Ok(())
 }

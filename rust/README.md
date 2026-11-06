@@ -13,6 +13,22 @@ engine's deterministic identity; clients using the same engine identity and
 cache root can reuse their artifacts. `Wasmer::new` and `with_config` keep
 their default Cranelift engine.
 
+## Module digests
+
+Raw modules can reuse a digest computed by their caller:
+
+```rust
+let package = wasmer.packages()
+    .load(wasmer_sdk::PackageSource::wasm_module(bytes, sha256))
+    .await?;
+```
+
+The digest must be the SHA-256 of those exact bytes. The SDK still checks
+the module format and `_start` export. Embedders that have already checked
+both can use `PackageSource::module(bytes, sha256, true)`. Package identities
+include module digests, commands, entrypoints, and files under a versioned
+domain, so all byte-source entry points resolve to the same identity.
+
 ## Package download progress
 
 ```rust

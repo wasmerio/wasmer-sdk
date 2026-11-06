@@ -1,7 +1,71 @@
-use js_sys::{Array, Function, Uint8Array};
+use js_sys::{Array, Function, Promise, Reflect, Uint8Array};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
 use wasmer_sdk::{PackageLoadOptions, PackageLoadProgress, PackageSource};
+
+/// Raw module bytes as a package source, with their SHA-256 from the host's
+/// native digest when it has one. A large module hashed by the SDK's own
+/// Wasm takes about a second on a fresh instance (its one long call runs
+/// unoptimized); SubtleCrypto takes tens of milliseconds. Without it, or if
+/// it fails, the core hashes the module itself, once. A cancellation ends
+/// the wait for the digest.
+struct ModuleSnapshot {
+    bytes: Vec<u8>,
+    digest: Option<JsFuture>,
+}
+
+fn snapshot_module(bytes: Uint8Array) -> ModuleSnapshot {
+    let magic = bytes.length() >= 4 && bytes.subarray(0, 4).to_vec() == b"\0asm";
+    // digest() copies its input before returning, and the copy below runs
+    // in the same turn: both see the same bytes.
+    let digest = magic
+        .then(|| start_digest(&bytes))
+        .flatten()
+        .map(JsFuture::from);
+    ModuleSnapshot {
+        bytes: bytes.to_vec(),
+        digest,
+    }
+}
+
+async fn module_source(
+    snapshot: ModuleSnapshot,
+    cancellation: &wasmer_sdk::PackageLoadCancellation,
+) -> PackageSource {
+    if let Some(pending) = snapshot.digest {
+        let result = tokio::select! {
+            result = pending => result,
+            () = cancellation.cancelled() => Err(JsValue::UNDEFINED),
+        };
+        if let Ok(result) = result
+            && result.is_instance_of::<js_sys::ArrayBuffer>()
+        {
+            let digest = Uint8Array::new(&result);
+            if digest.length() == 32 {
+                let mut sha256 = [0_u8; 32];
+                digest.copy_to(&mut sha256);
+                return PackageSource::wasm_module(snapshot.bytes, sha256);
+            }
+        }
+    }
+    PackageSource::Bytes(snapshot.bytes.into())
+}
+
+fn start_digest(bytes: &Uint8Array) -> Option<Promise> {
+    // Nauta's crypto.subtle getter throws outside a secure context.
+    let crypto = Reflect::get(&js_sys::global(), &"crypto".into()).ok()?;
+    let subtle = Reflect::get(&crypto, &"subtle".into()).ok()?;
+    let digest = Reflect::get(&subtle, &"digest".into())
+        .ok()?
+        .dyn_into::<Function>()
+        .ok()?;
+    digest
+        .call2(&subtle, &"SHA-256".into(), bytes)
+        .ok()?
+        .dyn_into::<Promise>()
+        .ok()
+}
 
 use crate::{JsPackage, JsWasmer, custom_error, sdk_error};
 
@@ -58,15 +122,18 @@ impl JsWasmer {
         mut callback: Option<Function>,
         cancellation: &JsPackageLoadCancellation,
     ) -> Result<Array, JsValue> {
-        let sources: Vec<_> = sources
+        enum Checked {
+            Registry(String),
+            Bytes(Uint8Array),
+        }
+        // Every source is checked before any is read.
+        let checked: Vec<_> = sources
             .iter()
             .map(|source| {
                 if let Some(specifier) = source.as_string() {
-                    Ok(PackageSource::Registry(specifier))
+                    Ok(Checked::Registry(specifier))
                 } else if source.is_instance_of::<Uint8Array>() {
-                    Ok(PackageSource::Bytes(
-                        source.unchecked_into::<Uint8Array>().to_vec().into(),
-                    ))
+                    Ok(Checked::Bytes(source.unchecked_into::<Uint8Array>()))
                 } else {
                     Err(custom_error(
                         "INVALID_PACKAGE_SOURCE",
@@ -75,6 +142,30 @@ impl JsWasmer {
                 }
             })
             .collect::<Result<_, _>>()?;
+        enum Snapshot {
+            Registry(String),
+            Module(ModuleSnapshot),
+        }
+        // Snapshot the entire batch before waiting for any digest. Each
+        // JsFuture attaches rejection handlers immediately, including for
+        // later batch entries whose digest has not yet been awaited.
+        let snapshots: Vec<_> = checked
+            .into_iter()
+            .map(|source| match source {
+                Checked::Registry(value) => Snapshot::Registry(value),
+                Checked::Bytes(bytes) => Snapshot::Module(snapshot_module(bytes)),
+            })
+            .collect();
+        let mut sources = Vec::with_capacity(snapshots.len());
+        for source in snapshots {
+            if cancellation.inner.is_cancelled() {
+                return Err(sdk_error(wasmer_sdk::Error::Cancelled));
+            }
+            sources.push(match source {
+                Snapshot::Registry(specifier) => PackageSource::Registry(specifier),
+                Snapshot::Module(module) => module_source(module, &cancellation.inner).await,
+            });
+        }
         let mut options = PackageLoadOptions::default().cancellation(cancellation.inner.clone());
         let (sender, mut progress) = tokio::sync::watch::channel(None);
         if callback.is_some() {
