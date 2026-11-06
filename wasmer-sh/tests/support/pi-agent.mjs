@@ -107,11 +107,16 @@ export async function checkPiAgent({ page, command, waitForPrompt }) {
     const preflight = `const r = require('node:module').createRequire('/opt/pi/package.json'); r('undici').fetch('${model.healthUrl}').then(r => r.text()).then(console.log).catch(e => { console.error(e, e.cause); process.exitCode = 1; });`;
     await command(`node -e ${quote(preflight)}`);
     await preparePiPreview(page);
-    const setupStart = await page.evaluate(() => window.__wasmerShell.snapshot().length);
     const send = input => page.evaluate(input => window.__wasmerShell.send(input), input);
-    const waitForText = text => page.waitForFunction(({ after, text }) => window.__wasmerShell.snapshot()
-      .slice(after).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').includes(text),
-    { after: setupStart, text }, { timeout: 120_000 });
+    // Pi's redraws can trim the rolling transcript. Read the active TUI instead
+    // of retaining a string offset that stops identifying new output after a trim.
+    const waitForText = (text, timeout = 120_000) => page.waitForFunction(text => {
+      const { terminal } = window.__piTest;
+      const buffer = terminal.buffer.active;
+      return buffer.type === 'alternate' && Array.from({ length: terminal.rows }, (_, row) =>
+        buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
+        .some(line => line.includes(text));
+    }, text, { timeout });
     await send('PI_CODING_AGENT_DIR=/workspace/.pi-test pi --offline --provider wasmer-test --model test --thinking off --tools read,write,edit,bash,grep,find,ls --extension /workspace/pi-terminal-probe.mjs\r');
     await waitForText('v1.0.0');
     await send('Exercise the workspace tools.\r');
@@ -119,18 +124,15 @@ export async function checkPiAgent({ page, command, waitForPrompt }) {
     model.assertComplete();
     await checkPiPreview(page);
     await send('/quit\r');
-    await waitForPrompt(setupStart);
+    await waitForPrompt(0);
     await command('test "$(cat pi-test/result.txt)" = after');
     await command("rg --hidden --glob '*.jsonl' PI_AGENT_TOOLS_OK .pi-test/sessions");
 
-    const before = await page.evaluate(() => window.__wasmerShell.snapshot().length);
     await send('pi\r');
-    await page.waitForFunction(before => window.__wasmerShell.snapshot().slice(before)
-      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').includes('v1.0.0'), before, { timeout: 60_000 });
+    await waitForText('v1.0.0', 60_000);
     assert.equal(await page.locator('#preview-panel').isVisible(), false);
     await send('/login\r');
-    await page.waitForFunction(before => window.__wasmerShell.snapshot().slice(before)
-      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').includes('Select authentication method:'), before, { timeout: 30_000 });
+    await waitForText('Select authentication method:', 30_000);
     await send('\x03');
     await page.waitForFunction(() => {
       const { terminal } = window.__piTest;
@@ -141,7 +143,7 @@ export async function checkPiAgent({ page, command, waitForPrompt }) {
     });
     if (process.env.WASMER_PI_SCREENSHOT) await page.screenshot({ path: process.env.WASMER_PI_SCREENSHOT });
     await page.evaluate(() => window.__wasmerShell.send('/quit\r'));
-    await waitForPrompt(before);
+    await waitForPrompt(0);
     await command('test ! -d .local/share/pnpm && test -d .pi/agent');
     await command('echo PI_SHELL_RECOVERED');
     console.log('PASS Pi WebC: direct pi launch, native login, streaming agent loop, read/write/edit/bash/grep/find/ls, preview, resize and exit');
