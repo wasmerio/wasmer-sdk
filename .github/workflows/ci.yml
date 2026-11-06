@@ -259,6 +259,9 @@ jobs:
       - name: Verify installed browsers
         working-directory: js
         run: |
+          # GitHub's mounted home belongs to pwuser, but this container runs as
+          # root. Firefox requires the home directory to match the current UID.
+          chown "$(id -u):$(id -g)" "$HOME"
           node --input-type=module -e '
             import { accessSync } from "node:fs";
             import { chromium, firefox, webkit } from "playwright";
