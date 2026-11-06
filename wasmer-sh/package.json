@@ -15,7 +15,7 @@
     "test": "npm run test:compatibility && node tests/browser-smoke.mjs",
     "test:stress": "node tests/terminal-stress.mjs",
     "test:compatibility": "node --test tests/browser-compatibility.mjs",
-    "test:examples": "node scripts/sync-webgpu-example.mjs --check && node scripts/sync-gui-example.mjs --check && node tests/example-picker.mjs",
+    "test:examples": "node tests/example-picker.mjs",
     "test:production": "node --test --test-timeout=180000 tests/production-shell.mjs"
   },
   "dependencies": {
@@ -27,7 +27,7 @@
   "devDependencies": {
     "@mercuryworkshop/wisp-js": "0.4.1",
     "@types/node": "^26.1.2",
-    "playwright": "^1.62.0",
+    "playwright": "1.62.1",
     "typescript": "^5.9.2",
     "vite": "^8.2.0"
   },

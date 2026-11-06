@@ -10,7 +10,6 @@
 
 mod browser_http;
 mod browser_tcp;
-mod gui;
 mod host_filesystem;
 mod module_cache;
 mod node_network;
@@ -57,6 +56,14 @@ fn initialize() {
     console_error_panic_hook::set_once();
 }
 
+/// Hash program bytes without depending on a host Worker SubtleCrypto API.
+#[wasm_bindgen(js_name = hashBrowserModule)]
+pub fn hash_browser_module(bytes: &[u8]) -> String {
+    wasmer_types::ModuleHash::sha256(bytes)
+        .to_string()
+        .to_ascii_lowercase()
+}
+
 #[wasm_bindgen(js_name = setSDKUrl)]
 pub fn set_sdk_url(url: String) {
     *CUSTOM_SDK_URL.lock().expect("SDK URL lock poisoned") = Some(url);
@@ -81,18 +88,6 @@ struct ClientCacheOptions {
     mode: Option<String>,
     namespace: Option<String>,
     read_only: Option<bool>,
-}
-
-/// The WebGPU grant of a sandbox, as the JavaScript facade passes it.
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WebGpuOptions {
-    /// Names the page-side canvas registry of this sandbox.
-    canvas_scope: u32,
-    force_fallback_adapter: Option<bool>,
-    max_devices: Option<f64>,
-    max_objects: Option<f64>,
-    max_gpu_memory_bytes: Option<f64>,
 }
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -267,8 +262,6 @@ impl JsWasmer {
             inner: Some(self.inner.sandboxes().create()),
             browser_http: None,
             browser_networks: self.browser_networks.clone(),
-            webgpu: None,
-            gui_waker: None,
         }
     }
 
@@ -316,11 +309,6 @@ pub struct JsSandboxBuilder {
     inner: Option<SandboxBuilder>,
     browser_http: Option<BrowserHttpRequestHandler>,
     browser_networks: BrowserNetworkGroup,
-    /// The WebGPU grant, built at `start`: the GUI grant may come after it,
-    /// and WebGPU then wakes the guests' GUI waits.
-    webgpu: Option<wasmer_sdk::webgpu::WebGpuCtxBuilder>,
-    /// Ends the GUI waits of the sandbox's guests, once it has a GUI.
-    gui_waker: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 #[wasm_bindgen(js_class = SandboxBuilderCore)]
@@ -340,59 +328,6 @@ impl JsSandboxBuilder {
     pub fn env(&mut self, key: String, value: String) -> Result<(), JsValue> {
         let builder = self.take()?.env(key, value);
         self.inner = Some(builder);
-        Ok(())
-    }
-
-    /// Grant guests WebGPU: programs built against `webgpu.h` then run on the
-    /// browser's GPU. The JavaScript facade owns the canvases a guest may
-    /// present to and names them with `canvasScope`.
-    pub fn webgpu(&mut self, options: JsValue) -> Result<(), JsValue> {
-        let options: WebGpuOptions = serde_wasm_bindgen::from_value(options)
-            .map_err(|error| custom_error("INVALID_ARGUMENT", &error.to_string()))?;
-        let limits = wasmer_sdk::webgpu::WebGpuLimits {
-            max_devices: options
-                .max_devices
-                .map(|value| validate_usize("webgpu.limits.maxDevices", value, 1))
-                .transpose()?,
-            max_objects: options
-                .max_objects
-                .map(|value| validate_usize("webgpu.limits.maxObjects", value, 1))
-                .transpose()?,
-            max_gpu_memory_bytes: options
-                .max_gpu_memory_bytes
-                .map(|value| {
-                    validate_integer(
-                        "webgpu.limits.maxGpuMemoryBytes",
-                        value,
-                        0,
-                        MAX_SAFE_INTEGER,
-                    )
-                })
-                .transpose()?,
-            ..wasmer_sdk::webgpu::WebGpuLimits::default()
-        };
-        if self.inner.is_none() {
-            return Err(consumed());
-        }
-        self.webgpu = Some(
-            wasmer_sdk::webgpu::WebGpuCtx::builder()
-                .limits(limits)
-                .force_fallback_adapter(options.force_fallback_adapter.unwrap_or(false))
-                .canvas_scope(options.canvas_scope),
-        );
-        Ok(())
-    }
-
-    /// Grant guests windows and input: programs built against
-    /// `<wasmer/gui.h>` then get canvases of the page as their windows.
-    /// `settings` is plain data (what guests may do, and how much); `page`
-    /// holds the functions with which the JavaScript facade finds the
-    /// canvases.
-    pub fn gui(&mut self, settings: JsValue, page: JsValue) -> Result<(), JsValue> {
-        let ctx = gui::context(settings, &page)?;
-        let waker = ctx.event_waker();
-        self.inner = Some(self.take()?.gui(ctx));
-        self.gui_waker = Some(waker);
         Ok(())
     }
 
@@ -521,17 +456,7 @@ impl JsSandboxBuilder {
     }
 
     pub async fn start(mut self) -> Result<JsSandbox, JsValue> {
-        let mut builder = self.take()?;
-        if let Some(webgpu) = self.webgpu.take() {
-            // A guest waiting for window events also wakes for its WebGPU
-            // events, as a native embedder arranges by handing WebGPU the
-            // GUI's waker.
-            let webgpu = match self.gui_waker.take() {
-                Some(wake) => webgpu.event_waker(wake),
-                None => webgpu,
-            };
-            builder = builder.webgpu(webgpu.build());
-        }
+        let builder = self.take()?;
         builder
             .await
             .map(|inner| JsSandbox {
@@ -544,12 +469,10 @@ impl JsSandboxBuilder {
 
 impl JsSandboxBuilder {
     fn take(&mut self) -> Result<SandboxBuilder, JsValue> {
-        self.inner.take().ok_or_else(consumed)
+        self.inner
+            .take()
+            .ok_or_else(|| custom_error("TARGET_ERROR", "sandbox builder was already consumed"))
     }
-}
-
-fn consumed() -> JsValue {
-    custom_error("TARGET_ERROR", "sandbox builder was already consumed")
 }
 
 #[derive(serde::Serialize)]

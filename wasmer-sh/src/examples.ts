@@ -14,8 +14,6 @@ export interface ShellExample {
   tcpPorts?: number[];
   /** An SDK-managed companion that runs alongside the interactive shell. */
   server?: { command: string; args: string[]; port: number };
-  /** What the example needs beyond what every shell does, such as `webgpu`. */
-  requires?: string[];
   env?: Record<string, string>;
   install: string | null;
   run: string;
@@ -30,49 +28,16 @@ const sources = import.meta.glob<string>(
     "!**/.next/**",
     "!**/__pycache__/**",
     "!**/.python-packages/**",
-    "!../workspace/webgpu/include/**",
-    "!../workspace/webgpu/lib/**",
-    "!../workspace/gui/include/**",
-    "!../workspace/gui/lib/**",
-    "!../workspace/gui/demos/**",
   ],
   { query: "?raw", import: "default", eager: true },
 );
-// The headers and library sources of the two examples that draw outweigh
-// every other example together. They are fetched when a shell that has them
-// starts, not with the picker.
-const deferredSources = import.meta.glob<string>(
-  [
-    "../workspace/webgpu/include/**/*",
-    "../workspace/webgpu/lib/**/*",
-    "../workspace/gui/include/**/*",
-    "../workspace/gui/lib/**/*",
-  ],
-  { query: "?raw", import: "default" },
-);
 
-// Programs built outside the browser, for trying them here: what
-// `scripts/sync-gui-demos.mjs` copied from this checkout's builds. The
-// directory is not in the repository, so a deployed wasmer.sh has none.
-const demoPrograms = import.meta.glob<string>(
-  "../workspace/gui/demos/*.wasm",
-  { query: "?url", import: "default" },
-);
-
-export async function exampleFiles(example?: ShellExample): Promise<Record<string, string | Uint8Array>> {
+export function exampleFiles(example?: ShellExample): Record<string, string> {
   const prefix = example ? `../workspace/${example.source}/` : "../workspace/";
-  const selected = <T>(entries: Record<string, T>) =>
-    Object.entries(entries).filter(([path]) => path.startsWith(prefix));
-  const deferred = await Promise.all([
-    ...selected(deferredSources).map(async ([path, load]) => [path, await load()] as const),
-    ...selected(demoPrograms).map(async ([path, load]) => {
-      const response = await fetch(await load());
-      if (!response.ok) throw new Error(`Unable to load ${path} (${response.status})`);
-      return [path, new Uint8Array(await response.arrayBuffer())] as const;
-    }),
-  ]);
   return Object.fromEntries(
-    [...selected(sources), ...deferred].map(([path, contents]) => [path.slice(prefix.length), contents]),
+    Object.entries(sources)
+      .filter(([path]) => path.startsWith(prefix))
+      .map(([path, contents]) => [path.slice(prefix.length), contents]),
   );
 }
 

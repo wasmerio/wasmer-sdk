@@ -46,6 +46,10 @@ jobs:
     name: Shell (published SDK)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    container:
+      # Match wasmer-sh/pnpm-lock.yaml; avoid downloading system libraries.
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -60,9 +64,14 @@ jobs:
       - name: Build deployment output
         working-directory: wasmer-sh
         run: pnpm run build
-      - name: Install browser
+      - name: Verify installed browser
         working-directory: wasmer-sh
-        run: pnpm exec playwright install --with-deps chromium
+        run: |
+          node --input-type=module -e '
+            import { accessSync } from "node:fs";
+            import { chromium } from "playwright";
+            accessSync(chromium.executablePath());
+          '
       - name: Test production shell startup
         working-directory: wasmer-sh
         run: pnpm run test:production
@@ -92,9 +101,9 @@ jobs:
           cargo +1.99.1 test --locked -p wasmer-sdk-uniffi --lib
           cargo +1.99.1 build --locked -p wasmer-sdk-uniffi --features bindgen-cli
 
-      # The integration branch consumes unreleased GUI/WebGPU crates from
-      # Git. Cargo's upload archive resolves normalized dependencies on
-      # crates.io; verify the source archive until those crates are published.
+      # This integration pins unreleased Wasmer/NAPI revisions from Git.
+      # Cargo normalizes packaged dependencies to crates.io; verify the
+      # source archive until those runtime changes are published.
       - name: Verify the Rust source archive
         run: |
           git archive --format=tar --output "$RUNNER_TEMP/wasmer-sdk-source.tar" HEAD rust
@@ -225,7 +234,12 @@ jobs:
     name: Browser
     needs: javascript
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
+    container:
+      # Match the Playwright versions in js/ and wasmer-sh/. The image
+      # includes browser libraries, avoiding slow apt mirrors on each run.
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --init --ipc=host
     steps:
       - uses: actions/checkout@v6
 
@@ -239,9 +253,19 @@ jobs:
         working-directory: js
         run: npm ci
 
-      - name: Install browsers
+      - name: Verify installed browsers
         working-directory: js
-        run: npx playwright install --with-deps chromium firefox webkit
+        run: |
+          # GitHub's mounted home belongs to pwuser, but this container runs as
+          # root. Firefox requires the home directory to match the current UID.
+          chown "$(id -u):$(id -g)" "$HOME"
+          node --input-type=module -e '
+            import { accessSync } from "node:fs";
+            import { chromium, firefox, webkit } from "playwright";
+            for (const browser of [chromium, firefox, webkit]) {
+              accessSync(browser.executablePath());
+            }
+          '
 
       - uses: actions/download-artifact@v4
         with:
@@ -257,7 +281,6 @@ jobs:
         run: |
           npm ci
           npm install --no-save --package-lock=false ../js
-          npx playwright install --with-deps chromium
           WASMER_EXAMPLE=postgres,pi npm run test:examples
 
   python:

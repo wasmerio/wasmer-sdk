@@ -4,6 +4,22 @@ Build package-first WASIX sandboxes directly into a Rust application. The SDK
 owns package resolution, caching, sandbox filesystems, command execution, live
 process streams, networking, and termination on top of Wasmer.
 
+## Module digests
+
+Raw modules can reuse a digest computed by their caller:
+
+```rust
+let package = wasmer.packages()
+    .load(wasmer_sdk::PackageSource::wasm_module(bytes, sha256))
+    .await?;
+```
+
+The digest must be the SHA-256 of those exact bytes. The SDK still checks
+the module format and `_start` export. Embedders that have already checked
+both can use `PackageSource::module(bytes, sha256, true)`. Package identities
+include module digests, commands, entrypoints, and files under a versioned
+domain, so all byte-source entry points resolve to the same identity.
+
 ## Package download progress
 
 ```rust
@@ -176,93 +192,16 @@ let sandbox = wasmer
 root. Registry and package data can be shared with Python and Node.js, while
 compiled artifacts are partitioned by native target.
 
-## WebGPU
-
-With the `webgpu` feature, a sandbox can be granted the GPU. Programs written
-in C or C++ against the standard `webgpu.h`, built for WASIX with the library
-from [wasmerio/webgpu](https://github.com/wasmerio/webgpu), then run on the
-machine's GPU through [wgpu](https://github.com/gfx-rs/wgpu):
-
-```rust
-use wasmer_sdk::webgpu::WebGpuCtx;
-
-let webgpu = WebGpuCtx::builder()
-    .max_devices(1)
-    .max_gpu_memory_bytes(512 << 20)
-    .build();
-let sandbox = wasmer
-    .sandboxes()
-    .create()
-    .package(app)
-    .webgpu(webgpu.clone())
-    .await?;
-let output = sandbox.command("main").run().await?;
-```
-
-The context is the grant: limits on what a guest process may hold, a
-software-adapter-only switch, and a `SurfaceProvider` that decides what a
-guest's surfaces present to (headless by default; frames can be captured or
-shown in windows). `webgpu.usage()` reports what guests hold, and
-`webgpu.runtime_control().terminate_all()` stops their GPU work. Without the
-grant a program that imports WebGPU does not start.
-
-## Windows and input
-
-With the `gui` feature, a sandbox can be given a GUI. Programs built against
-`<wasmer/gui.h>` ([wasmerio/gui](https://github.com/wasmerio/gui)) then open
-windows and read keys, pointers, text and the clipboard.
-
-```rust
-use wasmer_sdk::gui::GuiCtx;
-
-let gui = GuiCtx::default(); // headless: windows work, and nobody sees them
-let sandbox = wasmer
-    .sandboxes()
-    .create()
-    .package(app)
-    .gui(gui.clone())
-    .await?;
-let output = sandbox.command("main").run().await?;
-```
-
-The context is the grant: what guests may do (`GuiPolicy`), how much
-(`GuiLimits`), and the window system their windows are in. Every command gets
-a scope of its own on it, so killing a command also stops it where it waits
-for input, and takes its windows away. Without the grant a program that
-opens windows does not start.
-
-With `gui-window`, the windows are the desktop's. A window system wants the
-process's main thread, so `main` hands it over and does its own work
-asynchronously:
-
-```rust
-fn main() -> wasmer_sdk::Result<()> {
-    wasmer_sdk::gui::run_main(|windows| async move {
-        let gui = GuiCtx::builder()
-            .window_system(std::sync::Arc::new(windows))
-            .build();
-        // ... create a sandbox with `.gui(gui)` and run its commands ...
-        Ok(())
-    })?
-}
-```
-
-`gui-webgpu` lets WebGPU guests draw on those windows: give the `WebGpuCtx`
-`windows.surfaces(None)` as its surface provider. On the desktop's windows
-(`gui-window`) it needs a wasmer-webgpu newer than the revision this
-workspace pins: the `webgpu-gui` branch of
-[wasmerio/webgpu](https://github.com/wasmerio/webgpu) has it.
-
 ## Examples
 
 Run the same guest programs used by the JavaScript and Python SDK examples:
 
 ```console
-cargo +1.94.0 run --locked -p wasmer-sdk --example python
-cargo +1.94.0 run --locked -p wasmer-sdk --example multiple_runtimes
-cargo +1.94.0 run --locked -p wasmer-sdk --example edgejs_http
-cargo +1.94.0 run --locked -p wasmer-sdk --example postgres_psql
-cargo +1.94.0 run --locked -p wasmer-sdk --example terminal
+cargo +1.99.1 run --locked -p wasmer-sdk --example python
+cargo +1.99.1 run --locked -p wasmer-sdk --example multiple_runtimes
+cargo +1.99.1 run --locked -p wasmer-sdk --example edgejs_http
+cargo +1.99.1 run --locked -p wasmer-sdk --example postgres_psql
+cargo +1.99.1 run --locked -p wasmer-sdk --example terminal
 ```
 
 The PostgreSQL example requires `psql` on `PATH`; set `PSQL` or pass its path
@@ -271,18 +210,18 @@ after `--` otherwise. The common guest inputs live in
 
 ## Build and test locally
 
-The native SDK currently targets Rust 1.94:
+The native SDK currently targets Rust 1.99:
 
 ```console
-rustup toolchain install 1.94.0 --profile minimal
-cargo +1.94.0 test --locked -p wasmer-sdk --all-targets
+rustup toolchain install 1.99.1 --profile minimal
+cargo +1.99.1 test --locked -p wasmer-sdk --all-targets
 ```
 
 Build and test the UniFFI facade separately:
 
 ```console
-cargo +1.94.0 test --locked -p wasmer-sdk-uniffi --lib
-cargo +1.94.0 build --locked \
+cargo +1.99.1 test --locked -p wasmer-sdk-uniffi --lib
+cargo +1.99.1 build --locked \
   -p wasmer-sdk-uniffi \
   --features bindgen-cli
 ```

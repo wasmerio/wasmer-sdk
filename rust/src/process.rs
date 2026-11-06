@@ -3,7 +3,7 @@ use std::{
     pin::Pin,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicU8, Ordering},
     },
     task::{Context, Poll},
     time::Duration,
@@ -227,12 +227,6 @@ impl Process {
             process,
             stdin: stdin_control,
             exit: AtomicU8::new(EXIT_NONE),
-            finished: AtomicBool::new(false),
-            #[cfg(any(
-                all(target_arch = "wasm32", feature = "js-gui"),
-                all(not(target_arch = "wasm32"), feature = "gui")
-            ))]
-            gui: std::sync::OnceLock::new(),
         });
         Self {
             id: control.process.pid().raw(),
@@ -318,10 +312,10 @@ impl Process {
         if let Some(output) = &self.completed {
             return Ok(output.clone());
         }
-        let finished = self.task.wait_finished().await;
-        // Whatever it ended with, it has ended: nobody needs to ask again.
-        self.control.finished.store(true, Ordering::Release);
-        let code = finished
+        let code = self
+            .task
+            .wait_finished()
+            .await
             .map_err(|error| Error::Execution {
                 message: error.to_string(),
             })?
@@ -344,7 +338,6 @@ impl Process {
         let Some(result) = self.control.process.try_join() else {
             return Ok(None);
         };
-        self.control.finished.store(true, Ordering::Release);
         let code = result
             .map_err(|error| Error::Execution {
                 message: error.to_string(),
@@ -451,7 +444,7 @@ impl ProcessHandle {
     /// This waits at most `grace` for the guest to exit on its own; it does
     /// not join the process or return its output.
     pub async fn terminate(&self, grace: Duration) {
-        if self.control.try_join_exited() {
+        if self.control.process.try_join().is_some() {
             return;
         }
         self.control.signal_terminate();
@@ -485,32 +478,9 @@ pub(crate) struct ProcessControl {
     /// The first SDK-requested exit, if any. Once set it is never replaced,
     /// so a terminate that escalates to a kill still reports `Terminated`.
     exit: AtomicU8,
-    /// The process is known to have ended.
-    ///
-    /// Asking the runtime takes a lock that the process's own thread takes
-    /// to publish its exit, and in a browser the asker is usually the page's
-    /// thread, which may not wait for a lock: it traps. A sandbox that is
-    /// closed right after its command was waited for asks at exactly that
-    /// moment. What is known here is not asked again.
-    finished: AtomicBool,
-    /// The command's GUI scope, when its sandbox has a GUI. Closing it stops
-    /// the command where it waits for input and takes its windows away.
-    #[cfg(any(
-        all(target_arch = "wasm32", feature = "js-gui"),
-        all(not(target_arch = "wasm32"), feature = "gui")
-    ))]
-    gui: std::sync::OnceLock<wasmer_gui::GuiScope>,
 }
 
 impl ProcessControl {
-    #[cfg(any(
-        all(target_arch = "wasm32", feature = "js-gui"),
-        all(not(target_arch = "wasm32"), feature = "gui")
-    ))]
-    pub(crate) fn attach_gui(&self, scope: wasmer_gui::GuiScope) {
-        let _ = self.gui.set(scope);
-    }
-
     pub(crate) fn signal_terminate(&self) {
         if !self.record_exit_if_running(EXIT_TERMINATED_GRACEFUL) {
             return;
@@ -542,13 +512,6 @@ impl ProcessControl {
     }
 
     fn force_exit(&self) {
-        #[cfg(any(
-            all(target_arch = "wasm32", feature = "js-gui"),
-            all(not(target_arch = "wasm32"), feature = "gui")
-        ))]
-        if let Some(scope) = self.gui.get() {
-            scope.close();
-        }
         self.process.signal_process(Signal::Sigkill);
         // A wasm worker can be suspended inside an atomic wait while servicing
         // a WASIX syscall. SIGKILL disables and wakes those atomics, but there
@@ -560,14 +523,7 @@ impl ProcessControl {
     }
 
     pub(crate) fn try_join_exited(&self) -> bool {
-        if self.finished.load(Ordering::Acquire) {
-            return true;
-        }
-        let exited = self.process.try_join().is_some();
-        if exited {
-            self.finished.store(true, Ordering::Release);
-        }
-        exited
+        self.process.try_join().is_some()
     }
 
     fn record_exit_if_running(&self, requested: u8) -> bool {
@@ -592,7 +548,7 @@ impl ProcessControl {
 
 impl Drop for Process {
     fn drop(&mut self) {
-        if self.completed.is_none() && !self.control.try_join_exited() {
+        if self.completed.is_none() && self.control.process.try_join().is_none() {
             self.control.kill();
         }
     }

@@ -4,7 +4,7 @@ A fast, browser-native command shell powered by Wasmer, WASIX, and the new
 [`@wasmer/sdk`](https://www.npmjs.com/package/@wasmer/sdk) sandbox API.
 
 The opening screen offers Pi, Node.js, Express, Next.js, Richards.js, Python HTTP, Flask, Django,
-FastAPI, PostgreSQL, Clang / C, FFmpeg, yt-dlp, and WebGPU templates. Selecting a template opens Bash at
+FastAPI, PostgreSQL, Clang / C, FFmpeg, and yt-dlp templates. Selecting a template opens Bash at
 `/workspace`, with that example's source files directly in the root and only its
 required runtime packages. The terminal shows the install and run commands;
 nothing is installed automatically. Python dependencies are isolated in each
@@ -92,95 +92,6 @@ The compiler, linker, and C library come from `clang/clang`. No dependency
 installation is needed. The [example README](workspace/clang/README.md) also
 shows how to compile, read the emitted bytes, and run them through the JavaScript
 and Swift SDK APIs. Generated binaries are not bundled with the example.
-
-Choose **WebGPU** under **Graphics** (`?example=webgpu`) to compile a C program
-written against the standard `webgpu.h` and watch it draw with your GPU:
-
-```sh
-clang -Iinclude triangle.c lib/*.c -o triangle.wasm
-./triangle.wasm
-```
-
-A canvas opens beside the terminal when the program creates its surface, and
-stays until you close it; the **WebGPU** badge in the header brings it back.
-Press Ctrl-C to stop the program. Every sandbox is granted WebGPU where the
-browser has it, so the same works in the full shell (`cd webgpu`), and for any
-program built against `webgpu.h` that you bring yourself. See the
-[example README](workspace/webgpu/README.md).
-
-The example carries the header and Wasmer's guest library as source, copied
-from [wasmerio/webgpu](https://github.com/wasmerio/webgpu) (the
-`packages/webgpu` submodule) by
-`node scripts/sync-webgpu-example.mjs`; `npm run test:examples` fails when the
-copy is out of date. Its catalog entry has `"requires": ["webgpu"]`: wasmer.sh
-refuses to start it in a browser without WebGPU and WebAssembly JSPI, and the
-native WasmerShell leaves such examples out.
-
-Before the SDK's WebGPU support is released to npm, run this example from
-`wasmer-sh/` with the SDK built from the same checkout:
-
-```sh
-npm --prefix ../js run build
-npm install --no-save --package-lock=false ../js
-WASMER_BROWSER_CHANNEL=chrome WASMER_EXAMPLE=webgpu npm run test:examples
-npm run dev
-```
-
-`WASMER_BROWSER_CHANNEL=chrome` runs the check in the installed Chrome.
-Playwright's own Chromium has no GPU adapter in headless mode; there the check
-stops after compiling the program. The published SDK dependency must include
-WebGPU before the example is deployed.
-
-Choose **Windows and input** under **Graphics** (`?example=gui`) for a program
-that also has a window: it is written against `<wasmer/gui.h>`, and what you
-click, drag and type on the canvas is what it reads.
-
-```sh
-clang -Iinclude triangle.c lib/*.c -o triangle.wasm
-./triangle.wasm
-```
-
-Click the canvas to give it the keyboard: drag or use the arrows to turn the
-triangle, `F` for fullscreen, `L` to lock the cursor, `Q` to quit. Every
-sandbox is granted windows, with the canvas panel as the one window there is,
-so the same works in the full shell (`cd gui`) and for any program built
-against the header. The panel decides the window's size, and the program is
-told when it changes. See the [example README](workspace/gui/README.md).
-
-Its header, program and WebGPU library are copied from
-[wasmerio/gui](https://github.com/wasmerio/gui) and wasmerio/webgpu (the
-`packages/gui` and `packages/webgpu` submodules) by
-`node scripts/sync-gui-example.mjs`, checked by
-`npm run test:examples` like the WebGPU example's. Its catalog entry has
-`"requires": ["webgpu", "gui"]`; before the SDK's support for windows is
-released to npm, run it with the SDK built from this checkout, as above, with
-`WASMER_EXAMPLE=gui`.
-
-Programs that reach their window through a library are not compiled in the
-browser: SDL3 and winit have backends for `<wasmer/gui.h>`
-([wasmerio/gui](https://github.com/wasmerio/gui/tree/main/integrations)), and
-what they build are the files that run here. To try them in a checkout, build
-them and copy them into the example:
-
-```sh
-make -C ../packages/gui sdl-programs imgui-demo winit-programs
-node scripts/sync-gui-demos.mjs
-npm run dev
-```
-
-The windows example then has a `demos` directory:
-
-```sh
-./demos/imgui.wasm          # Dear ImGui's SDL3 example, drawn by SDL's software renderer
-./demos/sdl-events.wasm     # prints every SDL event
-./demos/winit-window.wasm   # winit's own `window` example
-./demos/winit-events.wasm   # prints every winit event
-```
-
-Click the canvas to give a program the keyboard, and press Ctrl-C in the
-terminal to end it. `workspace/gui/demos` is not in the repository, so a
-deployed wasmer.sh has no such directory;
-`node scripts/sync-gui-demos.mjs --clean` removes it again.
 
 The Django template is a standard `manage.py` / `mysite` starter based on
 [Wasmer's Django example](https://github.com/wasmerio/examples/tree/main/python-django).

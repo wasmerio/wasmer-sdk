@@ -211,111 +211,6 @@ browser can use `SharedArrayBuffer`. Serve the page with
 Browser package data is persisted with browser storage rather than the Node
 filesystem cache.
 
-### WebGPU
-
-Grant a sandbox the GPU and its commands can use WebGPU: programs written in
-C or C++ against the standard `webgpu.h`, built for WASIX with the library
-from [wasmerio/webgpu](https://github.com/wasmerio/webgpu), run on the browser's
-`navigator.gpu`.
-
-```javascript
-const sandbox = await wasmer.sandboxes.create({
-  packages: [app],
-  webgpu: { canvas: document.querySelector("canvas") },
-});
-await sandbox.command(app).run();
-```
-
-`webgpu: true` is enough for programs that only compute. A program that
-presents names its target with a selector; `canvas` answers for every
-selector and `canvases: { "#main": element }` for particular ones.
-`sandbox.webgpu.setCanvas(canvas, selector)` changes them later. `canvas` can
-also be a function: it is called with the selector when a guest creates a
-surface and returns the canvas for it, which is the moment to create or
-reveal one.
-
-- An `HTMLCanvasElement` stays with the page. The guest renders in its worker
-  and each frame it presents is shown in the element, so every command of the
-  sandbox can draw to it. The element's `width` and `height` are the size the
-  guest is asked to render at.
-- An `OffscreenCanvas` from `canvas.transferControlToOffscreen()` moves to
-  the first guest thread that asks for it, which then presents without
-  involving the page's thread. It cannot be given to another.
-
-`forceFallbackAdapter` restricts guests to a software adapter, and `limits`
-caps the devices, objects and GPU memory one guest process may hold.
-
-Guests need WebAssembly JavaScript Promise Integration (JSPI) to wait for the
-GPU; creating the sandbox fails with `CAPABILITY_UNAVAILABLE` where the
-engine does not have it. Without the `webgpu` option a program that imports
-WebGPU does not start.
-
-Run the example, a spinning triangle drawn by
-[`triangle.c`](https://github.com/wasmerio/webgpu/blob/main/examples/triangle.c)
-(the `packages/webgpu` submodule has it; `git submodule update --init packages/webgpu`):
-
-```sh
-make -C ../packages/webgpu examples
-npm run build
-node examples/serve-webgpu.mjs
-# Open the printed URL in a browser with WebGPU.
-```
-
-### Windows and input
-
-Grant a sandbox a GUI and its commands can open windows: programs built
-against [`<wasmer/gui.h>`](https://github.com/wasmerio/gui/blob/main/include/wasmer/gui.h) get canvases
-of the page as their windows, and read what the user does there. Most
-programs get there through a library: SDL3 and winit both have a backend for
-it ([wasmerio/gui](https://github.com/wasmerio/gui/tree/main/integrations)),
-and a program built with either runs here as the file it is under
-`wasmer run`.
-
-```ts
-const canvas = document.querySelector("canvas");
-const sandbox = await wasmer.sandboxes.create({
-  packages: [app],
-  gui: { canvas },
-  webgpu: true, // to draw on the same canvas
-});
-await sandbox.command(app).run();
-```
-
-A window is an `HTMLCanvasElement`. `gui.canvas` is the one a program gets
-when it names no target, or a function that is asked for the canvas of each
-window as it is opened; `gui.canvases` maps the targets a program names
-(`WGUIWindowDescriptor.target`) to canvases, and
-`sandbox.gui.setCanvas(canvas, target)` changes them later. While a canvas is
-a window, the SDK keeps its `width` and `height` at the pixels it shows, takes
-the keyboard for it when it is clicked, and gives the guest keys, pointers
-(mouse, touch and pen), the wheel, text from the system's input methods, and
-the clipboard. With `webgpu` the guest draws on the canvas it has its window
-in: nothing has to be listed twice. A guest without a GPU draws the canvas
-itself, frame by frame (`wguiWindowPresentPixels`); the canvas then has the
-size of the frames, and the page's layout stretches it.
-
-What a browser only allows in answer to something the user did (fullscreen,
-locking the cursor) happens at the user's next press when a guest asks at
-another moment. Reading the clipboard is limited to what the user pastes into
-the window, unless `gui.permissions.clipboardRead` is `"allow"` (the browser
-may then ask the user) or `"deny"`. `gui.permissions` also switches off
-fullscreen, the cursor lock, custom cursors, text entry and clipboard writes;
-`gui.limits` caps a command's windows and unread events; `gui.onTitle` hears
-the titles guests give their windows; and `gui.resizable: false` leaves the
-size of a canvas to the page's layout alone.
-
-Guests wait for input without WebAssembly JSPI, so windows work wherever the
-SDK does. They need a page: creating the sandbox fails with
-`CAPABILITY_UNAVAILABLE` in Node and in a worker. Without the `gui` option a
-program that opens windows does not start.
-
-Two options trade that default for speed. With `gui.suspendingWaits: true` a
-guest waiting for input leaves its worker free, where the browser has JSPI
-and `Atomics.waitAsync`: whatever else the worker has to do runs meanwhile,
-and with `webgpu` a GPU result the guest is owed ends the wait. With
-`gui.eagerRedraw: true` a window is told to redraw at once, rather than at
-the next animation frame, when that answers something the user did.
-
 ### Local TCP between browser sandboxes
 
 Browser sandboxes with `network: { mode: "http" }` or `"wisp"` share virtual
@@ -570,24 +465,6 @@ npm run test:browser-http
 npm run test:browser-node
 npm run test:browser-postgres
 ```
-
-`npm run test:browser-webgpu` runs the WebGPU conformance programs of
-[wasmerio/webgpu](https://github.com/wasmerio/webgpu) through the SDK in the installed
-Chrome (build them first with `make -C ../packages/webgpu programs`). It is
-skipped where the browser has no WebGPU adapter.
-
-`npm run test:browser-gui` runs the test programs of
-[wasmerio/gui](https://github.com/wasmerio/gui) (the `packages/gui` submodule)
-through the SDK in the installed Chrome, with real key, mouse, wheel, touch and
-input-method input (build them first with
-`make -C ../packages/gui programs examples`). The part that draws is skipped
-where the browser has no WebGPU adapter.
-
-`npm run test:browser-gui-sdl` and `npm run test:browser-gui-winit` do the
-same for programs that use SDL3 and winit: a program that prints what each
-library reports, Dear ImGui's SDL3 example and winit's `window` example
-(`make -C ../packages/gui sdl-programs imgui-demo winit-programs`; each test
-is skipped while its program is not built).
 
 `npm run check` type-checks the handwritten TypeScript API without rebuilding
 the wasm module.

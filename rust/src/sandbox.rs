@@ -42,16 +42,6 @@ pub struct SandboxBuilder {
     workspace_provider: Option<Arc<dyn FileSystem>>,
     network: NetworkPolicy,
     network_provider: Option<DynVirtualNetworking>,
-    #[cfg(any(
-        all(target_arch = "wasm32", feature = "js-webgpu"),
-        all(not(target_arch = "wasm32"), feature = "webgpu")
-    ))]
-    webgpu: Option<wasmer_webgpu::WebGpuCtx>,
-    #[cfg(any(
-        all(target_arch = "wasm32", feature = "js-gui"),
-        all(not(target_arch = "wasm32"), feature = "gui")
-    ))]
-    gui: Option<wasmer_gui::GuiCtx>,
 }
 
 /// A value that can be mounted into a sandbox as an external filesystem.
@@ -89,16 +79,6 @@ impl SandboxBuilder {
             workspace_provider: None,
             network: NetworkPolicy::Disabled,
             network_provider: None,
-            #[cfg(any(
-                all(target_arch = "wasm32", feature = "js-webgpu"),
-                all(not(target_arch = "wasm32"), feature = "webgpu")
-            ))]
-            webgpu: None,
-            #[cfg(any(
-                all(target_arch = "wasm32", feature = "js-gui"),
-                all(not(target_arch = "wasm32"), feature = "gui")
-            ))]
-            gui: None,
         }
     }
 
@@ -200,41 +180,6 @@ impl SandboxBuilder {
         self
     }
 
-    /// Grant the sandbox's commands the GPU, through WebGPU.
-    ///
-    /// Disabled by default: without it, a guest built against `webgpu.h`
-    /// fails to start because its imports are missing. The context carries the
-    /// embedder's policy (limits, where surfaces present) and can be shared by
-    /// several sandboxes.
-    #[cfg(any(
-        all(target_arch = "wasm32", feature = "js-webgpu"),
-        all(not(target_arch = "wasm32"), feature = "webgpu")
-    ))]
-    #[must_use]
-    pub fn webgpu(mut self, ctx: wasmer_webgpu::WebGpuCtx) -> Self {
-        self.webgpu = Some(ctx);
-        self
-    }
-
-    /// Let the sandbox's commands open windows and read input, through
-    /// `<wasmer/gui.h>`.
-    ///
-    /// Disabled by default: without it, a guest that uses the GUI fails to
-    /// start because its imports are missing. The context carries the
-    /// embedder's policy and the window system, which is headless unless one
-    /// is given; it can be shared by several sandboxes. Every command gets a
-    /// scope of its own on it, so that killing a command also stops it where
-    /// it waits for input, and takes its windows away.
-    #[cfg(any(
-        all(target_arch = "wasm32", feature = "js-gui"),
-        all(not(target_arch = "wasm32"), feature = "gui")
-    ))]
-    #[must_use]
-    pub fn gui(mut self, ctx: wasmer_gui::GuiCtx) -> Self {
-        self.gui = Some(ctx);
-        self
-    }
-
     /// Resolve packages and create the sandbox.
     ///
     /// # Errors
@@ -304,17 +249,6 @@ impl SandboxBuilder {
             NetworkPolicy::Host => host_networking(&self.client),
         });
         let runtime = build_sandbox_runtime(&self.client, Arc::clone(&networking));
-        #[cfg(any(
-            all(target_arch = "wasm32", feature = "js-webgpu"),
-            all(not(target_arch = "wasm32"), feature = "webgpu")
-        ))]
-        let runtime: Arc<dyn Runtime + Send + Sync> = match self.webgpu {
-            // This hook returns no imports for packages that do not use WebGPU.
-            Some(webgpu) => Arc::new(
-                OverriddenRuntime::new(runtime).with_instantiation_hook(webgpu.runtime_hooks()),
-            ),
-            None => runtime,
-        };
 
         Ok(Sandbox {
             inner: Arc::new(SandboxInner {
@@ -326,11 +260,6 @@ impl SandboxBuilder {
                 mounts,
                 networking,
                 runtime,
-                #[cfg(any(
-                    all(target_arch = "wasm32", feature = "js-gui"),
-                    all(not(target_arch = "wasm32"), feature = "gui")
-                ))]
-                gui: self.gui,
                 processes: Mutex::new(Vec::new()),
                 closed: AtomicBool::new(false),
             }),
@@ -363,11 +292,6 @@ pub(crate) struct SandboxInner {
     pub(crate) mounts: Vec<MountSpec>,
     pub(crate) networking: DynVirtualNetworking,
     pub(crate) runtime: Arc<dyn Runtime + Send + Sync>,
-    #[cfg(any(
-        all(target_arch = "wasm32", feature = "js-gui"),
-        all(not(target_arch = "wasm32"), feature = "gui")
-    ))]
-    pub(crate) gui: Option<wasmer_gui::GuiCtx>,
     processes: Mutex<Vec<Weak<ProcessControl>>>,
     closed: AtomicBool,
 }
