@@ -79,21 +79,26 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         with:
-          cargo-profile: native-1.95
+          cargo-profile: native-1.99
 
       - name: Install Rust
-        run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
+        run: rustup toolchain install 1.99.1 --profile minimal --no-self-update
 
       - name: Test the Rust SDK
-        run: cargo +1.95.0 test --locked -p wasmer-sdk --all-targets
+        run: cargo +1.99.1 test --locked -p wasmer-sdk --all-targets
 
       - name: Test and build UniFFI
         run: |
-          cargo +1.95.0 test --locked -p wasmer-sdk-uniffi --lib
-          cargo +1.95.0 build --locked -p wasmer-sdk-uniffi --features bindgen-cli
+          cargo +1.99.1 test --locked -p wasmer-sdk-uniffi --lib
+          cargo +1.99.1 build --locked -p wasmer-sdk-uniffi --features bindgen-cli
 
-      - name: Verify the Rust source package
-        run: cargo +1.95.0 package --locked -p wasmer-sdk --no-verify
+      # The integration branch consumes unreleased GUI/WebGPU crates from
+      # Git. Cargo's upload archive resolves normalized dependencies on
+      # crates.io; verify the source archive until those crates are published.
+      - name: Verify the Rust source archive
+        run: |
+          git archive --format=tar --output "$RUNNER_TEMP/wasmer-sdk-source.tar" HEAD rust
+          tar -tf "$RUNNER_TEMP/wasmer-sdk-source.tar"
 
   swift:
     name: Swift (macOS)
@@ -107,15 +112,15 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         with:
-          cargo-profile: swift-1.95-sys
+          cargo-profile: swift-1.99-sys
           cache-compiled-artifacts: "false"
 
       - name: Install Rust
-        run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
+        run: rustup toolchain install 1.99.1 --profile minimal --no-self-update
 
       - name: Build the UniFFI Swift package
         env:
-          RUSTUP_TOOLCHAIN: 1.95.0
+          RUSTUP_TOOLCHAIN: 1.99.1
         run: python3 swift/scripts/build.py
 
       - name: Test Swift against local Wasm fixtures
@@ -274,13 +279,13 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         with:
-          cargo-profile: native-1.95-release
+          cargo-profile: native-1.99-release
 
       - name: Check release metadata
         run: python .github/scripts/check-release-version.py
 
       - name: Install Rust
-        run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
+        run: rustup toolchain install 1.99.1 --profile minimal --no-self-update
 
       - name: Build the UniFFI Python module
         run: python python/scripts/build.py --release

@@ -429,7 +429,7 @@ impl Command {
             process_stdin = Some(ProcessStdin::terminal(tty, closer));
         }
         let task = spawn_exec(
-            selected.inner.binary.clone(),
+            selected.inner.binary.clone().into(),
             &command_name,
             environment,
             &runtime,
