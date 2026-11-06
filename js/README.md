@@ -396,6 +396,13 @@ The SDK opens the WISP connection lazily when the guest first requests DNS or
 outbound TCP access. Browser applications can also supply or replace the
 endpoint at that point:
 
+Loopback destinations normally stay inside the SDK client's virtual network.
+A browser application can explicitly route them to the WISP host instead with
+`network: { mode: "wisp", url: "wss://proxy.example/wisp/", loopback: "egress" }`.
+The grant belongs to that sandbox; other sandboxes keep their private routes.
+The relay's own destination policy still applies. Bound-socket egress remains
+unsupported, as it is for other WISP destinations.
+
 ```javascript
 const sandbox = await wasmer.sandboxes.create({
   packages: ["curl/curl"],

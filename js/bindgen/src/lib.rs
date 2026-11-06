@@ -468,6 +468,26 @@ impl JsSandboxBuilder {
         Ok(())
     }
 
+    /// Explicit browser capability: send loopback destinations to WISP.
+    #[wasm_bindgen(js_name = allowLoopbackEgress)]
+    pub fn allow_loopback_egress(&self) -> Result<(), JsValue> {
+        self.browser_http
+            .as_ref()
+            .ok_or_else(|| {
+                custom_error(
+                    "CAPABILITY_UNAVAILABLE",
+                    "loopback egress requires browser WISP networking",
+                )
+            })?
+            .allow_loopback_egress()
+            .map_err(|_| {
+                custom_error(
+                    "CAPABILITY_UNAVAILABLE",
+                    "loopback egress requires live browser WISP networking",
+                )
+            })
+    }
+
     /// Disable automatic localhost discovery before adding explicit peers.
     #[wasm_bindgen(js_name = restrictNetworkPeers)]
     pub fn restrict_network_peers(&self) -> Result<(), JsValue> {

@@ -29,6 +29,20 @@ test("client exposes package and sandbox services synchronously", () => {
   assert.equal(typeof wasmer.sandboxes.create, "function");
 });
 
+test("loopback egress is an explicit WISP-only option", async () => {
+  const client = new Wasmer({ cache: false });
+  try {
+    for (const network of [
+      { mode: "wisp", loopback: true },
+      { mode: "wisp", loopback: "allow" },
+      { mode: "http", loopback: "egress" },
+      { mode: "disabled", loopback: "egress" },
+    ]) {
+      await assert.rejects(client.sandboxes.create({ network }), { code: "INVALID_ARGUMENT" });
+    }
+  } finally { await client.close(); }
+});
+
 test("wasm facade rejects invalid retention values from direct callers", async () => {
   const wasm = await readFile(
     new URL("../pkg/wasmer_sdk_js_bg.wasm", import.meta.url),

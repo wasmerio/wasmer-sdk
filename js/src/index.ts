@@ -95,6 +95,8 @@ export type NetworkPolicy =
   /** Browser TCP/DNS egress over WISP, plus browser HTTP ingress. */
   | {
       mode: "wisp";
+      /** Route loopback to the WISP host instead of sandbox peers. Explicit opt-in. */
+      loopback?: "egress";
       /** Omit to share localhost with this client; [] isolates, [sandbox] links explicitly. */
       peers?: readonly Sandbox[];
       /** Initial endpoint. The connection is opened lazily on first network egress. */
@@ -589,6 +591,11 @@ export class Wasmer {
   }
 
   async #createSandbox(options: SandboxOptions): Promise<Sandbox> {
+    const network = options.network ?? { mode: "disabled" };
+    if ("loopback" in network && network.loopback !== undefined &&
+        (network.mode !== "wisp" || network.loopback !== "egress")) {
+      throw new WasmerError("network.loopback must be 'egress' with WISP networking", "INVALID_ARGUMENT");
+    }
     const client = await this.getCore();
     const sources = options.packages ?? [];
     const loaded = await this.packages.loadMany(
@@ -607,7 +614,6 @@ export class Wasmer {
     for (const [key, value] of Object.entries(options.env ?? {})) {
       builder.env(key, value);
     }
-    const network = options.network ?? { mode: "disabled" };
     let networkBridge: { close(): void } | undefined;
     let canvases: WebGpuCanvases | undefined;
     if (network.mode === "wisp") {
@@ -626,6 +632,7 @@ export class Wasmer {
       );
       networkBridge = bridge;
       builder.networkWisp(bridge);
+      if (network.loopback === "egress") builder.allowLoopbackEgress();
     } else {
       builder.network(network.mode);
     }
