@@ -4,6 +4,15 @@ Build package-first WASIX sandboxes directly into a Rust application. The SDK
 owns package resolution, caching, sandbox filesystems, command execution, live
 process streams, networking, and termination on top of Wasmer.
 
+## Native engine selection
+
+`Wasmer::with_engine(config, engine)` uses the caller's native Wasmer engine
+for compilation and execution. This supports engines configured by the
+embedding application, including LLVM. Compiled caches are separated by the
+engine's deterministic identity; clients using the same engine identity and
+cache root can reuse their artifacts. `Wasmer::new` and `with_config` keep
+their default Cranelift engine.
+
 ## Package download progress
 
 ```rust

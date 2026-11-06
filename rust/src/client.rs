@@ -135,11 +135,50 @@ impl Wasmer {
         Self::new_with_http_client(config, http_client)
     }
 
+    /// Create a native client with an explicitly selected Wasmer engine.
+    ///
+    /// Compiled artifacts are isolated by the engine's deterministic identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when cache, runtime or HTTP initialization fails.
+    #[cfg(feature = "sys")]
+    pub fn with_engine(config: WasmerConfig, engine: wasmer::Engine) -> Result<Self> {
+        let http_client: Arc<dyn HttpClient + Send + Sync> =
+            Arc::new(wasmer_wasix::http::default_http_client().ok_or_else(|| {
+                Error::Initialization {
+                    message: "this target has no default HTTP client".to_owned(),
+                }
+            })?);
+        Self::new_with_http_client_and_engine(config, http_client, Some(engine))
+    }
+
     #[cfg(feature = "sys")]
     fn new_with_http_client(
         config: WasmerConfig,
         http_client: Arc<dyn HttpClient + Send + Sync>,
     ) -> Result<Self> {
+        Self::new_with_http_client_and_engine(config, http_client, None)
+    }
+
+    #[cfg(feature = "sys")]
+    fn new_with_http_client_and_engine(
+        config: WasmerConfig,
+        http_client: Arc<dyn HttpClient + Send + Sync>,
+        engine: Option<wasmer::Engine>,
+    ) -> Result<Self> {
+        use sha2::Digest;
+        let compiler_cache = engine.as_ref().map_or_else(
+            || engine_identity().to_owned(),
+            |engine| {
+                let digest = sha2::Sha256::digest(engine.deterministic_id().as_bytes());
+                let hash = digest
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>();
+                format!("engine-{hash}")
+            },
+        );
         let cache_root = absolutize(config.cache.root)?;
         let package_cache = cache_root.join("cache-v1").join("packages");
         let registry_cache = cache_root.join("cache-v1").join("registry");
@@ -147,7 +186,7 @@ impl Wasmer {
             .join("cache-v1")
             .join("compiled")
             .join(target_identity())
-            .join(engine_identity());
+            .join(compiler_cache);
 
         for directory in [&package_cache, &registry_cache, &compiled_cache] {
             std::fs::create_dir_all(directory).map_err(|error| Error::Initialization {
@@ -183,6 +222,9 @@ impl Wasmer {
             .with_local_cache(registry_cache, REGISTRY_QUERY_CACHE_TTL),
         );
         let mut runtime = PluggableRuntime::new(Arc::clone(&tasks) as Arc<_>);
+        if let Some(engine) = engine {
+            runtime.set_engine(engine);
+        }
         runtime
             .set_tty(Arc::new(DefaultTty::default()))
             .set_module_cache(module_cache)
