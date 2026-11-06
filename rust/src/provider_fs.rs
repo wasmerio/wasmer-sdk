@@ -20,9 +20,9 @@ use virtual_fs::{
     VirtualFile,
 };
 
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 type ProviderRuntime = tokio::runtime::Handle;
-#[cfg(not(feature = "sys"))]
+#[cfg(not(feature = "sys-runtime"))]
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ProviderRuntime;
 
@@ -932,7 +932,7 @@ fn provider_io_error(error: FsError) -> io::Error {
 /// `block_in_place` keeps the rest of the runtime making progress; on a
 /// current-thread runtime that safety valve does not exist, so providers
 /// should not be driven from the runtime's own thread there.
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 fn run_provider<T, F>(runtime: &ProviderRuntime, future: F) -> T
 where
     T: Send + 'static,
@@ -960,7 +960,7 @@ where
 /// through shared memory while a separate control page performs the I/O.
 /// Do not await JavaScript promises on this same worker: its event loop cannot
 /// make progress while a synchronous VFS operation is in flight.
-#[cfg(not(feature = "sys"))]
+#[cfg(not(feature = "sys-runtime"))]
 fn run_provider<T, F>(_runtime: &ProviderRuntime, future: F) -> T
 where
     F: Future<Output = T>,
@@ -968,7 +968,7 @@ where
     futures::executor::block_on(future)
 }
 
-#[cfg(all(test, feature = "sys"))]
+#[cfg(all(test, feature = "sys-runtime"))]
 mod tests {
     use super::*;
 

@@ -87,6 +87,9 @@ jobs:
       - name: Test the Rust SDK
         run: cargo +1.99.1 test --locked -p wasmer-sdk --all-targets
 
+      - name: Test compiler-free precompiled execution
+        run: python3 rust/tests/runtime_only.py --toolchain 1.99.1
+
       - name: Test and build UniFFI
         run: |
           cargo +1.99.1 test --locked -p wasmer-sdk-uniffi --lib

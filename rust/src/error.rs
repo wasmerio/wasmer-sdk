@@ -88,6 +88,20 @@ pub enum Error {
 
     #[error("unable to initialize the SDK: {message}")]
     Initialization { message: String },
+
+    /// A command's module came by its hash alone, with no bytes (a module
+    /// compiled ahead of time: `PackageSource::module` with empty bytes),
+    /// and the compiled-module cache does not have it, or could not load it.
+    /// There is nothing to compile it from.
+    #[error(
+        "the compiled module {module_hash} is not in the compiled-module cache for engine `{engine}`, \
+         or could not be loaded from it ({message}), and its package has no module bytes to compile"
+    )]
+    ModuleNotCompiled {
+        module_hash: String,
+        engine: String,
+        message: String,
+    },
 }
 
 impl Error {
@@ -120,6 +134,7 @@ impl Error {
             Self::InternalState { .. } => "INTERNAL_ERROR",
             Self::Io(_) => "IO_ERROR",
             Self::Initialization { .. } => "INITIALIZATION_ERROR",
+            Self::ModuleNotCompiled { .. } => "MODULE_NOT_COMPILED",
         }
     }
 }

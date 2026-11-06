@@ -10,9 +10,9 @@ use std::{
 };
 
 use wasmer_config::package::PackageSource as WasmerPackageSource;
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 use wasmer_wasix::runtime::DefaultTty;
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 use wasmer_wasix::runtime::{
     module_cache::{FileSystemCache, ModuleCache, SharedCache},
     task_manager::tokio::TokioTaskManager,
@@ -89,7 +89,7 @@ pub struct Sandboxes {
 
 pub(crate) struct ClientInner {
     pub(crate) runtime: Arc<PluggableRuntime>,
-    #[cfg(feature = "sys")]
+    #[cfg(feature = "sys-runtime")]
     pub(crate) tasks: Arc<TokioTaskManager>,
     pub(crate) output_bytes: usize,
     registry_packages: RwLock<HashMap<String, Package>>,
@@ -142,7 +142,7 @@ impl Wasmer {
     /// # Errors
     ///
     /// Returns an error when cache, runtime or HTTP initialization fails.
-    #[cfg(feature = "sys")]
+    #[cfg(feature = "sys-runtime")]
     pub fn with_engine(config: WasmerConfig, engine: wasmer::Engine) -> Result<Self> {
         let http_client: Arc<dyn HttpClient + Send + Sync> =
             Arc::new(wasmer_wasix::http::default_http_client().ok_or_else(|| {
@@ -161,7 +161,7 @@ impl Wasmer {
         Self::new_with_http_client_and_engine(config, http_client, None)
     }
 
-    #[cfg(feature = "sys")]
+    #[cfg(feature = "sys-runtime")]
     fn new_with_http_client_and_engine(
         config: WasmerConfig,
         http_client: Arc<dyn HttpClient + Send + Sync>,
@@ -423,11 +423,11 @@ impl Wasmer {
                     .or_insert_with(|| package.clone())
                     .clone());
             }
-            #[cfg(feature = "sys")]
+            #[cfg(feature = "sys-runtime")]
             PackageSource::Path(path) if path.is_dir() => {
                 BinaryPackage::from_dir(&path, &runtime).await
             }
-            #[cfg(feature = "sys")]
+            #[cfg(feature = "sys-runtime")]
             PackageSource::Path(path) => {
                 let container = wasmer_package::utils::from_disk(&path).map_err(|error| {
                     Error::PackageLoad {
@@ -437,7 +437,7 @@ impl Wasmer {
                 })?;
                 BinaryPackage::from_webc(&container, &runtime).await
             }
-            #[cfg(not(feature = "sys"))]
+            #[cfg(not(feature = "sys-runtime"))]
             PackageSource::Path(path) => {
                 return Err(Error::PackageLoad {
                     package_source: path.display().to_string(),
@@ -448,6 +448,16 @@ impl Wasmer {
             }
             PackageSource::Bytes(bytes) if bytes.starts_with(b"\0asm") => {
                 let package = PackageDefinition::from_wasm(bytes).into_package().await?;
+                if let Some(progress) = &progress {
+                    progress.local(&package, false);
+                }
+                return Ok(package);
+            }
+            #[cfg(feature = "sys-runtime")]
+            PackageSource::PrecompiledModule { sha256 } => {
+                let package = PackageDefinition::from_wasm(bytes::Bytes::new())
+                    .into_package_with_digests([("main".to_owned(), sha256)].into(), true)
+                    .await?;
                 if let Some(progress) = &progress {
                     progress.local(&package, false);
                 }
@@ -515,6 +525,33 @@ impl Packages {
             .await
     }
 
+    /// Compile each command into the client's compiled-module cache without
+    /// running guest code. Cached commands are loaded instead of compiled.
+    ///
+    /// # Errors
+    /// Returns an error if the client is closed, package loading fails, or a
+    /// command cannot be compiled or loaded by the selected engine.
+    #[cfg(feature = "sys-runtime")]
+    pub async fn precompile(&self, source: impl Into<PackageSource>) -> Result<()> {
+        use wasmer_wasix::runtime::ModuleInput;
+        let package = self.load(source).await?;
+        let runtime = &self.client.inner.runtime;
+        for command in &package.inner.binary.commands {
+            crate::command::require_compiled_module(runtime.as_ref(), command).await?;
+            runtime
+                .resolve_module(
+                    ModuleInput::Command(std::borrow::Cow::Borrowed(command)),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|error| Error::Execution {
+                    message: format!("unable to compile command `{}`: {error:#}", command.name()),
+                })?;
+        }
+        Ok(())
+    }
+
     /// Load one package with operation-scoped progress and cancellation.
     pub async fn load_with_options(
         &self,
@@ -566,7 +603,7 @@ impl Sandboxes {
     }
 }
 
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 fn absolutize(path: PathBuf) -> Result<PathBuf> {
     if path.is_absolute() {
         return Ok(path);
@@ -578,7 +615,7 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
         })
 }
 
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 fn target_identity() -> String {
     format!(
         "{}-{}-{}",
@@ -588,17 +625,17 @@ fn target_identity() -> String {
     )
 }
 
-#[cfg(feature = "sys")]
+#[cfg(feature = "sys-runtime")]
 fn engine_identity() -> &'static str {
-    #[cfg(feature = "sys")]
+    #[cfg(feature = "sys-runtime")]
     {
         "cranelift"
     }
-    #[cfg(all(not(feature = "sys"), feature = "js"))]
+    #[cfg(all(not(feature = "sys-runtime"), feature = "js"))]
     {
         "javascript"
     }
-    #[cfg(not(any(feature = "sys", feature = "js")))]
+    #[cfg(not(any(feature = "sys-runtime", feature = "js")))]
     {
         "headless"
     }

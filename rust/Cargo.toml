@@ -9,13 +9,13 @@ repository = "https://github.com/wasmerio/wasmer-sdk"
 
 [features]
 default = ["sys"]
-sys = [
+sys-runtime = [
   "virtual-fs/host-fs",
-  "wasmer/cranelift",
   "wasmer-wasix/sys-default",
 ]
+sys = ["sys-runtime", "wasmer/cranelift"]
 napi-v8 = [
-  "sys",
+  "sys-runtime",
   "dep:wasmer-napi",
   "wasmer-napi/wasix",
 ]
@@ -34,7 +34,7 @@ js-napi = [
 # Windows and input for guests built against <wasmer/gui.h>. Headless unless
 # the embedder gives its `GuiCtx` a window system.
 gui = [
-  "sys",
+  "sys-runtime",
   "dep:wasmer-gui",
   "wasmer-gui/wasix",
 ]
@@ -58,7 +58,7 @@ gui-webgpu = [
 # WebGPU for guests built against webgpu.h: on wgpu natively, on the
 # JavaScript realm's `navigator.gpu` in a browser.
 webgpu = [
-  "sys",
+  "sys-runtime",
   "dep:wasmer-webgpu",
   "wasmer-webgpu/wasix",
 ]
@@ -122,6 +122,10 @@ name = "gui_window"
 path = "tests/gui_window.rs"
 harness = false
 required-features = ["gui-window"]
+
+[[example]]
+name = "precompiled"
+required-features = ["sys-runtime"]
 
 [lints.rust]
 unsafe_code = "forbid"
