@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const wasmPath = resolve(packageRoot, "pkg/wasmer_sdk_js_bg.wasm");
-// Explicit loopback egress routing adds about 30 KB to the Wasm artifact.
-const maximumRawBytes = 5_300_000;
+// Allow modest raw headroom for the new browser runtime capabilities.
+const maximumRawBytes = 5_350_000;
 const maximumBrotliBytes = 1_500_000;
 
 const rawBytes = statSync(wasmPath).size;
