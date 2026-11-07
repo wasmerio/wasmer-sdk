@@ -173,7 +173,8 @@ export async function checkNodeCompatibility({ httpOrigin, wispUrl, edgePackage 
     record('PASS Express install and depd structured-stack consumer');
 
     for (const framework of ['node', 'express']) {
-      for (let round = 0; round < 2; round++) {
+      // Repeat both termination paths so later processes reuse released memory.
+      for (let round = 0; round < 4; round++) {
         const token = `${framework}:${round}`;
         record(`Starting ${token}`);
         const html = `<script>fetch('/health').then(r=>r.json()).then(result=>parent.postMessage(result,'*'))</script>`;
@@ -207,7 +208,7 @@ export async function checkNodeCompatibility({ httpOrigin, wispUrl, edgePackage 
         } finally {
           iframe?.remove();
           await server?.close();
-          if (round === 0) await process.terminate({ gracePeriodMs: 250 });
+          if (round % 2 === 0) await process.terminate({ gracePeriodMs: 250 });
           else await process.kill();
           await process.wait();
         }

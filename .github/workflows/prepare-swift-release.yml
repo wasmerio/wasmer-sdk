@@ -18,7 +18,7 @@ permissions:
 
 env:
   CARGO_INCREMENTAL: 0
-  RUSTUP_TOOLCHAIN: 1.95.0
+  RUSTUP_TOOLCHAIN: 1.99.1
 
 jobs:
   select:
@@ -111,10 +111,10 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         with:
-          cargo-profile: swift-1.95-universal-release
+          cargo-profile: swift-1.99-universal-release
           cache-compiled-artifacts: 'false'
       - name: Install Rust targets
-        run: rustup toolchain install 1.95.0 --profile minimal --target aarch64-apple-darwin --target x86_64-apple-darwin --no-self-update
+        run: rustup toolchain install 1.99.1 --profile minimal --target aarch64-apple-darwin --target x86_64-apple-darwin --no-self-update
       - name: Build both macOS architectures
         run: python swift/scripts/build.py --release --target aarch64-apple-darwin --target x86_64-apple-darwin
       - name: Test the release binary

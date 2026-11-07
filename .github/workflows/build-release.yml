@@ -97,11 +97,11 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         with:
-          cargo-profile: native-1.95-release-${{ matrix.backend }}
-      - run: rustup toolchain install 1.95.0 --profile minimal --no-self-update
+          cargo-profile: native-1.99-release-${{ matrix.backend }}
+      - run: rustup toolchain install 1.99.1 --profile minimal --no-self-update
       - name: Build the native module and wheel
         env:
-          RUSTUP_TOOLCHAIN: 1.95.0
+          RUSTUP_TOOLCHAIN: 1.99.1
           SDK_BACKEND: ${{ matrix.backend }}
         run: |
           python -m pip install --upgrade build

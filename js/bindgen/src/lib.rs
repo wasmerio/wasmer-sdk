@@ -56,6 +56,14 @@ fn initialize() {
     console_error_panic_hook::set_once();
 }
 
+/// Hash program bytes without depending on a host Worker SubtleCrypto API.
+#[wasm_bindgen(js_name = hashBrowserModule)]
+pub fn hash_browser_module(bytes: &[u8]) -> String {
+    wasmer_types::ModuleHash::sha256(bytes)
+        .to_string()
+        .to_ascii_lowercase()
+}
+
 #[wasm_bindgen(js_name = setSDKUrl)]
 pub fn set_sdk_url(url: String) {
     *CUSTOM_SDK_URL.lock().expect("SDK URL lock poisoned") = Some(url);
@@ -393,6 +401,26 @@ impl JsSandboxBuilder {
         self.browser_http = Some(networking.request_handler());
         self.inner = Some(builder.network_provider(Arc::new(networking)));
         Ok(())
+    }
+
+    /// Explicit browser capability: send loopback destinations to WISP.
+    #[wasm_bindgen(js_name = allowLoopbackEgress)]
+    pub fn allow_loopback_egress(&self) -> Result<(), JsValue> {
+        self.browser_http
+            .as_ref()
+            .ok_or_else(|| {
+                custom_error(
+                    "CAPABILITY_UNAVAILABLE",
+                    "loopback egress requires browser WISP networking",
+                )
+            })?
+            .allow_loopback_egress()
+            .map_err(|_| {
+                custom_error(
+                    "CAPABILITY_UNAVAILABLE",
+                    "loopback egress requires live browser WISP networking",
+                )
+            })
     }
 
     /// Disable automatic localhost discovery before adding explicit peers.

@@ -38,6 +38,8 @@ struct NetworkState {
     ip_addresses: Vec<IpCidr>,
     peers: Option<Vec<Weak<Mutex<NetworkState>>>>,
     closed: bool,
+    has_egress: bool,
+    loopback_egress: bool,
     next_port: u16,
 }
 
@@ -49,6 +51,7 @@ impl BrowserNetworkGroup {
     pub(crate) fn create(&self, egress: Option<NodeNetworking>) -> BrowserHttpNetworking {
         let state = Arc::new(Mutex::new(NetworkState {
             next_port: 49_152,
+            has_egress: egress.is_some(),
             ..NetworkState::default()
         }));
         let mut networks = self.0.lock().expect("browser network group poisoned");
@@ -171,6 +174,18 @@ impl BrowserHttpNetworking {
 }
 
 impl BrowserHttpRequestHandler {
+    pub(crate) fn allow_loopback_egress(&self) -> NetworkResult<()> {
+        let mut state = self.state.lock().expect("browser network poisoned");
+        if state.closed {
+            return Err(NetworkError::NotConnected);
+        }
+        if !state.has_egress {
+            return Err(NetworkError::Unsupported);
+        }
+        state.loopback_egress = true;
+        Ok(())
+    }
+
     pub(crate) fn restrict_peers(&self) -> NetworkResult<()> {
         let mut state = self.state.lock().expect("browser TCP network poisoned");
         if state.closed {
@@ -441,7 +456,14 @@ impl VirtualNetworking for BrowserHttpNetworking {
         local: SocketAddr,
         peer: SocketAddr,
     ) -> NetworkResult<Box<dyn VirtualTcpSocket + Sync>> {
-        if peer.ip().is_loopback() {
+        let loopback_egress = {
+            let state = self.state.lock().expect("browser network poisoned");
+            if state.closed {
+                return Err(NetworkError::NotConnected);
+            }
+            state.loopback_egress
+        };
+        if peer.ip().is_loopback() && !loopback_egress {
             // Missing localhost routes must never escape to WISP or the host.
             return self
                 .connect_local(local, peer)
@@ -570,6 +592,17 @@ impl VirtualTcpBoundSocket for BrowserHttpBoundSocket {
             return Err(NetworkError::InvalidFd);
         }
         if !peer.ip().is_loopback() {
+            return Err(NetworkError::Unsupported);
+        }
+        // The host bridge does not support connecting a bound socket. Do not
+        // silently connect a private peer when loopback names the WISP host.
+        if self
+            .networking
+            .state
+            .lock()
+            .expect("browser network poisoned")
+            .loopback_egress
+        {
             return Err(NetworkError::Unsupported);
         }
         let socket = self.networking.connect_local(self.addresses[0], peer)?;
@@ -1100,6 +1133,86 @@ mod tests {
     use std::{mem::MaybeUninit, task::Waker};
 
     use super::*;
+
+    #[wasm_bindgen::prelude::wasm_bindgen(inline_js = r#"
+      let original, calls;
+      export function loopbackTestBridge() {
+        original = globalThis.__wasmerHostConnectTcp;
+        calls = [];
+        globalThis.__wasmerHostConnectTcp = (id, local, peer) => {
+          calls.push(peer);
+          return Promise.reject(Object.assign(new Error('test egress'), {code:'ECONNREFUSED'}));
+        };
+        return { id: 987654, setWakeCallback() {} };
+      }
+      export function loopbackTestCalls() { return calls; }
+      export function restoreLoopbackTestBridge() { globalThis.__wasmerHostConnectTcp = original; }
+    "#)]
+    extern "C" {
+        #[wasm_bindgen(js_name = loopbackTestBridge)]
+        fn loopback_test_bridge() -> crate::node_network::NodeNetworkBridge;
+        #[wasm_bindgen(js_name = loopbackTestCalls)]
+        fn loopback_test_calls() -> js_sys::Array;
+        #[wasm_bindgen(js_name = restoreLoopbackTestBridge)]
+        fn restore_loopback_test_bridge();
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn loopback_egress_requires_a_per_network_grant_and_respects_close() {
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                restore_loopback_test_bridge();
+            }
+        }
+        let bridge = loopback_test_bridge();
+        let _restore = Restore;
+        let group = BrowserNetworkGroup::default();
+        let egress = NodeNetworking::new(bridge);
+        let network = group.create(Some(egress.clone()));
+        let private = group.create(Some(egress));
+        let no_egress = group.create(None);
+        assert!(matches!(
+            no_egress.request_handler().allow_loopback_egress(),
+            Err(NetworkError::Unsupported)
+        ));
+        let peers = ["127.0.0.1:5432", "[::1]:5432"];
+        for peer in peers {
+            let peer: SocketAddr = peer.parse().unwrap();
+            assert!(matches!(
+                network.connect_tcp(peer, peer).await,
+                Err(NetworkError::ConnectionRefused)
+            ));
+        }
+        assert_eq!(loopback_test_calls().length(), 0);
+        network.request_handler().allow_loopback_egress().unwrap();
+        for peer in peers {
+            let peer: SocketAddr = peer.parse().unwrap();
+            assert!(network.connect_tcp(peer, peer).await.is_err());
+            assert!(matches!(
+                private.connect_tcp(peer, peer).await,
+                Err(NetworkError::ConnectionRefused)
+            ));
+        }
+        assert_eq!(
+            loopback_test_calls()
+                .iter()
+                .map(|value| value.as_string().unwrap())
+                .collect::<Vec<_>>(),
+            peers
+        );
+        network.request_handler().close();
+        let peer = peers[0].parse().unwrap();
+        assert!(matches!(
+            network.connect_tcp(peer, peer).await,
+            Err(NetworkError::NotConnected)
+        ));
+        assert!(matches!(
+            network.request_handler().allow_loopback_egress(),
+            Err(NetworkError::NotConnected)
+        ));
+        assert_eq!(loopback_test_calls().length(), 2);
+    }
 
     #[wasm_bindgen_test::wasm_bindgen_test]
     async fn shared_loopback_preserves_addresses_and_half_close() {

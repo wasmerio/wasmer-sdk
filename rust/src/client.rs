@@ -411,6 +411,19 @@ impl Wasmer {
                 }
                 return Ok(package);
             }
+            PackageSource::WasmModule {
+                bytes,
+                sha256,
+                validated,
+            } => {
+                let package = PackageDefinition::from_wasm(bytes)
+                    .into_package_with_digests([("main".to_owned(), sha256)].into(), validated)
+                    .await?;
+                if let Some(progress) = &progress {
+                    progress.local(&package, false);
+                }
+                return Ok(package);
+            }
             PackageSource::Bytes(bytes) | PackageSource::Webc(bytes) => {
                 let container = wasmer_package::utils::from_bytes(bytes).map_err(|error| {
                     Error::PackageLoad {
@@ -807,23 +820,27 @@ mod tests {
                 .unwrap();
             assert_eq!(packages.len(), 2);
             assert_eq!(http.downloads.load(Ordering::SeqCst), 1);
-            let events = events.lock().unwrap();
-            assert!(events.iter().any(|p| p.download.downloaded_bytes > 0
-                && p.download.downloaded_bytes < http.bytes.len() as u64));
-            let partial = events
-                .iter()
-                .find(|p| {
-                    p.download.downloaded_bytes > 0
-                        && p.download.downloaded_bytes < http.bytes.len() as u64
-                })
-                .unwrap();
-            assert_eq!(partial.download.percent.is_some(), known);
-            let ready = events.last().unwrap();
-            assert_eq!(ready.phase, PackageLoadPhase::Ready);
-            assert_eq!(ready.packages.len(), 1);
-            assert_eq!(ready.download.downloaded_bytes, http.bytes.len() as u64);
-            assert_eq!(ready.download.percent, Some(100.0));
-            drop(events);
+            {
+                let events = events.lock().unwrap();
+                assert!(events.iter().any(|p| p.download.downloaded_bytes > 0
+                    && p.download.downloaded_bytes < http.bytes.len() as u64));
+                let partial = events
+                    .iter()
+                    // The aliases can finish resolution at different times,
+                    // so aggregate progress can still have an unknown total.
+                    .flat_map(|event| &event.packages)
+                    .find(|p| {
+                        p.download.downloaded_bytes > 0
+                            && p.download.downloaded_bytes < http.bytes.len() as u64
+                    })
+                    .unwrap();
+                assert_eq!(partial.download.percent.is_some(), known);
+                let ready = events.last().unwrap();
+                assert_eq!(ready.phase, PackageLoadPhase::Ready);
+                assert_eq!(ready.packages.len(), 1);
+                assert_eq!(ready.download.downloaded_bytes, http.bytes.len() as u64);
+                assert_eq!(ready.download.percent, Some(100.0));
+            }
             // A fresh client exercises the persistent cache, not just loaded handles.
             let fresh = Wasmer::new_with_http_client(config, http.clone()).unwrap();
             let cached = Arc::new(Mutex::new(Vec::new()));

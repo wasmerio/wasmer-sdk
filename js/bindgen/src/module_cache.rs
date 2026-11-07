@@ -33,7 +33,12 @@ impl ModuleCache for SharedModuleCache {
         Ok(self.modules.contains_key(&Self::key(hash, engine)))
     }
 
-    async fn save(&self, hash: ModuleHash, engine: &Engine, module: &Module) -> Result<(), CacheError> {
+    async fn save(
+        &self,
+        hash: ModuleHash,
+        engine: &Engine,
+        module: &Module,
+    ) -> Result<(), CacheError> {
         self.modules.insert(Self::key(hash, engine), module.clone());
         Ok(())
     }
