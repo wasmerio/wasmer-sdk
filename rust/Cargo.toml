@@ -13,6 +13,9 @@ sys = [
   "virtual-fs/host-fs",
   "wasmer/cranelift",
   "wasmer-wasix/sys-default",
+  # Lets kill(), timeouts, and termination stop a guest that never calls
+  # into the runtime (Unix only).
+  "wasmer-wasix/experimental-host-interrupt",
 ]
 napi-v8 = [
   "sys",

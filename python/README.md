@@ -137,6 +137,12 @@ by default. Pass `check=False` when the outcome is expected and should be
 inspected as an `Output`. Spawned-process `wait()` remains unchecked by
 default.
 
+On Linux and macOS, killing a process or reaching its timeout also stops a
+guest that never calls into the runtime, such as a busy loop. The SDK
+interrupts the guest's thread with `SIGUSR1`, so the application should not
+handle `SIGUSR1` itself. On Windows such a guest keeps running until the
+Python process exits.
+
 Live processes expose asynchronous stdin, stdout, and stderr streams.
 `process.stdout.lines()` is an async iterator suitable for servers and agent
 loops.
