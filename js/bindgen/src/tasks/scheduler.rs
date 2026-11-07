@@ -211,6 +211,17 @@ struct SchedulerState {
     timer_worker: Option<WorkerHandle>,
     retire_wasm_workers: bool,
     retiring: BTreeSet<u32>,
+    /// Workers retired at their own request because they cannot collect
+    /// their dead guest memory, kept until they report Retired.
+    stopping: BTreeMap<u32, WorkerHandle>,
+    /// Busy workers that asked to retire; they retire instead of going idle.
+    retire_when_idle: BTreeSet<u32>,
+    /// Workers that received a WASIX thread since they were last idle.
+    /// `wasm_workers` cannot tell: every sandbox's main thread has the same
+    /// PID and TID, so an overlapping guest replaces the entry of the one
+    /// still unwinding.
+    ran_wasm: BTreeSet<u32>,
+    guest_memory_gc_budget: u64,
     /// A channel that can be used to send messages to this scheduler.
     mailbox: Scheduler,
     /// Nested WebAssembly objects waiting to travel with the next blocking
@@ -263,6 +274,10 @@ impl SchedulerState {
                 .and_then(|value| value.as_bool())
                 .unwrap_or(false),
             retiring: BTreeSet::new(),
+            stopping: BTreeMap::new(),
+            retire_when_idle: BTreeSet::new(),
+            ran_wasm: BTreeSet::new(),
+            guest_memory_gc_budget: options.guest_memory_gc_budget,
             mailbox,
             pending_capi_transfers: BTreeMap::new(),
             capi_values: BTreeMap::new(),
@@ -274,6 +289,18 @@ impl SchedulerState {
             next_doom_generation: 0,
             gates: BTreeMap::new(),
         }
+    }
+
+    /// Take an idle worker out of the pool and let it retire once its
+    /// remaining jobs finish (see [`WorkerHandle::retire`]).
+    fn retire_idle_worker(&mut self, worker_id: u32) {
+        let Some(ix) = self.idle.iter().position(|worker| worker.id() == worker_id) else {
+            return;
+        };
+        let worker = self.idle.remove(ix).unwrap();
+        scheduler_diag(format!("retire idle worker={worker_id}"));
+        worker.retire();
+        self.stopping.insert(worker_id, worker);
     }
 
     /// The worker is gone: free its wasm-bindgen TLS block and stack.
@@ -295,10 +322,12 @@ impl SchedulerState {
         close_completions: &mut Vec<tokio::sync::oneshot::Sender<()>>,
     ) {
         let mut workers: BTreeMap<u32, WorkerHandle> = BTreeMap::new();
+        let stopping = std::mem::take(&mut self.stopping);
         let all = self
             .idle
             .drain(..)
             .chain(self.busy.drain(..))
+            .chain(stopping.into_values())
             .chain(self.timer_worker.take());
         for worker in all {
             worker.shutdown();
@@ -433,7 +462,22 @@ impl SchedulerState {
                 // worker, which was already removed from the pool. Node
                 // reports it once the thread has stopped; browsers do not.
                 tracing::trace!(worker.id = worker_id, "Worker exited");
+                if let Some(worker) = self.stopping.remove(&worker_id) {
+                    worker.mark_exited();
+                }
                 self.release_worker_memory(worker_id);
+                Ok(())
+            }
+            SchedulerMessage::WorkerRetireRequested { worker_id } => {
+                if self.idle.iter().any(|worker| worker.id() == worker_id) {
+                    self.retire_idle_worker(worker_id);
+                } else if self.busy.iter().any(|worker| worker.id() == worker_id)
+                    && !self.retiring.contains(&worker_id)
+                {
+                    // It received a task after asking; stop routing work to
+                    // it once that task is done.
+                    self.retire_when_idle.insert(worker_id);
+                }
                 Ok(())
             }
             SchedulerMessage::WorkerIdle { worker_id } => {
@@ -450,14 +494,21 @@ impl SchedulerState {
                     .retain(|_, worker| worker.worker_id != worker_id);
                 // Dropping the completed process can expire memories imported
                 // by any worker. Idle workers otherwise retain those JS roots
-                // until they happen to receive another task.
+                // until they happen to receive another task, and this worker
+                // could not release its finished guest's memory.
                 // Timer thunks also emit Idle; they must not broadcast a
                 // collection to the entire pool on every network poll.
-                if self.wasm_workers.len() != active_wasm_threads {
+                let ran_wasm = self.ran_wasm.remove(&worker_id);
+                if ran_wasm || self.wasm_workers.len() != active_wasm_threads {
                     wasmer::js::collect_shared_objects();
                     for worker in &self.idle {
                         worker.collect_shared_objects()?;
                     }
+                }
+                // After its collection message, so the worker drops the
+                // finished guest's roots before it retires.
+                if self.retire_when_idle.remove(&worker_id) {
+                    self.retire_idle_worker(worker_id);
                 }
                 tracing::trace!(
                     worker.id=worker_id,
@@ -476,6 +527,11 @@ impl SchedulerState {
             }
             SchedulerMessage::WorkerRetired { worker_id } => {
                 self.doomed.remove(&worker_id);
+                if let Some(worker) = self.stopping.remove(&worker_id) {
+                    worker.mark_exited();
+                    self.release_worker_memory(worker_id);
+                    return Ok(());
+                }
                 if !self.retiring.remove(&worker_id) {
                     if self.worker(worker_id).is_none() {
                         return Ok(());
@@ -483,6 +539,7 @@ impl SchedulerState {
                     anyhow::bail!("unexpected retired worker {worker_id}");
                 }
                 self.busy.retain(|worker| worker.id() != worker_id);
+                self.ran_wasm.remove(&worker_id);
                 self.wasm_workers
                     .retain(|_, worker| worker.worker_id != worker_id);
                 self.release_worker_memory(worker_id);
@@ -603,6 +660,7 @@ impl SchedulerState {
             self.next_available_worker(&reason)?
         };
         let transfers = self.take_capi_transfers(source_worker_id, true, Some(worker.id()));
+        self.ran_wasm.insert(worker.id());
         self.wasm_workers.insert(
             task_key,
             WasmWorker {
@@ -656,7 +714,13 @@ impl SchedulerState {
 
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
 
-        let handle = WorkerHandle::spawn(id, self.mailbox.clone(), retire_after_task)?;
+        // A dedicated worker's isolate is disposed with its guest memory.
+        let budget = if retire_after_task {
+            0.0
+        } else {
+            self.guest_memory_gc_budget as f64
+        };
+        let handle = WorkerHandle::spawn(id, self.mailbox.clone(), retire_after_task, budget)?;
         self.gates.insert(id, handle.gate());
 
         Ok(handle)
@@ -785,6 +849,8 @@ impl SchedulerState {
     /// Take a worker out of the pool along with everything routed to it.
     fn remove_worker(&mut self, worker_id: u32) -> Option<WorkerHandle> {
         self.retiring.remove(&worker_id);
+        self.retire_when_idle.remove(&worker_id);
+        self.ran_wasm.remove(&worker_id);
         self.wasm_workers
             .retain(|_, worker| worker.worker_id != worker_id);
         self.pending_capi_requests.retain(|_, workers| {

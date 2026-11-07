@@ -80,6 +80,7 @@ struct ClientOptions {
     output_bytes: Option<f64>,
     parallelism: Option<f64>,
     worker_per_thread: Option<bool>,
+    guest_memory_gc_budget: Option<f64>,
     cache: Option<ClientCacheOptions>,
 }
 
@@ -169,6 +170,11 @@ impl JsWasmer {
             parallelism,
             tasks::PoolOptions {
                 worker_per_thread: options.worker_per_thread.unwrap_or(false),
+                guest_memory_gc_budget: options
+                    .guest_memory_gc_budget
+                    .map(|bytes| validate_usize("guestMemoryGcBudget", bytes, 0))
+                    .transpose()?
+                    .map_or(tasks::DEFAULT_GUEST_MEMORY_GC_BUDGET, |bytes| bytes as u64),
             },
         ));
         let mut runtime = PluggableRuntime::new(Arc::clone(&tasks) as Arc<_>);

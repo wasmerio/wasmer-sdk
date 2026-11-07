@@ -10,6 +10,9 @@ use crate::tasks::{AsyncJob, BlockingJob, PostMessagePayload, WorkerMessage};
 pub struct ThreadPoolWorker {
     id: u32,
     active_blocking_jobs: Cell<u32>,
+    /// Guest memory of the WASIX threads this worker finished since the host
+    /// last took the count (see `take_released_guest_memory`).
+    released_guest_memory: Cell<f64>,
 }
 
 impl ThreadPoolWorker {
@@ -81,7 +84,9 @@ impl ThreadPoolWorker {
             BlockingJob::SpawnWasm(task) => {
                 let task = task.begin().await;
                 let _guard = self.busy();
-                task.execute().await?;
+                let guest_memory = task.execute().await?;
+                self.released_guest_memory
+                    .set(self.released_guest_memory.get() + guest_memory);
             }
         }
 
@@ -114,6 +119,7 @@ impl ThreadPoolWorker {
         ThreadPoolWorker {
             id,
             active_blocking_jobs: Cell::new(0),
+            released_guest_memory: Cell::new(0.0),
         }
     }
 
@@ -123,6 +129,15 @@ impl ThreadPoolWorker {
     #[wasm_bindgen(js_name = collectSharedObjects)]
     pub fn collect_shared_objects(&self) {
         wasmer::js::collect_shared_objects();
+    }
+
+    /// Bytes of guest memory used by the WASIX threads this worker finished
+    /// since the last call. Call it after `collectSharedObjects()` on the
+    /// pool's post-idle collection: by then the finished process is dropped
+    /// and only this worker's garbage collector keeps the memory alive.
+    #[wasm_bindgen(js_name = takeReleasedGuestMemory)]
+    pub fn take_released_guest_memory(&self) -> f64 {
+        self.released_guest_memory.replace(0.0)
     }
 
     #[wasm_bindgen(js_name = "handle")]
