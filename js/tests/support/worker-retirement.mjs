@@ -26,4 +26,6 @@ assert.equal(typeof complete,"function");
 assert.deepEqual(events,[],"must not retire a suspended guest");
 complete();
 await setImmediate();
-assert.deepEqual(events,["collect","free","destroy","retired","close"]);
+// The pool frees the retired thread's TLS and stack: a worker destroying its
+// own thread can trap while holding wasm-bindgen's temporary-stack lock.
+assert.deepEqual(events,["collect","free","retired","close"]);

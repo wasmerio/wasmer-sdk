@@ -17,11 +17,25 @@ globalThis.onmessage = async ({ data }) => {
 };
 
 async function handleMessage(data) {
+  if (data.type === "wasmer-shutdown") {
+    // Runs from the message loop, so no SDK code is executing on this thread.
+    // Report the exit and close; the pool then frees this thread's TLS and
+    // stack (a thread must not destroy itself).
+    worker = undefined;
+    globalThis.postMessage({ type: "exited" });
+    globalThis.close();
+    return;
+  }
   if (data.type === "init") {
-    const { memory, module, id, sdkUrl } = data;
+    const { memory, module, id, sdkUrl, gate } = data;
     const sdk = await import(sdkUrl);
-    await sdk.default({ module_or_path: module, memory });
-    const initializedWorker = new sdk.ThreadPoolWorker(id);
+    const exports = await sdk.default({ module_or_path: module, memory });
+    const initializedWorker = new sdk.ThreadPoolWorker(
+      id,
+      gate,
+      exports?.__tls_base?.value,
+      exports?.__stack_alloc?.value,
+    );
     // Drain everything queued during init before publishing the worker, so
     // messages are handled in arrival order. Messages that arrive while
     // draining are appended and picked up by the loop; there is no await

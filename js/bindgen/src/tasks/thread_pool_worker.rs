@@ -91,8 +91,26 @@ impl ThreadPoolWorker {
 
 #[wasm_bindgen]
 impl ThreadPoolWorker {
+    /// `gate` is the worker's termination gate from its `init` message.
+    /// `tls_base` and `stack_alloc` are this thread's `__tls_base` and
+    /// `__stack_alloc` export values, which the scheduler frees once the
+    /// worker has exited. A worker must not destroy its own thread: see
+    /// `worker_gate`.
     #[wasm_bindgen(constructor)]
-    pub fn new(id: u32) -> ThreadPoolWorker {
+    pub fn new(
+        id: u32,
+        gate: Option<u32>,
+        tls_base: Option<u32>,
+        stack_alloc: Option<u32>,
+    ) -> ThreadPoolWorker {
+        // Safety: the scheduler passes the address of a leaked WorkerGate.
+        unsafe {
+            crate::tasks::worker_gate::install(
+                gate.unwrap_or(0),
+                tls_base.unwrap_or(0),
+                stack_alloc.unwrap_or(0),
+            )
+        };
         ThreadPoolWorker {
             id,
             active_blocking_jobs: Cell::new(0),

@@ -45,18 +45,26 @@ impl GlobalScope {
         }
     }
 
+    /// Complete after `milliseconds`.
+    ///
+    /// Dropping the returned [`Delay`] early clears the timer and releases
+    /// its callback immediately, so an abandoned delay never keeps a Rust
+    /// closure rooted in JS until the timer would have fired.
+    pub fn delay(&self, milliseconds: i32) -> Delay {
+        Delay::new(milliseconds)
+    }
+
+    /// A promise that resolves after `milliseconds`.
     #[cfg(test)]
     pub fn sleep(&self, milliseconds: i32) -> Promise {
         Promise::new(&mut |resolve, reject| match self {
             GlobalScope::Window(window) => {
-                window
-                    .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds)
-                    .unwrap();
+                let _ = window
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds);
             }
             GlobalScope::Worker(worker_global_scope) => {
-                worker_global_scope
-                    .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds)
-                    .unwrap();
+                let _ = worker_global_scope
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds);
             }
             GlobalScope::Other(global) => {
                 match js_sys::Reflect::get(global, &JsValue::from_str("setTimeout"))
@@ -212,4 +220,64 @@ pub(crate) fn current_module() -> js_sys::WebAssembly::Module {
     //   0: failed to generate bindings for import of `__wbindgen_placeholder__::__wbindgen_module`
     //   1: `wasm_bindgen::module` is currently only supported with `--target no-modules` and `--tar get web`
     wasm_bindgen::module().dyn_into().unwrap()
+}
+
+/// A cancellable timer future; see [`GlobalScope::delay`].
+pub(crate) struct Delay {
+    receiver: tokio::sync::oneshot::Receiver<()>,
+    handle: JsValue,
+    clear_timeout: Option<js_sys::Function>,
+    _callback: wasm_bindgen::closure::Closure<dyn FnMut()>,
+}
+
+impl Delay {
+    fn new(milliseconds: i32) -> Self {
+        let global = js_sys::global();
+        let function = |name: &str| {
+            js_sys::Reflect::get(&global, &JsValue::from_str(name))
+                .ok()
+                .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+        };
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let mut sender = Some(sender);
+        let callback = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+            if let Some(sender) = sender.take() {
+                let _ = sender.send(());
+            }
+        });
+        let handle = function("setTimeout")
+            .and_then(|set_timeout| {
+                set_timeout
+                    .call2(&global, callback.as_ref(), &milliseconds.into())
+                    .ok()
+            })
+            .unwrap_or(JsValue::UNDEFINED);
+        Delay {
+            receiver,
+            handle,
+            clear_timeout: function("clearTimeout"),
+            _callback: callback,
+        }
+    }
+}
+
+impl std::future::Future for Delay {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        std::pin::Pin::new(&mut self.receiver).poll(cx).map(|_| ())
+    }
+}
+
+impl Drop for Delay {
+    fn drop(&mut self) {
+        // Clear first: the callback is freed right after this, and JS must
+        // never call it afterwards.
+        if let Some(clear_timeout) = &self.clear_timeout {
+            let _ = clear_timeout.call1(&js_sys::global(), &self.handle);
+        }
+    }
 }

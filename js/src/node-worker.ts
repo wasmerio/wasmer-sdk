@@ -52,6 +52,7 @@ port.on("message", async (data) => {
 });
 
 async function handleMessage(data: any): Promise<void> {
+  if (data?.type === "wasmer-shutdown") shutdown();
   data = receiveCapiDispatch(data);
   if (isCapiDispatchHandled(data)) return;
   if (data?.type === "wasmer-cache-rpc-response") {
@@ -66,11 +67,17 @@ async function handleMessage(data: any): Promise<void> {
   if (data?.type === "init") {
     setCapiMessageWorkerId(data.id);
     const sdk = await import(data.sdkUrl);
-    await sdk.default({
+    const exports = await sdk.default({
       module_or_path: data.module,
       memory: data.memory,
     });
-    const initializedWorker = new sdk.ThreadPoolWorker(data.id);
+    // The pool frees this thread's TLS and stack after it exits.
+    const initializedWorker = new sdk.ThreadPoolWorker(
+      data.id,
+      data.gate,
+      exports?.__tls_base?.value,
+      exports?.__stack_alloc?.value,
+    );
     worker = initializedWorker;
     while (pendingMessages.length > 0) {
       await handleMessage(pendingMessages.shift());
@@ -83,6 +90,17 @@ async function handleMessage(data: any): Promise<void> {
     else await worker.handle(data);
   }
   else pendingMessages.push(data);
+}
+
+/**
+ * Exit at the pool's request. This runs from the message loop, so no SDK code
+ * is executing on this thread and it cannot hold a runtime lock. Stop
+ * immediately so no pending callback can run SDK code afterwards. The adapter
+ * reports the exit, and the pool then frees this thread's TLS and stack: a
+ * thread must not destroy itself (see `worker_gate.rs`).
+ */
+function shutdown(): never {
+  process.exit(0);
 }
 
 function installCacheProxy(): void {
