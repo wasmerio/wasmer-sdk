@@ -31,20 +31,39 @@ test("Node package caches are client-scoped and path-safe", async (context) => {
   assert.notEqual(first.id, second.id);
   assert.equal(nodePackageCache(first.id), first);
 
+  // The SDK passes views of its shared memory and reads and writes them in
+  // place.
+  const memory = new Uint8Array(new SharedArrayBuffer(64));
   const path = "cache-v1/packages/abc.bin";
-  await globalThis.__wasmerNodeCachePut(
-    first.id,
-    path,
-    new TextEncoder().encode("package"),
+  memory.set(new TextEncoder().encode("package"), 8);
+  await globalThis.__wasmerNodeCachePut(first.id, path, memory.subarray(8, 15));
+  const opened = await globalThis.__wasmerNodeCacheOpen(first.id, path);
+  assert.equal(opened.size, 7);
+  assert.equal(
+    await globalThis.__wasmerNodeCacheReadInto(
+      first.id,
+      opened.handle,
+      memory.subarray(32, 32 + opened.size),
+    ),
+    7,
   );
   assert.equal(
-    new TextDecoder().decode(
-      await globalThis.__wasmerNodeCacheGet(first.id, path),
-    ),
+    new TextDecoder().decode(memory.slice(32, 39)),
     "package",
   );
+  await assert.rejects(
+    globalThis.__wasmerNodeCacheReadInto(first.id, opened.handle, memory),
+    /unknown Wasmer cache file/,
+    "a read closes its file",
+  );
+  const unread = await globalThis.__wasmerNodeCacheOpen(first.id, path);
+  await globalThis.__wasmerNodeCacheCloseFile(first.id, unread.handle);
+  await assert.rejects(
+    globalThis.__wasmerNodeCacheReadInto(first.id, unread.handle, memory),
+    /unknown Wasmer cache file/,
+  );
   assert.equal(
-    await globalThis.__wasmerNodeCacheGet(second.id, path),
+    await globalThis.__wasmerNodeCacheOpen(second.id, path),
     undefined,
   );
   assert.equal(
@@ -56,6 +75,40 @@ test("Node package caches are client-scoped and path-safe", async (context) => {
   await assert.rejects(
     first.put("../outside", new Uint8Array()),
     /invalid Wasmer cache path/,
+  );
+});
+
+test("Node worker cache calls read and write shared memory in place", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "wasmer-sdk-node-cache-"));
+  const cache = new NodePackageCache(root);
+  context.after(async () => {
+    cache.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  // The adapter answers a worker's cache calls from the main thread.
+  const { NodeWorkerAdapter } = await import("../dist/node-worker-adapter.js");
+  const result = await new Promise((resolve, reject) => {
+    const adapter = new NodeWorkerAdapter(
+      new URL("./support/cache-rpc-worker.mjs", import.meta.url).href,
+    );
+    adapter.onmessage = ({ data }) => {
+      if (data?.type === "result") {
+        adapter.terminate();
+        resolve(data);
+      }
+    };
+    adapter.onerror = (error) => reject(new Error(error.message));
+    adapter.postMessage({ type: "cache-id", cacheId: cache.id });
+  });
+  assert.deepEqual(result, {
+    type: "result",
+    size: 11,
+    read: 11,
+    text: "from worker",
+  });
+  assert.equal(
+    await readFile(join(root, "cache-v1", "packages", "worker.bin"), "utf8"),
+    "from worker",
   );
 });
 

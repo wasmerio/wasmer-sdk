@@ -45,10 +45,28 @@ pub(crate) enum SchedulerMessage {
     WorkerRetired {
         worker_id: u32,
     },
+    /// An idle worker asks to be retired because it cannot collect the guest
+    /// memory it has released.
+    WorkerRetireRequested {
+        worker_id: u32,
+    },
     /// Terminate the browser worker executing a WASIX thread.
     TerminateWasmThread {
         pid: u32,
         tid: u32,
+    },
+    /// A doomed worker's grace period elapsed without it unwinding.
+    ForceTerminate {
+        worker_id: u32,
+        generation: u64,
+    },
+    /// A worker exited from its message loop after a shutdown request.
+    WorkerExited {
+        worker_id: u32,
+    },
+    /// Guest spawns deferred for a draining worker stop waiting for it.
+    DrainWaitElapsed {
+        generation: u64,
     },
     /// Publish a nested WebAssembly object to the other browser workers.
     CapiShare {
@@ -169,6 +187,12 @@ impl SchedulerMessage {
             }
             SchedulerMessage::WorkerFailed => {
                 Err(anyhow::anyhow!("worker failures are local to the scheduler").into())
+            }
+            SchedulerMessage::ForceTerminate { .. }
+            | SchedulerMessage::WorkerExited { .. }
+            | SchedulerMessage::WorkerRetireRequested { .. }
+            | SchedulerMessage::DrainWaitElapsed { .. } => {
+                Err(anyhow::anyhow!("worker lifecycle messages are local to the scheduler").into())
             }
             SchedulerMessage::CapiShare { .. }
             | SchedulerMessage::CapiRequest { .. }

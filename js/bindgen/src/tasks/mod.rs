@@ -39,6 +39,7 @@ mod task_wasm;
 mod thread_pool;
 mod thread_pool_worker;
 mod timer;
+mod worker_gate;
 mod worker_handle;
 mod worker_message;
 
@@ -47,7 +48,7 @@ pub(crate) use self::{
     post_message_payload::{AsyncJob, BlockingJob, PostMessagePayload},
     scheduler::Scheduler,
     scheduler_message::SchedulerMessage,
-    thread_pool::ThreadPool,
+    thread_pool::{DEFAULT_GUEST_MEMORY_GC_BUDGET, PoolOptions, ThreadPool},
     worker_handle::{CapiTransfer, WorkerHandle},
     worker_message::WorkerMessage,
 };

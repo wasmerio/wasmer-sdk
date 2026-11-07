@@ -1,5 +1,7 @@
 [general]
 cache-control-headers = false
+# Serve the SDK control pages and bundles under /.wasmer/.
+ignore-hidden-files = false
 
 [advanced]
 

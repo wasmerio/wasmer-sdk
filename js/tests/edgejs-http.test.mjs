@@ -93,6 +93,37 @@ test(
   },
 );
 
+test("guest code never sees the hook that collects guest memory", async () => {
+  // A 1-byte budget collects after every guest, so the guests after the
+  // first start in a worker that has already obtained its collector.
+  const client = new Wasmer({
+    cache: { directory: cacheDirectory },
+    guestMemoryGcBudget: 1,
+  });
+  try {
+    const edgejs = await client.packages.load(edgeJsSource);
+    const probe = [
+      "const vm = require('node:vm');",
+      "console.log([typeof gc, typeof globalThis.gc, vm.runInNewContext('typeof gc')].join(' '));",
+    ].join("\n");
+    for (let index = 0; index < 3; index++) {
+      const sandbox = await client.sandboxes.create({
+        packages: [edgejs],
+        files: { "probe.js": probe },
+      });
+      try {
+        const output = await sandbox.command(edgejs, ["/workspace/probe.js"]).run();
+        assert.equal(output.text().trim(), "undefined undefined undefined");
+      } finally {
+        await sandbox.close();
+      }
+    }
+  } finally {
+    await client.close();
+  }
+  assert.equal(typeof globalThis.gc, "undefined");
+});
+
 async function startServer(name) {
   const port = await reservePort();
   const client = new Wasmer({ cache: { directory: cacheDirectory } });

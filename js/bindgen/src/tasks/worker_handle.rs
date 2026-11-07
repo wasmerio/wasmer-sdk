@@ -1,11 +1,29 @@
-use std::fmt::Debug;
+use std::{cell::Cell, fmt::Debug};
 
 use anyhow::{Context, Error};
 use js_sys::{Array, JsString, Uint8Array};
 use once_cell::sync::Lazy;
 use wasm_bindgen::{JsCast, JsValue, prelude::Closure};
 
-use crate::tasks::{PostMessagePayload, Scheduler, SchedulerMessage, WorkerMessage};
+use crate::{
+    tasks::{
+        PostMessagePayload, Scheduler, SchedulerMessage, WorkerMessage, worker_gate::WorkerGate,
+    },
+    worker_utils::GlobalScope,
+};
+
+/// How long [`WorkerHandle::terminate_gated`] waits for a doomed worker to
+/// leave the allocator before terminating it anyway.
+const GATE_WAIT_LIMIT_MS: u32 = 2_000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lifecycle {
+    Running,
+    /// Asked to exit from its own message loop.
+    ShuttingDown,
+    /// Exited on its own, or terminated.
+    Stopped,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct CapiTransfer {
@@ -16,19 +34,28 @@ pub(crate) struct CapiTransfer {
 
 /// A handle to a running [`web_sys::Worker`].
 ///
-/// This provides a structured way to communicate with the worker and will
-/// automatically call [`web_sys::Worker::terminate()`] when dropped.
+/// Workers share the SDK's linear memory, so stopping one at an arbitrary
+/// point can orphan a runtime lock (wasmer-sdk#542). Prefer
+/// [`Self::shutdown`], which lets the worker exit from its own message loop.
+/// [`Self::terminate_gated`] forces termination only once the worker is
+/// outside the allocator; dropping a handle that is still running does the
+/// same as a last resort.
 #[derive(Debug)]
 pub(crate) struct WorkerHandle {
     id: u32,
     inner: web_sys::Worker,
+    gate: &'static WorkerGate,
+    lifecycle: Cell<Lifecycle>,
 }
 
 impl WorkerHandle {
+    /// `guest_memory_gc_budget` is the dead guest memory, in bytes, the
+    /// worker may keep before collecting it (0 disables collection).
     pub(crate) fn spawn(
         worker_id: u32,
         sender: Scheduler,
         retire_after_task: bool,
+        guest_memory_gc_budget: f64,
     ) -> Result<Self, Error> {
         let name = format!("worker-{worker_id}");
 
@@ -54,21 +81,101 @@ impl WorkerHandle {
         let on_error: js_sys::Function = on_error.into_js_value().unchecked_into();
         worker.set_onerror(Some(&on_error));
 
+        let gate = WorkerGate::leak();
+
         // The worker has technically been started, but it's kinda useless
         // because it hasn't been initialized with the same WebAssembly module
         // and linear memory as the scheduler. We need to initialize explicitly.
-        init_message(worker_id, retire_after_task)
+        init_message(worker_id, retire_after_task, guest_memory_gc_budget, gate)
             .and_then(|msg| worker.post_message(&msg))
             .map_err(crate::worker_utils::js_error)?;
 
         Ok(WorkerHandle {
             id: worker_id,
             inner: worker,
+            gate,
+            lifecycle: Cell::new(Lifecycle::Running),
         })
     }
 
     pub(crate) fn id(&self) -> u32 {
         self.id
+    }
+
+    pub(crate) fn gate(&self) -> &'static WorkerGate {
+        self.gate
+    }
+
+    /// Ask the worker to exit from its own message loop.
+    ///
+    /// The worker handles the message only when no SDK code is running on
+    /// it, so it cannot be holding a runtime lock. It releases its stack and
+    /// TLS, then exits and reports [`WorkerMessage::Exited`].
+    pub(crate) fn shutdown(&self) {
+        if self.lifecycle.get() != Lifecycle::Running {
+            return;
+        }
+        self.lifecycle.set(Lifecycle::ShuttingDown);
+        let message = js_sys::Object::new();
+        let posted = js_sys::Reflect::set(
+            &message,
+            &JsValue::from_str("type"),
+            &JsValue::from_str("wasmer-shutdown"),
+        )
+        .and_then(|_| self.inner.post_message(&message));
+        if let Err(error) = posted {
+            tracing::warn!(
+                worker.id = self.id,
+                ?error,
+                "Unable to ask a worker to shut down"
+            );
+        }
+    }
+
+    /// Ask an idle worker to retire: it finishes the jobs it already has,
+    /// releases its SDK state and exits, then reports
+    /// [`WorkerMessage::Retired`]. The scheduler must route no more work to
+    /// it.
+    pub(crate) fn retire(&self) {
+        let message = js_sys::Object::new();
+        let posted = js_sys::Reflect::set(
+            &message,
+            &JsValue::from_str("type"),
+            &JsValue::from_str("wasmer-retire"),
+        )
+        .and_then(|_| self.inner.post_message(&message));
+        if let Err(error) = posted {
+            tracing::warn!(worker.id = self.id, ?error, "Unable to retire a worker");
+        }
+    }
+
+    /// Record that the worker exited on its own after [`Self::shutdown`].
+    pub(crate) fn mark_exited(&self) {
+        self.lifecycle.set(Lifecycle::Stopped);
+    }
+
+    /// Terminate the worker without orphaning the allocator lock.
+    ///
+    /// Dooms the worker so it can never enter the allocator again, waits
+    /// until it is outside, then terminates it.
+    pub(crate) async fn terminate_gated(&self) {
+        if self.lifecycle.get() == Lifecycle::Stopped {
+            return;
+        }
+        self.gate.doom();
+        let mut waited_ms = 0;
+        while self.gate.in_allocator() && waited_ms < GATE_WAIT_LIMIT_MS {
+            GlobalScope::current().delay(1).await;
+            waited_ms += 1;
+        }
+        if self.gate.in_allocator() {
+            tracing::warn!(
+                worker.id = self.id,
+                "Terminating a worker that did not leave the allocator"
+            );
+        }
+        self.lifecycle.set(Lifecycle::Stopped);
+        self.inner.terminate();
     }
 
     pub(crate) fn collect_shared_objects(&self) -> Result<(), Error> {
@@ -290,6 +397,10 @@ fn on_message(msg: web_sys::MessageEvent, sender: &Scheduler, worker_id: u32) {
 
             let msg = match base_msg {
                 WorkerMessage::Retired => SchedulerMessage::WorkerRetired { worker_id },
+                WorkerMessage::RetireRequest => {
+                    SchedulerMessage::WorkerRetireRequested { worker_id }
+                }
+                WorkerMessage::Exited => SchedulerMessage::WorkerExited { worker_id },
                 WorkerMessage::MarkBusy => SchedulerMessage::WorkerBusy { worker_id },
                 WorkerMessage::MarkIdle => SchedulerMessage::WorkerIdle { worker_id },
                 WorkerMessage::Scheduler(msg) => SchedulerMessage::FromWorker {
@@ -409,13 +520,31 @@ fn handle_host_rpc(data: &JsValue) -> bool {
 
 impl Drop for WorkerHandle {
     fn drop(&mut self) {
+        if self.lifecycle.get() == Lifecycle::Stopped {
+            return;
+        }
+        // Last resort: the scheduler normally shuts workers down or calls
+        // `terminate_gated()` first. Drop cannot await, so wait for the
+        // worker to leave the allocator with a bounded spin; it never holds
+        // the allocator for more than one allocation.
         tracing::debug!(id = self.id(), "Terminating worker");
+        self.gate.doom();
+        let mut spins: u32 = 0;
+        while self.gate.in_allocator() && spins < 10_000_000 {
+            std::hint::spin_loop();
+            spins += 1;
+        }
         self.inner.terminate();
     }
 }
 
 /// Craft the special `"init"` message.
-fn init_message(id: u32, retire_after_task: bool) -> Result<JsValue, JsValue> {
+fn init_message(
+    id: u32,
+    retire_after_task: bool,
+    guest_memory_gc_budget: f64,
+    gate: &'static WorkerGate,
+) -> Result<JsValue, JsValue> {
     let msg = js_sys::Object::new();
 
     js_sys::Reflect::set(&msg, &JsString::from("type"), &JsString::from("init"))?;
@@ -423,8 +552,18 @@ fn init_message(id: u32, retire_after_task: bool) -> Result<JsValue, JsValue> {
     js_sys::Reflect::set(&msg, &JsString::from("id"), &JsValue::from(id))?;
     js_sys::Reflect::set(
         &msg,
+        &JsString::from("gate"),
+        &JsValue::from(gate.address()),
+    )?;
+    js_sys::Reflect::set(
+        &msg,
         &JsString::from("retireAfterTask"),
         &JsValue::from(retire_after_task),
+    )?;
+    js_sys::Reflect::set(
+        &msg,
+        &JsString::from("guestMemoryGcBudget"),
+        &JsValue::from(guest_memory_gc_budget),
     )?;
     js_sys::Reflect::set(&msg, &JsString::from("sdkUrl"), &JsValue::from(sdk_url()))?;
     js_sys::Reflect::set(

@@ -576,8 +576,9 @@ async fn precompile_browser_command(
         return Ok(());
     }
 
-    let bytes = command.atom();
-    let module = wasmer::Module::new_async(&engine, bytes.as_ref())
+    // The module keeps its binary; pass the package's buffer so it shares
+    // it instead of keeping a second copy while the client caches the module.
+    let module = wasmer::Module::new_async(&engine, command.atom())
         .await
         .map_err(|error| Error::Execution {
             message: format!("unable to compile the command: {error}"),

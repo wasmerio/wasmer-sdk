@@ -411,6 +411,19 @@ impl Wasmer {
                 }
                 return Ok(package);
             }
+            PackageSource::WasmModule {
+                bytes,
+                sha256,
+                validated,
+            } => {
+                let package = PackageDefinition::from_wasm(bytes)
+                    .into_package_with_digests([("main".to_owned(), sha256)].into(), validated)
+                    .await?;
+                if let Some(progress) = &progress {
+                    progress.local(&package, false);
+                }
+                return Ok(package);
+            }
             PackageSource::Bytes(bytes) | PackageSource::Webc(bytes) => {
                 let container = wasmer_package::utils::from_bytes(bytes).map_err(|error| {
                     Error::PackageLoad {
@@ -813,6 +826,9 @@ mod tests {
                     && p.download.downloaded_bytes < http.bytes.len() as u64));
                 let partial = events
                     .iter()
+                    // The aliases can finish resolution at different times,
+                    // so aggregate progress can still have an unknown total.
+                    .flat_map(|event| &event.packages)
                     .find(|p| {
                         p.download.downloaded_bytes > 0
                             && p.download.downloaded_bytes < http.bytes.len() as u64

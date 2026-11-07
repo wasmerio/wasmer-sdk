@@ -5,8 +5,11 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const wasmPath = resolve(packageRoot, "pkg/wasmer_sdk_js_bg.wasm");
-// Allow modest raw headroom for the new browser runtime capabilities.
-const maximumRawBytes = 5_350_000;
+// Raised from 5.00 MB for the allocator-gated worker termination
+// (wasmer-sdk#542/#556), then for the GUI and WebGPU browser runtime, then
+// for main's worker retirement and guest memory budget (#578-#583) on top of
+// it: about 5.40 MB once main was merged into webgpu-gui.
+const maximumRawBytes = 5_450_000;
 const maximumBrotliBytes = 1_500_000;
 
 const rawBytes = statSync(wasmPath).size;
