@@ -49,10 +49,13 @@ pub(crate) struct WorkerHandle {
 }
 
 impl WorkerHandle {
+    /// `guest_memory_gc_budget` is the dead guest memory, in bytes, the
+    /// worker may keep before collecting it (0 disables collection).
     pub(crate) fn spawn(
         worker_id: u32,
         sender: Scheduler,
         retire_after_task: bool,
+        guest_memory_gc_budget: f64,
     ) -> Result<Self, Error> {
         let name = format!("worker-{worker_id}");
 
@@ -83,7 +86,7 @@ impl WorkerHandle {
         // The worker has technically been started, but it's kinda useless
         // because it hasn't been initialized with the same WebAssembly module
         // and linear memory as the scheduler. We need to initialize explicitly.
-        init_message(worker_id, retire_after_task, gate)
+        init_message(worker_id, retire_after_task, guest_memory_gc_budget, gate)
             .and_then(|msg| worker.post_message(&msg))
             .map_err(crate::worker_utils::js_error)?;
 
@@ -126,6 +129,23 @@ impl WorkerHandle {
                 ?error,
                 "Unable to ask a worker to shut down"
             );
+        }
+    }
+
+    /// Ask an idle worker to retire: it finishes the jobs it already has,
+    /// releases its SDK state and exits, then reports
+    /// [`WorkerMessage::Retired`]. The scheduler must route no more work to
+    /// it.
+    pub(crate) fn retire(&self) {
+        let message = js_sys::Object::new();
+        let posted = js_sys::Reflect::set(
+            &message,
+            &JsValue::from_str("type"),
+            &JsValue::from_str("wasmer-retire"),
+        )
+        .and_then(|_| self.inner.post_message(&message));
+        if let Err(error) = posted {
+            tracing::warn!(worker.id = self.id, ?error, "Unable to retire a worker");
         }
     }
 
@@ -377,6 +397,9 @@ fn on_message(msg: web_sys::MessageEvent, sender: &Scheduler, worker_id: u32) {
 
             let msg = match base_msg {
                 WorkerMessage::Retired => SchedulerMessage::WorkerRetired { worker_id },
+                WorkerMessage::RetireRequest => {
+                    SchedulerMessage::WorkerRetireRequested { worker_id }
+                }
                 WorkerMessage::Exited => SchedulerMessage::WorkerExited { worker_id },
                 WorkerMessage::MarkBusy => SchedulerMessage::WorkerBusy { worker_id },
                 WorkerMessage::MarkIdle => SchedulerMessage::WorkerIdle { worker_id },
@@ -515,6 +538,7 @@ impl Drop for WorkerHandle {
 fn init_message(
     id: u32,
     retire_after_task: bool,
+    guest_memory_gc_budget: f64,
     gate: &'static WorkerGate,
 ) -> Result<JsValue, JsValue> {
     let msg = js_sys::Object::new();
@@ -531,6 +555,11 @@ fn init_message(
         &msg,
         &JsString::from("retireAfterTask"),
         &JsValue::from(retire_after_task),
+    )?;
+    js_sys::Reflect::set(
+        &msg,
+        &JsString::from("guestMemoryGcBudget"),
+        &JsValue::from(guest_memory_gc_budget),
     )?;
     js_sys::Reflect::set(&msg, &JsString::from("sdkUrl"), &JsValue::from(sdk_url()))?;
     js_sys::Reflect::set(

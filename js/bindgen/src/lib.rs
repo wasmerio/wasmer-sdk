@@ -79,6 +79,8 @@ pub fn set_worker_url(url: String) {
 struct ClientOptions {
     output_bytes: Option<f64>,
     parallelism: Option<f64>,
+    worker_per_thread: Option<bool>,
+    guest_memory_gc_budget: Option<f64>,
     cache: Option<ClientCacheOptions>,
 }
 
@@ -164,7 +166,17 @@ impl JsWasmer {
             .map(|value| validate_usize("parallelism", value, 1))
             .transpose()?
             .and_then(std::num::NonZeroUsize::new);
-        let tasks = Arc::new(tasks::ThreadPool::new(parallelism));
+        let tasks = Arc::new(tasks::ThreadPool::new(
+            parallelism,
+            tasks::PoolOptions {
+                worker_per_thread: options.worker_per_thread.unwrap_or(false),
+                guest_memory_gc_budget: options
+                    .guest_memory_gc_budget
+                    .map(|bytes| validate_usize("guestMemoryGcBudget", bytes, 0))
+                    .transpose()?
+                    .map_or(tasks::DEFAULT_GUEST_MEMORY_GC_BUDGET, |bytes| bytes as u64),
+            },
+        ));
         let mut runtime = PluggableRuntime::new(Arc::clone(&tasks) as Arc<_>);
         runtime
             .set_tty(Arc::new(DefaultTty::default()))

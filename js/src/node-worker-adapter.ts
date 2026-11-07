@@ -37,6 +37,59 @@ interface CacheRequest {
 let workersCreated = 0;
 let activeWorkers = 0;
 let workerFailures = 0;
+const liveAdapters = new Set<NodeWorkerAdapter>();
+let nextStatsRequestId = 1;
+const pendingStatsRequests = new Map<
+  number,
+  (stats: NodeWorkerGuestMemoryStats) => void
+>();
+
+/** Per-worker guest-memory counters, for tests. */
+export interface NodeWorkerGuestMemoryStats {
+  threadId: number;
+  /** Guest memories created in the worker (with diagnostics enabled). */
+  created?: number;
+  finalized?: number;
+  /** Guest memories not yet collected, live or dead. */
+  liveCount?: number;
+  liveBytes?: number;
+  /** Dead guest memory the worker has not collected yet. */
+  released: number;
+  budgetCollections?: number;
+  idleCollections?: number;
+  collectionMs?: number;
+  retirementRequests?: number;
+}
+
+/**
+ * Ask every live worker for its guest-memory counters. Set
+ * `globalThis.__wasmerGuestMemoryDiagnostics = true` before workers start to
+ * get creation counts (`"no-collector"` also makes workers behave as if no
+ * garbage-collection hook were available). Workers busy running a guest do
+ * not answer within the timeout and are left out.
+ */
+export async function nodeWorkerGuestMemoryStats(
+  timeoutMs = 1_000,
+): Promise<NodeWorkerGuestMemoryStats[]> {
+  const requests = [...liveAdapters].map(
+    (adapter) =>
+      new Promise<NodeWorkerGuestMemoryStats | undefined>((resolve) => {
+        const requestId = nextStatsRequestId++;
+        const timer = setTimeout(() => {
+          pendingStatsRequests.delete(requestId);
+          resolve(undefined);
+        }, timeoutMs);
+        pendingStatsRequests.set(requestId, (stats) => {
+          clearTimeout(timer);
+          resolve(stats);
+        });
+        adapter.postMessage({ type: "wasmer-guest-memory-stats", requestId });
+      }),
+  );
+  return (await Promise.all(requests)).filter(
+    (stats): stats is NodeWorkerGuestMemoryStats => stats !== undefined,
+  );
+}
 
 export function nodeWorkerStats(): {
   workersCreated: number;
@@ -65,17 +118,35 @@ export class NodeWorkerAdapter {
   #terminating = false;
   #failed = false;
   #exited = false;
+  /**
+   * The worker stops by itself: after its single task, or once the pool
+   * retires it.
+   */
+  #retires = false;
 
   constructor(url: string, options: { name?: string; type?: string } = {}) {
     const workerOptions: NodeWorkerOptions = {
       name: options.name,
     };
+    const diagnostics = (
+      globalThis as { __wasmerGuestMemoryDiagnostics?: unknown }
+    ).__wasmerGuestMemoryDiagnostics;
+    if (diagnostics === true || diagnostics === "no-collector") {
+      workerOptions.workerData = { wasmerGuestMemoryDiagnostics: diagnostics };
+    }
     this.#worker = new NodeWorker(new URL(url), workerOptions);
     workersCreated += 1;
     activeWorkers += 1;
+    liveAdapters.add(this);
     this.#worker.on("message", (data) => {
       if (isNetworkRequest(data)) {
         void respondToNetworkRequest(data);
+      } else if (isRetiredMessage(data)) {
+        // Reported from the exit event instead: the pool frees the thread's
+        // TLS and stack on "retired", which is only safe once it has stopped.
+      } else if (isStatsReply(data)) {
+        pendingStatsRequests.get(data.requestId)?.(data.stats);
+        pendingStatsRequests.delete(data.requestId);
       } else if (isCacheRequest(data)) {
         void respondToCacheRequest(this.#worker, data);
       } else {
@@ -88,7 +159,12 @@ export class NodeWorkerAdapter {
     this.#worker.on("exit", (code) => {
       activeWorkers -= 1;
       this.#exited = true;
-      if (this.#terminating) {
+      liveAdapters.delete(this);
+      if (this.#retires && !this.#terminating && code === 0) {
+        // A retiring worker exits by itself. Its thread has stopped, so the
+        // pool may now free its TLS and stack.
+        this.onmessage?.({ data: { type: "retired" } });
+      } else if (this.#terminating) {
         // Tell the scheduler the worker is gone, as a browser worker does
         // itself before closing.
         this.onmessage?.({ data: { type: "exited" } });
@@ -114,6 +190,13 @@ export class NodeWorkerAdapter {
   }
 
   postMessage(message: unknown): void {
+    const control = message as { type?: unknown; retireAfterTask?: unknown } | null;
+    if (
+      (control?.type === "init" && control.retireAfterTask === true) ||
+      control?.type === "wasmer-retire"
+    ) {
+      this.#retires = true;
+    }
     if ((message as { type?: unknown } | null)?.type === "wasmer-shutdown") {
       // The worker exits by itself; that exit is expected.
       this.#terminating = true;
@@ -131,6 +214,24 @@ export class NodeWorkerAdapter {
     this.#terminating = true;
     void this.#worker.terminate();
   }
+}
+
+function isStatsReply(
+  value: unknown,
+): value is { requestId: number; stats: NodeWorkerGuestMemoryStats } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { type?: unknown }).type === "wasmer-guest-memory-stats-reply"
+  );
+}
+
+function isRetiredMessage(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { type?: unknown }).type === "retired"
+  );
 }
 
 function isCacheRequest(value: unknown): value is CacheRequest {

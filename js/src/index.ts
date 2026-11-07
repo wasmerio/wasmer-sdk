@@ -24,6 +24,23 @@ export interface WasmerOptions {
    * cache namespace; Node uses `directory`, which defaults to `.wasmer`.
    */
   cache?: false | "memory" | CacheOptions;
+  /**
+   * Run every WASIX thread on a dedicated worker that stops when the thread
+   * exits. Stopping the worker disposes its JavaScript isolate, which frees
+   * the guest's memory immediately instead of at that worker's next garbage
+   * collection. Each thread then pays for a worker start (tens of
+   * milliseconds), so this is off by default.
+   */
+  workerPerThread?: boolean;
+  /**
+   * Bytes of finished guests' memory that each pool worker may keep before
+   * it runs a garbage collection, which frees it. Idle workers also collect
+   * about a second after their last guest. Where no collection hook is
+   * available (browsers), the worker is replaced instead. 0 leaves this to
+   * the JavaScript engine, which may keep dead guest memory indefinitely.
+   * Defaults to 192 MiB.
+   */
+  guestMemoryGcBudget?: number;
 }
 
 export interface CacheOptions {
@@ -366,6 +383,15 @@ export class Wasmer {
         options.parallelism === undefined
           ? undefined
           : validateParallelism(options.parallelism),
+      guestMemoryGcBudget:
+        options.guestMemoryGcBudget === undefined
+          ? undefined
+          : validateInteger(
+              "guestMemoryGcBudget",
+              options.guestMemoryGcBudget,
+              0,
+              MAX_WASM32_SIZE,
+            ),
     };
     this.packages = new PackagesService(
       (sources, options) => this.#loadPackages(sources, options),
@@ -409,6 +435,8 @@ export class Wasmer {
     return WasmerCore.create({
       outputBytes: options.outputBytes,
       parallelism: options.parallelism ?? 2,
+      workerPerThread: options.workerPerThread,
+      guestMemoryGcBudget: options.guestMemoryGcBudget,
       cache: browserCacheOptions(options.cache),
     });
   }

@@ -108,7 +108,10 @@ mod tests {
         let engine = wasmer::Engine::default();
         let module = wasmer::Module::new(&engine, TEST_WASM).unwrap();
         let flag = Arc::new(AtomicBool::new(false));
-        let runtime = PluggableRuntime::new(Arc::new(ThreadPool::new(None)));
+        let runtime = PluggableRuntime::new(Arc::new(ThreadPool::new(
+            None,
+            crate::tasks::PoolOptions::default(),
+        )));
         let env = WasiEnvBuilder::new("program")
             .runtime(Arc::new(runtime))
             .build()

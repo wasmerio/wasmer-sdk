@@ -45,6 +45,11 @@ pub(crate) enum SchedulerMessage {
     WorkerRetired {
         worker_id: u32,
     },
+    /// An idle worker asks to be retired because it cannot collect the guest
+    /// memory it has released.
+    WorkerRetireRequested {
+        worker_id: u32,
+    },
     /// Terminate the browser worker executing a WASIX thread.
     TerminateWasmThread {
         pid: u32,
@@ -185,6 +190,7 @@ impl SchedulerMessage {
             }
             SchedulerMessage::ForceTerminate { .. }
             | SchedulerMessage::WorkerExited { .. }
+            | SchedulerMessage::WorkerRetireRequested { .. }
             | SchedulerMessage::DrainWaitElapsed { .. } => {
                 Err(anyhow::anyhow!("worker lifecycle messages are local to the scheduler").into())
             }

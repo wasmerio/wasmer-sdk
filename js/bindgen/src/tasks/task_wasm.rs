@@ -1,12 +1,20 @@
 //! Execute a WASIX task after the JS backend's objects have been transported.
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+
 use crate::tasks::SchedulerMessage;
 use anyhow::Context;
 use bytes::Bytes;
 use derivative::Derivative;
+use wasm_bindgen::JsCast;
+use wasmer::js::AsJs;
 use wasmer_wasix::{
     WasiFunctionEnv,
     runtime::task_manager::{
-        LocalTaskSpawner, SpawnMemoryTypeOrStore, SpawnType, TaskWasm, TaskWasmRunProperties,
+        LocalTaskSpawner, SpawnMemoryTypeOrStore, SpawnType, TaskWasm, TaskWasmRecycle,
+        TaskWasmRecycleProperties, TaskWasmRunProperties,
     },
 };
 use wasmer_wasix_types::wasi::ExitCode;
@@ -39,17 +47,41 @@ impl SpawnWasm {
 pub(crate) struct ReadySpawnWasm(TaskWasm, Option<Result<Bytes, ExitCode>>);
 
 impl ReadySpawnWasm {
-    pub(crate) async fn execute(self) -> Result<(), anyhow::Error> {
+    /// Run the thread to completion. Returns the size in bytes of the guest
+    /// memory it used, which only this worker's garbage collector can free
+    /// once the pool has dropped the finished process (wasmer-sdk#547).
+    pub(crate) async fn execute(self) -> Result<f64, anyhow::Error> {
         let ReadySpawnWasm(task, trigger_result) = self;
+        let mut attached = None;
         let (memory, instance_group) = match task.spawn_type {
             SpawnType::CreateMemory => (SpawnMemoryTypeOrStore::New, None),
             SpawnType::CreateMemoryOfType(ty) => (SpawnMemoryTypeOrStore::Type(ty), None),
             SpawnType::AttachMemory(memory) => {
                 let mut store = task.env.runtime().new_store();
                 let memory = memory.attach(&mut store);
+                attached = Some(
+                    memory
+                        .as_jsvalue(&store)
+                        .unchecked_into::<js_sys::WebAssembly::Memory>(),
+                );
                 (SpawnMemoryTypeOrStore::StoreAndMemory(store, memory), None)
             }
             SpawnType::NewLinkerInstanceGroup(data) => (SpawnMemoryTypeOrStore::New, Some(data)),
+        };
+        // A memory this thread created reaches only the recycle callback,
+        // which WASIX calls with the final store when a process's main thread
+        // exits.
+        let created_bytes = Arc::new(AtomicU64::new(0));
+        let recycle: Box<TaskWasmRecycle> = {
+            let created_bytes = Arc::clone(&created_bytes);
+            let recycle = task.callbacks.recycle;
+            Box::new(move |props: TaskWasmRecycleProperties| {
+                let bytes = props.memory.view(&props.store).data_size();
+                created_bytes.store(bytes, Ordering::Relaxed);
+                if let Some(recycle) = recycle {
+                    recycle(props);
+                }
+            })
         };
         let (mut ctx, mut store) = WasiFunctionEnv::new_with_store(
             task.module,
@@ -72,9 +104,14 @@ impl ReadySpawnWasm {
                 Ok(())
             }),
             trigger_result,
-            recycle: task.callbacks.recycle,
+            recycle: Some(recycle),
         })
         .await;
-        Ok(())
+        // An attached memory may have grown while the thread ran.
+        let attached_bytes = attached
+            .and_then(|memory| js_sys::Reflect::get(&memory.buffer(), &"byteLength".into()).ok())
+            .and_then(|length| length.as_f64())
+            .unwrap_or(0.0);
+        Ok(attached_bytes.max(created_bytes.load(Ordering::Relaxed) as f64))
     }
 }
