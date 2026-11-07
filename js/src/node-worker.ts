@@ -103,15 +103,36 @@ function shutdown(): never {
   process.exit(0);
 }
 
+/**
+ * Forward cache calls to the cache on the main thread. Byte arguments are
+ * views of the SDK's shared memory, which the SDK keeps alive until the call
+ * settles: posting one shares that memory, so the main thread reads or writes
+ * the SDK's bytes in place.
+ */
 function installCacheProxy(): void {
   const scope = globalThis as Record<string, unknown>;
-  scope.__wasmerNodeCacheGet = (cacheId: number, path: string) =>
-    callCache(cacheId, "get", [path]);
+  scope.__wasmerNodeCacheOpen = (cacheId: number, path: string) =>
+    callCache(cacheId, "open", [path]);
+  scope.__wasmerNodeCacheReadInto = (
+    cacheId: number,
+    handle: number,
+    destination: Uint8Array,
+  ) => {
+    if (!(destination.buffer instanceof SharedArrayBuffer)) {
+      // A posted copy would be filled instead of the destination.
+      return Promise.reject(
+        new Error("Wasmer cache reads need a SharedArrayBuffer destination"),
+      );
+    }
+    return callCache(cacheId, "readInto", [handle, destination]);
+  };
+  scope.__wasmerNodeCacheCloseFile = (cacheId: number, handle: number) =>
+    callCache(cacheId, "closeFile", [handle]);
   scope.__wasmerNodeCachePut = (
     cacheId: number,
     path: string,
     bytes: Uint8Array,
-  ) => callCache(cacheId, "put", [path, bytes.slice()]);
+  ) => callCache(cacheId, "put", [path, bytes]);
   scope.__wasmerNodeCacheRemove = (cacheId: number, path: string) =>
     callCache(cacheId, "remove", [path]);
 }

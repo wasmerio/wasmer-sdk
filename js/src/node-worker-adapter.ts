@@ -146,30 +146,18 @@ async function respondToCacheRequest(
   request: CacheRequest,
 ): Promise<void> {
   try {
+    // Results are small: file bytes move through the request's shared views.
     const result = await dispatchNodeCacheCall(
       nodePackageCache(request.cacheId),
       request.method,
       request.args,
     );
-    if (result instanceof Uint8Array) {
-      const bytes = Uint8Array.from(result);
-      worker.postMessage(
-        {
-          type: "wasmer-cache-rpc-response",
-          requestId: request.requestId,
-          ok: true,
-          value: bytes,
-        },
-        [bytes.buffer],
-      );
-    } else {
-      worker.postMessage({
-        type: "wasmer-cache-rpc-response",
-        requestId: request.requestId,
-        ok: true,
-        value: result,
-      });
-    }
+    worker.postMessage({
+      type: "wasmer-cache-rpc-response",
+      requestId: request.requestId,
+      ok: true,
+      value: result,
+    });
   } catch (error) {
     worker.postMessage({
       type: "wasmer-cache-rpc-response",
