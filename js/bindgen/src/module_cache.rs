@@ -43,3 +43,40 @@ impl ModuleCache for SharedModuleCache {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use bytes::Bytes;
+    use wasm_bindgen_test::wasm_bindgen_test;
+    use wasmer::Engine;
+    use wasmer_wasix::runtime::{
+        ModuleInput, load_module,
+        module_cache::{HashedModuleData, ModuleCache},
+    };
+
+    use super::SharedModuleCache;
+
+    #[wasm_bindgen_test]
+    async fn cached_modules_share_the_package_buffer() {
+        // A module stored at an offset inside a larger buffer, like a webc atom.
+        let package = Bytes::from([b"package header".as_slice(), b"\0asm\x01\0\0\0"].concat());
+        let wasm = package.slice(b"package header".len()..);
+        let input = HashedModuleData::new(wasm.clone());
+        let hash = *input.hash();
+        let engine = Engine::default();
+        let cache = SharedModuleCache::default();
+
+        let module = load_module(&engine, &cache, ModuleInput::Hashed(Cow::Owned(input)), None)
+            .await
+            .unwrap();
+        let cached = cache.load(hash, &engine).await.unwrap();
+
+        // The JS backend keeps each module's binary for as long as the client
+        // caches it. It must reference the package buffer, not a second copy.
+        for module in [module, cached] {
+            assert_eq!(module.serialize().unwrap().as_ptr(), wasm.as_ptr());
+        }
+    }
+}
