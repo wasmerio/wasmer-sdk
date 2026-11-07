@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.2](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.19.1...wasmer-sdk-js-v0.19.2) (2026-11-07)
+
+
+### Bug Fixes
+
+* **js:** load cached packages without whole-file JavaScript buffers ([#581](https://github.com/wasmerio/wasmer-sdk/issues/581)) ([5d19581](https://github.com/wasmerio/wasmer-sdk/commit/5d1958116e5efb0ffb2b5c653a20e67f3c965359))
+* **js:** stop caching a second copy of each command's Wasm binary ([#579](https://github.com/wasmerio/wasmer-sdk/issues/579)) ([24e6c70](https://github.com/wasmerio/wasmer-sdk/commit/24e6c70f5590a67b0b5bd40a926a2851230d2e3d))
+* **js:** stop pool workers safely on kill, timeout, and close ([#578](https://github.com/wasmerio/wasmer-sdk/issues/578)) ([6561527](https://github.com/wasmerio/wasmer-sdk/commit/65615275450e03642f44a57b7cc77a0bc16a6639))
+
+
+### Performance Improvements
+
+* **js:** read the shared memory buffer once per wasm-bindgen view check ([#559](https://github.com/wasmerio/wasmer-sdk/issues/559)) ([fb5ba80](https://github.com/wasmerio/wasmer-sdk/commit/fb5ba80645380570125885cd8ef44bbce535aac0))
+
 ## [0.19.1](https://github.com/wasmerio/wasmer-sdk/compare/wasmer-sdk-js-v0.19.0...wasmer-sdk-js-v0.19.1) (2026-10-07)
 
 
