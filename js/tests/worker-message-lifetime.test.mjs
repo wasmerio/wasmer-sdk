@@ -10,6 +10,12 @@ test("pending worker tasks release transport envelopes and still report failures
   ], { timeout: 10_000 });
 });
 
+test("pooled workers exit from their message loop on shutdown without destroying themselves", async () => {
+  await promisify(execFile)(process.execPath, [
+    fileURLToPath(new URL("./support/worker-shutdown.mjs", import.meta.url)),
+  ], { timeout: 10_000 });
+});
+
 test("dedicated workers release their SDK stack only after the guest completes", async () => {
   await promisify(execFile)(process.execPath, [
     fileURLToPath(new URL("./support/worker-retirement.mjs", import.meta.url)),

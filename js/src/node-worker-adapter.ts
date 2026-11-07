@@ -64,6 +64,7 @@ export class NodeWorkerAdapter {
   readonly #worker: NodeWorker;
   #terminating = false;
   #failed = false;
+  #exited = false;
 
   constructor(url: string, options: { name?: string; type?: string } = {}) {
     const workerOptions: NodeWorkerOptions = {
@@ -86,7 +87,12 @@ export class NodeWorkerAdapter {
     });
     this.#worker.on("exit", (code) => {
       activeWorkers -= 1;
-      if (!this.#terminating) {
+      this.#exited = true;
+      if (this.#terminating) {
+        // Tell the scheduler the worker is gone, as a browser worker does
+        // itself before closing.
+        this.onmessage?.({ data: { type: "exited" } });
+      } else {
         this.#reportFailure(
           new Error(`Wasmer SDK worker exited unexpectedly with status ${code}`),
         );
@@ -108,6 +114,16 @@ export class NodeWorkerAdapter {
   }
 
   postMessage(message: unknown): void {
+    if ((message as { type?: unknown } | null)?.type === "wasmer-shutdown") {
+      // The worker exits by itself; that exit is expected.
+      this.#terminating = true;
+      if (this.#exited) {
+        // Already gone (e.g. it failed): report it instead of letting the
+        // pool wait out its shutdown deadline.
+        queueMicrotask(() => this.onmessage?.({ data: { type: "exited" } }));
+        return;
+      }
+    }
     this.#worker.postMessage(message);
   }
 

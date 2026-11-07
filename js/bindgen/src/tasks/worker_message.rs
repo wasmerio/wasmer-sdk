@@ -17,6 +17,10 @@ pub(crate) enum WorkerMessage {
     /// Mark this worker as idle.
     MarkIdle,
     Retired,
+    /// The worker exited from its message loop after a shutdown request.
+    /// Posted by the worker script (browser) or synthesized from the worker's
+    /// `exit` event (Node), never by Rust code on the worker.
+    Exited,
     Scheduler(SchedulerMessage),
 }
 
@@ -26,6 +30,7 @@ impl WorkerMessage {
 
         match de.ty()?.as_str() {
             "retired" => Ok(Self::Retired),
+            "exited" => Ok(Self::Exited),
             consts::TYPE_BUSY => Ok(WorkerMessage::MarkBusy),
             consts::TYPE_IDLE => Ok(WorkerMessage::MarkIdle),
             consts::TYPE_SCHEDULER => {
@@ -40,6 +45,7 @@ impl WorkerMessage {
     pub(crate) fn into_js(self) -> Result<JsValue, Error> {
         match self {
             Self::Retired => Serializer::new("retired").finish(),
+            Self::Exited => Serializer::new("exited").finish(),
             WorkerMessage::MarkBusy => Serializer::new(consts::TYPE_BUSY).finish(),
             WorkerMessage::MarkIdle => Serializer::new(consts::TYPE_IDLE).finish(),
             WorkerMessage::Scheduler(msg) => {

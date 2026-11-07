@@ -25,6 +25,8 @@ interface InitMessage {
   module: WebAssembly.Module;
   memory: WebAssembly.Memory;
   retireAfterTask?: boolean;
+  /** Address of this worker's termination gate in SDK memory. */
+  gate?: number;
 }
 
 Error.stackTraceLimit = 50;
@@ -46,7 +48,6 @@ globalThis.addEventListener("unhandledrejection", (event) => {
 
 let worker: WorkerRuntime | undefined;
 let retireAfterTask = false;
-let destroyThread: (() => void) | undefined;
 const pendingMessages: unknown[] = [];
 let failureReported = false;
 
@@ -65,6 +66,10 @@ globalThis.onmessage = ({ data }: MessageEvent<unknown>) => {
 };
 
 async function handleMessage(data: unknown): Promise<void> {
+  if ((data as { type?: string } | null)?.type === "wasmer-shutdown") {
+    shutdown();
+    return;
+  }
   data = receiveCapiDispatch(data);
   if (isCapiDispatchHandled(data)) return;
   if (isInitMessage(data)) {
@@ -92,10 +97,22 @@ function retireWorker(): void {
   // includes shutdown of worker-local async contexts. Never destroy a pooled
   // worker here: it may still own timers or unrelated asynchronous jobs.
   worker?.collectSharedObjects();
-  worker?.free();
+  worker?.free(); // Must be the final call into this SDK instance.
   worker = undefined;
-  destroyThread?.(); // Must be the final call into this SDK instance.
+  // The pool frees this thread's TLS and stack once it sees "retired": a
+  // thread must not destroy itself (see `worker_gate.rs`).
   globalThis.postMessage({ type: "retired" });
+  globalThis.close();
+}
+
+/**
+ * Exit at the pool's request. This runs from the message loop, so no SDK code
+ * is executing on this thread and it cannot hold a runtime lock. Report the
+ * exit and close; the pool then frees this thread's TLS and stack.
+ */
+function shutdown(): void {
+  worker = undefined;
+  globalThis.postMessage({ type: "exited" });
   globalThis.close();
 }
 
@@ -105,13 +122,25 @@ async function initialize(data: InitMessage): Promise<void> {
     default(options: {
       module_or_path: WebAssembly.Module;
       memory: WebAssembly.Memory;
-    }): Promise<{ __wbindgen_thread_destroy(): void }>;
-    ThreadPoolWorker: new (id: number) => WorkerRuntime;
+    }): Promise<{
+      __tls_base?: WebAssembly.Global;
+      __stack_alloc?: WebAssembly.Global;
+    }>;
+    ThreadPoolWorker: new (
+      id: number,
+      gate?: number,
+      tlsBase?: number,
+      stackAlloc?: number,
+    ) => WorkerRuntime;
   };
   const exports = await sdk.default({ module_or_path: data.module, memory: data.memory });
   retireAfterTask = data.retireAfterTask === true;
-  destroyThread = () => exports.__wbindgen_thread_destroy();
-  const initialized = new sdk.ThreadPoolWorker(data.id);
+  const initialized = new sdk.ThreadPoolWorker(
+    data.id,
+    data.gate,
+    exports?.__tls_base?.value,
+    exports?.__stack_alloc?.value,
+  );
   worker = initialized;
   while (pendingMessages.length > 0) {
     void handleMessage(pendingMessages.shift()).catch(reportWorkerFailure);

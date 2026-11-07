@@ -225,6 +225,7 @@ impl Process {
         let stdin_control = stdin.as_ref().map(ProcessStdin::closer);
         let control = Arc::new(ProcessControl {
             process,
+            tasks: Arc::clone(&tasks),
             stdin: stdin_control,
             exit: AtomicU8::new(EXIT_NONE),
         });
@@ -474,6 +475,7 @@ const EXIT_TIMED_OUT: u8 = 3;
 #[derive(Debug)]
 pub(crate) struct ProcessControl {
     process: WasiProcess,
+    tasks: Arc<dyn VirtualTaskManager>,
     stdin: Option<PipeCloser>,
     /// The first SDK-requested exit, if any. Once set it is never replaced,
     /// so a terminate that escalates to a kill still reports `Terminated`.
@@ -512,14 +514,23 @@ impl ProcessControl {
     }
 
     fn force_exit(&self) {
+        let threads = self.process.all_threads();
         self.process.signal_process(Signal::Sigkill);
         // A wasm worker can be suspended inside an atomic wait while servicing
         // a WASIX syscall. SIGKILL disables and wakes those atomics, but there
         // is no native thread unwinder to publish the task's final status.
-        // Complete the join state explicitly; client shutdown will then
-        // terminate the worker if it has not unwound on its own.
+        // Complete the join state explicitly.
         #[cfg(target_arch = "wasm32")]
         self.process.terminate(ExitCode::from(137));
+        // A guest that never calls into the runtime (a busy loop) never sees
+        // the kill and would keep its executor forever (wasmer-sdk#556). Ask
+        // the task manager to stop the executors, as a guest-sent SIGKILL
+        // does. The browser pool lets threads that do unwind finish first.
+        // Task managers without cancellable executors report Unsupported.
+        let pid = self.process.pid();
+        for tid in threads {
+            let _ = self.tasks.terminate_wasm_thread(pid, tid);
+        }
     }
 
     pub(crate) fn try_join_exited(&self) -> bool {
