@@ -17,7 +17,7 @@ use wasm_bindgen::JsValue;
 use crate::{
     tasks::{
         AsyncJob, BlockingJob, CapiTransfer, PostMessagePayload, SchedulerMessage, WorkerHandle,
-        WorkerMessage, worker_gate::WorkerGate,
+        WorkerMessage, task_wasm::SpawnWasm, worker_gate::WorkerGate,
     },
     worker_utils::GlobalScope,
 };
@@ -32,6 +32,17 @@ const TERMINATE_GRACE_MS: i32 = 500;
 /// How long pool shutdown waits for workers to exit from their own message
 /// loops before force-terminating the rest.
 const SHUTDOWN_GRACE_MS: i32 = 2_000;
+
+/// How long a guest spawn waits for a draining worker (one whose WASIX threads
+/// have all finished) to report Idle before another worker is started.
+///
+/// A guest's exit is observable, so `run()` and `close()` resolve, before its
+/// worker has unwound and reported Idle. Without the wait, back-to-back guests
+/// alternate between two workers, and each worker keeps its own backlog of
+/// dead guest memories (wasmer-sdk#547). The bound only matters when a
+/// finished thread's worker never unwinds.
+/// Overridable with `globalThis.__wasmerDrainWaitMs`.
+const DRAIN_WAIT_MS: i32 = 250;
 
 /// A handle for interacting with the threadpool's scheduler.
 #[derive(Debug, Clone)]
@@ -68,6 +79,9 @@ impl Scheduler {
                         // pool, and preserve the failure for client shutdown.
                         for worker in scheduler.wasm_workers.values() {
                             worker.process.terminate(1.into());
+                        }
+                        for deferred in &scheduler.deferred_wasm {
+                            deferred.task.process().terminate(1.into());
                         }
                         break;
                     }
@@ -238,12 +252,36 @@ struct SchedulerState {
     /// Every live worker's gate, kept until the worker is known to be gone so
     /// its thread memory can be freed then.
     gates: BTreeMap<u32, &'static WorkerGate>,
+    /// Guest spawns waiting for a draining worker, oldest first. See
+    /// [`DRAIN_WAIT_MS`].
+    deferred_wasm: VecDeque<DeferredWasm>,
+    next_drain_generation: u64,
 }
 
 #[derive(Debug)]
 struct WasmWorker {
     worker_id: u32,
     process: wasmer_wasix::WasiProcess,
+}
+
+impl WasmWorker {
+    /// Whether the WASIX thread `tid` of this task has finished, so that only
+    /// unwinding is left on its worker.
+    fn thread_finished(&self, tid: u32) -> bool {
+        self.process.try_join().is_some()
+            || self
+                .process
+                .get_thread(&wasmer_wasix::WasiThreadId::from(tid))
+                .map_or(true, |thread| thread.try_join().is_some())
+    }
+}
+
+#[derive(Debug)]
+struct DeferredWasm {
+    source_worker_id: Option<u32>,
+    task: SpawnWasm,
+    /// Identifies the [`SchedulerMessage::DrainWaitElapsed`] that ends the wait.
+    generation: u64,
 }
 
 impl SchedulerState {
@@ -270,6 +308,8 @@ impl SchedulerState {
             doomed: BTreeMap::new(),
             next_doom_generation: 0,
             gates: BTreeMap::new(),
+            deferred_wasm: VecDeque::new(),
+            next_drain_generation: 0,
         }
     }
 
@@ -291,6 +331,11 @@ impl SchedulerState {
         receiver: &mut UnboundedReceiver<SchedulerMessage>,
         close_completions: &mut Vec<tokio::sync::oneshot::Sender<()>>,
     ) {
+        // Spawns still waiting for a draining worker never started: end their
+        // processes instead of leaving joins pending.
+        for deferred in self.deferred_wasm.drain(..) {
+            deferred.task.process().terminate(1.into());
+        }
         let mut workers: BTreeMap<u32, WorkerHandle> = BTreeMap::new();
         let all = self
             .idle
@@ -373,15 +418,9 @@ impl SchedulerState {
                 source_worker_id,
                 message,
             } => self.execute_from(Some(source_worker_id), *message),
-            SchedulerMessage::SpawnWasm(task) => {
-                let task_key = task.task_key();
-                let process = task.process();
-                self.post_wasm_message_from(
-                    source_worker_id,
-                    PostMessagePayload::Blocking(BlockingJob::SpawnWasm(task)),
-                    task_key,
-                    process,
-                )
+            SchedulerMessage::SpawnWasm(task) => self.spawn_wasm(source_worker_id, task),
+            SchedulerMessage::DrainWaitElapsed { generation } => {
+                self.dispatch_deferred_wasm(Some(generation))
             }
             SchedulerMessage::WorkerBusy { worker_id } => {
                 move_worker(worker_id, &mut self.idle, &mut self.busy);
@@ -418,7 +457,8 @@ impl SchedulerState {
                 for worker in &self.idle {
                     worker.collect_shared_objects()?;
                 }
-                Ok(())
+                // A deferred spawn may have been waiting for this worker.
+                self.dispatch_deferred_wasm(None)
             }
             SchedulerMessage::WorkerExited { worker_id } => {
                 // Outside shutdown this is the exit of a force-terminated
@@ -464,7 +504,9 @@ impl SchedulerState {
                     self.idle.len(),
                     self.wasm_workers.len(),
                 ));
-                Ok(())
+                // After the collection above, so the worker drops the
+                // finished guest's roots before it starts the next one.
+                self.dispatch_deferred_wasm(None)
             }
             SchedulerMessage::WorkerRetired { worker_id } => {
                 self.doomed.remove(&worker_id);
@@ -482,7 +524,7 @@ impl SchedulerState {
                 for worker in &self.idle {
                     worker.collect_shared_objects()?;
                 }
-                Ok(())
+                self.dispatch_deferred_wasm(None)
             }
             SchedulerMessage::CapiShare {
                 source_worker_id,
@@ -577,6 +619,85 @@ impl SchedulerState {
         }
 
         Ok(())
+    }
+
+    /// Run a WASIX thread. When no worker is idle but a busy one has already
+    /// finished its threads, wait for that worker instead of starting
+    /// another (see [`DRAIN_WAIT_MS`]).
+    fn spawn_wasm(&mut self, source_worker_id: Option<u32>, task: SpawnWasm) -> Result<(), Error> {
+        if self.retire_wasm_workers
+            || !self.idle.is_empty()
+            || self.deferred_wasm.len() >= self.draining_workers()
+        {
+            return self.dispatch_wasm(source_worker_id, task);
+        }
+        self.next_drain_generation += 1;
+        let generation = self.next_drain_generation;
+        let (pid, tid) = task.task_key();
+        scheduler_diag(format!("defer wasm={pid}.{tid} for a draining worker"));
+        self.deferred_wasm.push_back(DeferredWasm {
+            source_worker_id,
+            task,
+            generation,
+        });
+        let mailbox = self.mailbox.clone();
+        let wait = drain_wait_ms();
+        wasm_bindgen_futures::spawn_local(async move {
+            GlobalScope::current().delay(wait).await;
+            let _ = mailbox.send(SchedulerMessage::DrainWaitElapsed { generation });
+        });
+        Ok(())
+    }
+
+    fn dispatch_wasm(
+        &mut self,
+        source_worker_id: Option<u32>,
+        task: SpawnWasm,
+    ) -> Result<(), Error> {
+        let task_key = task.task_key();
+        let process = task.process();
+        self.post_wasm_message_from(
+            source_worker_id,
+            PostMessagePayload::Blocking(BlockingJob::SpawnWasm(task)),
+            task_key,
+            process,
+        )
+    }
+
+    /// Hand deferred spawns to idle workers, oldest first. A spawn starts a
+    /// new worker instead when its wait ended with `elapsed` (or earlier), or
+    /// when fewer draining workers are left than spawns waiting for them.
+    fn dispatch_deferred_wasm(&mut self, elapsed: Option<u64>) -> Result<(), Error> {
+        while let Some(front) = self.deferred_wasm.front() {
+            let expired = elapsed.is_some_and(|generation| front.generation <= generation);
+            let worth_waiting = self.deferred_wasm.len() <= self.draining_workers();
+            if self.idle.is_empty() && !expired && worth_waiting {
+                break;
+            }
+            let deferred = self.deferred_wasm.pop_front().unwrap();
+            self.dispatch_wasm(deferred.source_worker_id, deferred.task)?;
+        }
+        Ok(())
+    }
+
+    /// Busy workers whose WASIX threads have all finished. Each reports Idle
+    /// as soon as its task has unwound.
+    fn draining_workers(&self) -> usize {
+        self.busy
+            .iter()
+            .filter(|worker| {
+                let id = worker.id();
+                if self.retiring.contains(&id) || self.doomed.contains_key(&id) {
+                    return false;
+                }
+                let mut tasks = self
+                    .wasm_workers
+                    .iter()
+                    .filter(|(_, task)| task.worker_id == id)
+                    .peekable();
+                tasks.peek().is_some() && tasks.all(|(&(_, tid), task)| task.thread_finished(tid))
+            })
+            .count()
     }
 
     fn post_wasm_message_from(
@@ -795,7 +916,7 @@ impl SchedulerState {
         // Guest PIDs/TIDs can repeat across sandboxes sharing this pool. The
         // process map can therefore be empty while another worker is still
         // unwinding; wait for every blocking worker's Idle/Retired message.
-        self.busy.is_empty()
+        self.busy.is_empty() && self.deferred_wasm.is_empty()
     }
 }
 
@@ -809,6 +930,15 @@ fn terminate_grace_ms() -> i32 {
     .filter(|ms| ms.is_finite() && *ms >= 0.0)
     .map(|ms| ms.min(i32::MAX as f64) as i32)
     .unwrap_or(TERMINATE_GRACE_MS)
+}
+
+fn drain_wait_ms() -> i32 {
+    js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("__wasmerDrainWaitMs"))
+        .ok()
+        .and_then(|value| value.as_f64())
+        .filter(|ms| ms.is_finite() && *ms >= 0.0)
+        .map(|ms| ms.min(i32::MAX as f64) as i32)
+        .unwrap_or(DRAIN_WAIT_MS)
 }
 
 fn scheduler_diagnostics_enabled() -> bool {

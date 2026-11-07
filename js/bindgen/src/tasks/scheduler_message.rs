@@ -59,6 +59,10 @@ pub(crate) enum SchedulerMessage {
     WorkerExited {
         worker_id: u32,
     },
+    /// Guest spawns deferred for a draining worker stop waiting for it.
+    DrainWaitElapsed {
+        generation: u64,
+    },
     /// Publish a nested WebAssembly object to the other browser workers.
     CapiShare {
         source_worker_id: u32,
@@ -179,7 +183,9 @@ impl SchedulerMessage {
             SchedulerMessage::WorkerFailed => {
                 Err(anyhow::anyhow!("worker failures are local to the scheduler").into())
             }
-            SchedulerMessage::ForceTerminate { .. } | SchedulerMessage::WorkerExited { .. } => {
+            SchedulerMessage::ForceTerminate { .. }
+            | SchedulerMessage::WorkerExited { .. }
+            | SchedulerMessage::DrainWaitElapsed { .. } => {
                 Err(anyhow::anyhow!("worker lifecycle messages are local to the scheduler").into())
             }
             SchedulerMessage::CapiShare { .. }
