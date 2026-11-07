@@ -148,6 +148,12 @@ or timeout. Use `Command::output()` when an unsuccessful outcome is expected
 and should be inspected as an `Output`. Spawned-process `wait()` likewise
 returns the outcome without checking it.
 
+On Unix, killing a process or reaching its timeout also stops a guest that
+never calls into the runtime, such as a busy loop. The SDK interrupts the
+guest's thread with `SIGUSR1`, so the embedding application should not install
+its own `SIGUSR1` handler. On Windows such a guest keeps running until the host
+process exits.
+
 Live processes use Tokio I/O:
 
 ```rust
