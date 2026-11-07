@@ -65,6 +65,8 @@ export class NodeWorkerAdapter {
   #terminating = false;
   #failed = false;
   #exited = false;
+  /** The worker stops by itself once its single task completes. */
+  #retireAfterTask = false;
 
   constructor(url: string, options: { name?: string; type?: string } = {}) {
     const workerOptions: NodeWorkerOptions = {
@@ -76,6 +78,9 @@ export class NodeWorkerAdapter {
     this.#worker.on("message", (data) => {
       if (isNetworkRequest(data)) {
         void respondToNetworkRequest(data);
+      } else if (isRetiredMessage(data)) {
+        // Reported from the exit event instead: the pool frees the thread's
+        // TLS and stack on "retired", which is only safe once it has stopped.
       } else if (isCacheRequest(data)) {
         void respondToCacheRequest(this.#worker, data);
       } else {
@@ -88,7 +93,11 @@ export class NodeWorkerAdapter {
     this.#worker.on("exit", (code) => {
       activeWorkers -= 1;
       this.#exited = true;
-      if (this.#terminating) {
+      if (this.#retireAfterTask && !this.#terminating && code === 0) {
+        // A dedicated worker exits by itself after its task. Its thread has
+        // stopped, so the pool may now free its TLS and stack.
+        this.onmessage?.({ data: { type: "retired" } });
+      } else if (this.#terminating) {
         // Tell the scheduler the worker is gone, as a browser worker does
         // itself before closing.
         this.onmessage?.({ data: { type: "exited" } });
@@ -114,6 +123,10 @@ export class NodeWorkerAdapter {
   }
 
   postMessage(message: unknown): void {
+    const init = message as { type?: unknown; retireAfterTask?: unknown } | null;
+    if (init?.type === "init" && init.retireAfterTask === true) {
+      this.#retireAfterTask = true;
+    }
     if ((message as { type?: unknown } | null)?.type === "wasmer-shutdown") {
       // The worker exits by itself; that exit is expected.
       this.#terminating = true;
@@ -131,6 +144,14 @@ export class NodeWorkerAdapter {
     this.#terminating = true;
     void this.#worker.terminate();
   }
+}
+
+function isRetiredMessage(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { type?: unknown }).type === "retired"
+  );
 }
 
 function isCacheRequest(value: unknown): value is CacheRequest {

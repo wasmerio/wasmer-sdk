@@ -53,6 +53,7 @@ export class Wasmer extends BrowserWasmer {
         {
           outputBytes: options.outputBytes,
           parallelism: options.parallelism,
+          workerPerThread: options.workerPerThread,
           cache: {
             mode:
               options.cache === false

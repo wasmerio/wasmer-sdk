@@ -108,6 +108,13 @@ const tests = [
     processTimeoutMs: 60_000,
     attempts: 1,
   },
+  {
+    name: "worker-per-thread",
+    file: "tests/worker-per-thread.test.mjs",
+    testTimeoutMs: 120_000,
+    processTimeoutMs: 240_000,
+    attempts: 1,
+  },
 ];
 
 const requested = new Set(process.argv.slice(2));

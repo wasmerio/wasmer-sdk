@@ -24,6 +24,14 @@ export interface WasmerOptions {
    * cache namespace; Node uses `directory`, which defaults to `.wasmer`.
    */
   cache?: false | "memory" | CacheOptions;
+  /**
+   * Run every WASIX thread on a dedicated worker that stops when the thread
+   * exits. Stopping the worker disposes its JavaScript isolate, which frees
+   * the guest's memory immediately instead of at that worker's next garbage
+   * collection. Each thread then pays for a worker start (tens of
+   * milliseconds), so this is off by default.
+   */
+  workerPerThread?: boolean;
 }
 
 export interface CacheOptions {
@@ -409,6 +417,7 @@ export class Wasmer {
     return WasmerCore.create({
       outputBytes: options.outputBytes,
       parallelism: options.parallelism ?? 2,
+      workerPerThread: options.workerPerThread,
       cache: browserCacheOptions(options.cache),
     });
   }

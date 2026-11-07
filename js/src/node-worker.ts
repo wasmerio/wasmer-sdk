@@ -30,8 +30,10 @@ let worker:
   | {
       handle(message: unknown): Promise<void>;
       collectSharedObjects(): void;
+      free(): void;
     }
   | undefined;
+let retireAfterTask = false;
 const pendingMessages: unknown[] = [];
 let nextCacheRequestId = 1;
 const pendingCacheRequests = new Map<
@@ -71,6 +73,7 @@ async function handleMessage(data: any): Promise<void> {
       module_or_path: data.module,
       memory: data.memory,
     });
+    retireAfterTask = data.retireAfterTask === true;
     // The pool frees this thread's TLS and stack after it exits.
     const initializedWorker = new sdk.ThreadPoolWorker(
       data.id,
@@ -87,9 +90,33 @@ async function handleMessage(data: any): Promise<void> {
 
   if (worker) {
     if (data?.type === "wasmer-collect-shared") worker.collectSharedObjects();
-    else await worker.handle(data);
+    else {
+      // Rust consumes the shared-object envelope when it dispatches the task.
+      // Awaiting keeps that envelope (and every attached guest memory) alive
+      // for the whole task, including its unwinding.
+      await worker.handle(data);
+      if (retireAfterTask) retireWorker();
+    }
   }
   else pendingMessages.push(data);
+}
+
+/**
+ * Stop a dedicated worker after its single WASIX thread has completed.
+ *
+ * Exiting disposes this thread's isolate, which frees every guest
+ * `WebAssembly.Memory` it created, without waiting for a GC. The adapter
+ * reports "retired" only once the thread has exited, and the pool then frees
+ * this thread's TLS and stack: a thread must not destroy itself (see
+ * `worker_gate.rs`). Never retire a pooled worker here: it may still own
+ * timers or unrelated asynchronous jobs.
+ */
+function retireWorker(): never {
+  worker?.collectSharedObjects();
+  worker?.free(); // Must be the final call into this SDK instance.
+  worker = undefined;
+  port.postMessage({ type: "retired" });
+  process.exit(0);
 }
 
 /**

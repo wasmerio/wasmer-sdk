@@ -16,8 +16,8 @@ use wasm_bindgen::JsValue;
 
 use crate::{
     tasks::{
-        AsyncJob, BlockingJob, CapiTransfer, PostMessagePayload, SchedulerMessage, WorkerHandle,
-        WorkerMessage, worker_gate::WorkerGate,
+        AsyncJob, BlockingJob, CapiTransfer, PoolOptions, PostMessagePayload, SchedulerMessage,
+        WorkerHandle, WorkerMessage, worker_gate::WorkerGate,
     },
     worker_utils::GlobalScope,
 };
@@ -44,14 +44,14 @@ pub(crate) struct Scheduler {
 impl Scheduler {
     /// Spin up a scheduler on the current thread and get a channel that can be
     /// used to communicate with it.
-    pub(crate) fn spawn() -> Scheduler {
+    pub(crate) fn spawn(options: PoolOptions) -> Scheduler {
         let (sender, mut receiver) = mpsc::unbounded_channel();
 
         let thread_id = wasmer::js::current_thread_id();
         // Safety: we just got the thread ID.
         let sender = unsafe { Scheduler::new(sender, thread_id) };
 
-        let mut scheduler = SchedulerState::new(sender.clone());
+        let mut scheduler = SchedulerState::new(sender.clone(), options);
 
         tracing::debug!(thread_id, "Spinning up the scheduler");
         wasm_bindgen_futures::spawn_local(
@@ -247,18 +247,21 @@ struct WasmWorker {
 }
 
 impl SchedulerState {
-    fn new(mailbox: Scheduler) -> Self {
+    fn new(mailbox: Scheduler, options: PoolOptions) -> Self {
         SchedulerState {
             idle: VecDeque::new(),
             busy: VecDeque::new(),
             timer_worker: None,
-            retire_wasm_workers: js_sys::Reflect::get(
-                &js_sys::global(),
-                &JsValue::from_str("__wasmerWorkerPerThread"),
-            )
-            .ok()
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false),
+            // The global predates the client option; the Swift WebKit SDK
+            // sets it for every client.
+            retire_wasm_workers: options.worker_per_thread
+                || js_sys::Reflect::get(
+                    &js_sys::global(),
+                    &JsValue::from_str("__wasmerWorkerPerThread"),
+                )
+                .ok()
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
             retiring: BTreeSet::new(),
             mailbox,
             pending_capi_transfers: BTreeMap::new(),
@@ -314,7 +317,12 @@ impl SchedulerState {
                 Either::Right(_) => break,
             };
             match message {
-                Some(SchedulerMessage::WorkerExited { worker_id }) => {
+                // A dedicated worker may retire on its own before it sees
+                // the shutdown request; either way it has stopped.
+                Some(
+                    SchedulerMessage::WorkerExited { worker_id }
+                    | SchedulerMessage::WorkerRetired { worker_id },
+                ) => {
                     if let Some(worker) = workers.remove(&worker_id) {
                         worker.mark_exited();
                     }
@@ -847,7 +855,7 @@ mod tests {
         let (sender, receiver) = oneshot::channel();
         let (tx, _) = mpsc::unbounded_channel();
         let tx = unsafe { Scheduler::new(tx, wasmer::js::current_thread_id()) };
-        let mut scheduler = SchedulerState::new(tx);
+        let mut scheduler = SchedulerState::new(tx, PoolOptions::default());
         let message = SchedulerMessage::SpawnAsync(Box::new(move || {
             Box::pin(async move {
                 let _ = sender.send(42);
@@ -876,7 +884,7 @@ mod tests {
     fn capi_objects_attach_once_but_remain_available_until_release() {
         let (tx, _) = mpsc::unbounded_channel();
         let tx = unsafe { Scheduler::new(tx, wasmer::js::current_thread_id()) };
-        let mut scheduler = SchedulerState::new(tx);
+        let mut scheduler = SchedulerState::new(tx, PoolOptions::default());
         scheduler
             .pending_capi_transfers
             .entry(7)

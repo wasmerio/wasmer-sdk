@@ -12,6 +12,14 @@ use crate::{
     worker_utils::GlobalScope,
 };
 
+/// How the pool runs WASIX threads, from the client options.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PoolOptions {
+    /// Run every WASIX thread on a dedicated worker that stops when the
+    /// thread exits, disposing its isolate and the guest memory with it.
+    pub(crate) worker_per_thread: bool,
+}
+
 /// A handle to a threadpool backed by Web Workers. Shared via `Arc`; closing
 /// happens on drop or through [`ThreadPool::close`].
 #[derive(Debug)]
@@ -23,7 +31,7 @@ pub struct ThreadPool {
 const CROSS_ORIGIN_WARNING: &str = r#"You can only run packages from "Cross-Origin Isolated" websites. For more details, check out https://docs.wasmer.io/javascript-sdk/explainers/troubleshooting#sharedarraybuffer-and-cross-origin-isolation"#;
 
 impl ThreadPool {
-    pub fn new(parallelism: Option<NonZeroUsize>) -> Self {
+    pub(crate) fn new(parallelism: Option<NonZeroUsize>, options: PoolOptions) -> Self {
         if let Some(cross_origin_isolated) =
             crate::worker_utils::GlobalScope::current().cross_origin_isolated()
         {
@@ -35,7 +43,7 @@ impl ThreadPool {
             );
         }
 
-        let sender = Scheduler::spawn();
+        let sender = Scheduler::spawn(options);
         ThreadPool {
             scheduler: sender,
             parallelism,
@@ -216,7 +224,7 @@ mod tests {
                 .dyn_into()
                 .unwrap();
         let module = wasmer::Module::from((module, bytes::Bytes::from_static(TEST_WASM)));
-        let pool = ThreadPool::new(None);
+        let pool = ThreadPool::new(None, PoolOptions::default());
 
         let (sender, receiver) = oneshot::channel();
         pool.spawn_with_module(
@@ -233,7 +241,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     async fn spawned_tasks_can_communicate_with_the_main_thread() {
-        let pool = ThreadPool::new(None);
+        let pool = ThreadPool::new(None, PoolOptions::default());
         let (sender, receiver) = oneshot::channel();
 
         pool.task_shared(Box::new(move || {
@@ -253,7 +261,7 @@ mod tests {
     async fn spawn_interdependent_blocking_tasks_out_of_order() {
         let (sender_1, receiver_1) = oneshot::channel();
         let (sender_2, mut receiver_2) = oneshot::channel();
-        let pool = ThreadPool::new(None);
+        let pool = ThreadPool::new(None, PoolOptions::default());
 
         let first_task = Box::new(move || sender_1.send(()).unwrap());
         let second_task = Box::new(move || {
