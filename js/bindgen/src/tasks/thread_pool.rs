@@ -12,12 +12,28 @@ use crate::{
     worker_utils::GlobalScope,
 };
 
+/// The default per-worker budget of dead guest memory (wasmer-sdk#547).
+pub(crate) const DEFAULT_GUEST_MEMORY_GC_BUDGET: u64 = 192 * 1024 * 1024;
+
 /// How the pool runs WASIX threads, from the client options.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct PoolOptions {
     /// Run every WASIX thread on a dedicated worker that stops when the
     /// thread exits, disposing its isolate and the guest memory with it.
     pub(crate) worker_per_thread: bool,
+    /// Bytes of finished guests' memory a pooled worker may keep before it
+    /// runs a garbage collection (or retires, where it cannot collect).
+    /// 0 leaves collection to the JavaScript engine.
+    pub(crate) guest_memory_gc_budget: u64,
+}
+
+impl Default for PoolOptions {
+    fn default() -> Self {
+        PoolOptions {
+            worker_per_thread: false,
+            guest_memory_gc_budget: DEFAULT_GUEST_MEMORY_GC_BUDGET,
+        }
+    }
 }
 
 /// A handle to a threadpool backed by Web Workers. Shared via `Arc`; closing

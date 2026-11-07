@@ -32,6 +32,15 @@ export interface WasmerOptions {
    * milliseconds), so this is off by default.
    */
   workerPerThread?: boolean;
+  /**
+   * Bytes of finished guests' memory that each pool worker may keep before
+   * it runs a garbage collection, which frees it. Idle workers also collect
+   * about a second after their last guest. Where no collection hook is
+   * available (browsers), the worker is replaced instead. 0 leaves this to
+   * the JavaScript engine, which may keep dead guest memory indefinitely.
+   * Defaults to 192 MiB.
+   */
+  guestMemoryGcBudget?: number;
 }
 
 export interface CacheOptions {
@@ -374,6 +383,15 @@ export class Wasmer {
         options.parallelism === undefined
           ? undefined
           : validateParallelism(options.parallelism),
+      guestMemoryGcBudget:
+        options.guestMemoryGcBudget === undefined
+          ? undefined
+          : validateInteger(
+              "guestMemoryGcBudget",
+              options.guestMemoryGcBudget,
+              0,
+              MAX_WASM32_SIZE,
+            ),
     };
     this.packages = new PackagesService(
       (sources, options) => this.#loadPackages(sources, options),
@@ -418,6 +436,7 @@ export class Wasmer {
       outputBytes: options.outputBytes,
       parallelism: options.parallelism ?? 2,
       workerPerThread: options.workerPerThread,
+      guestMemoryGcBudget: options.guestMemoryGcBudget,
       cache: browserCacheOptions(options.cache),
     });
   }

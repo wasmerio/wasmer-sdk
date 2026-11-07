@@ -1,5 +1,5 @@
 import "./node-compat.js";
-import { parentPort } from "node:worker_threads";
+import { parentPort, threadId, workerData } from "node:worker_threads";
 import type { NodeNetworkMethod } from "./node-network.js";
 import {
   NETWORK_RPC_CONTROL_BYTES,
@@ -12,9 +12,22 @@ import {
   receiveCapiDispatch,
   setCapiMessageWorkerId,
 } from "./capi-worker-bridge.js";
+import { GuestMemoryBudget } from "./guest-memory-budget.js";
+import { installGuestMemoryCounters } from "./guest-memory-diagnostics.js";
+import { obtainGarbageCollector } from "./node-garbage-collector.js";
 
 if (!parentPort) throw new Error("Wasmer SDK worker has no parent port");
 const port: NonNullable<typeof parentPort> = parentPort;
+
+// Test diagnostics, enabled by `globalThis.__wasmerGuestMemoryDiagnostics`
+// on the main thread (see `nodeWorkerGuestMemoryStats`). "no-collector"
+// also simulates a host without a garbage-collection hook.
+const diagnostics = (
+  workerData as { wasmerGuestMemoryDiagnostics?: unknown } | undefined
+)?.wasmerGuestMemoryDiagnostics;
+const guestMemoryCounters = diagnostics
+  ? installGuestMemoryCounters()
+  : undefined;
 
 Error.stackTraceLimit = 50;
 installNetworkProxy();
@@ -30,10 +43,16 @@ let worker:
   | {
       handle(message: unknown): Promise<void>;
       collectSharedObjects(): void;
+      takeReleasedGuestMemory(): number;
       free(): void;
     }
   | undefined;
 let retireAfterTask = false;
+let guestMemory: GuestMemoryBudget | undefined;
+/** Messages the SDK runtime is still handling: tasks, timers and jobs. */
+let activeJobs = 0;
+/** The pool retired this pooled worker: stop once its jobs are done. */
+let retiring = false;
 const pendingMessages: unknown[] = [];
 let nextCacheRequestId = 1;
 const pendingCacheRequests = new Map<
@@ -55,6 +74,19 @@ port.on("message", async (data) => {
 
 async function handleMessage(data: any): Promise<void> {
   if (data?.type === "wasmer-shutdown") shutdown();
+  if (data?.type === "wasmer-guest-memory-stats") {
+    port.postMessage({
+      type: "wasmer-guest-memory-stats-reply",
+      requestId: data.requestId,
+      stats: {
+        threadId,
+        ...guestMemoryCounters?.(),
+        released: guestMemory?.released ?? 0,
+        ...guestMemory?.stats,
+      },
+    });
+    return;
+  }
   data = receiveCapiDispatch(data);
   if (isCapiDispatchHandled(data)) return;
   if (data?.type === "wasmer-cache-rpc-response") {
@@ -74,6 +106,12 @@ async function handleMessage(data: any): Promise<void> {
       memory: data.memory,
     });
     retireAfterTask = data.retireAfterTask === true;
+    guestMemory = new GuestMemoryBudget({
+      budget: Number(data.guestMemoryGcBudget) || 0,
+      obtainCollector:
+        diagnostics === "no-collector" ? () => null : obtainGarbageCollector,
+      requestRetirement: () => port.postMessage({ type: "retire-request" }),
+    });
     // The pool frees this thread's TLS and stack after it exits.
     const initializedWorker = new sdk.ThreadPoolWorker(
       data.id,
@@ -89,27 +127,54 @@ async function handleMessage(data: any): Promise<void> {
   }
 
   if (worker) {
-    if (data?.type === "wasmer-collect-shared") worker.collectSharedObjects();
-    else {
-      // Rust consumes the shared-object envelope when it dispatches the task.
-      // Awaiting keeps that envelope (and every attached guest memory) alive
-      // for the whole task, including its unwinding.
-      await worker.handle(data);
-      if (retireAfterTask) retireWorker();
+    if (data?.type === "wasmer-collect-shared") {
+      worker.collectSharedObjects();
+      // The pool has dropped the finished processes: their memories are
+      // dead unless this isolate collects them.
+      guestMemory?.release(worker.takeReleasedGuestMemory());
+    } else if (data?.type === "wasmer-retire") {
+      retiring = true;
+      if (activeJobs === 0) retireWorker();
+    } else {
+      const blocking = isBlockingTask(data);
+      if (blocking) guestMemory?.blockingTaskStarted();
+      activeJobs += 1;
+      try {
+        // Rust consumes the shared-object envelope when it dispatches the
+        // task. Do not keep it in this suspended frame: it snapshots every
+        // shared memory this worker knew, including finished guests', and
+        // an asynchronous job can run for a long time.
+        const completion = worker.handle(data);
+        data = undefined;
+        await completion;
+      } finally {
+        activeJobs -= 1;
+        if (blocking) guestMemory?.blockingTaskFinished();
+      }
+      if (retireAfterTask || (retiring && activeJobs === 0)) retireWorker();
     }
   }
   else pendingMessages.push(data);
 }
 
+function isBlockingTask(data: unknown): boolean {
+  // Tasks carrying shared objects arrive in a [namespace, payload, objects]
+  // envelope.
+  const payload = Array.isArray(data) ? data[1] : data;
+  const type = (payload as { type?: unknown } | null)?.type;
+  return type === "spawn-wasm" || type === "spawn-blocking";
+}
+
 /**
- * Stop a dedicated worker after its single WASIX thread has completed.
+ * Stop this worker: a dedicated worker after its single WASIX thread has
+ * completed, or a pooled worker the pool retired once its jobs are done.
  *
  * Exiting disposes this thread's isolate, which frees every guest
  * `WebAssembly.Memory` it created, without waiting for a GC. The adapter
  * reports "retired" only once the thread has exited, and the pool then frees
  * this thread's TLS and stack: a thread must not destroy itself (see
- * `worker_gate.rs`). Never retire a pooled worker here: it may still own
- * timers or unrelated asynchronous jobs.
+ * `worker_gate.rs`). Never retire a pooled worker otherwise: it may still
+ * own timers or unrelated asynchronous jobs.
  */
 function retireWorker(): never {
   worker?.collectSharedObjects();

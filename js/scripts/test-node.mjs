@@ -109,6 +109,13 @@ const tests = [
     attempts: 1,
   },
   {
+    name: "guest-memory",
+    file: "tests/guest-memory.test.mjs",
+    testTimeoutMs: 180_000,
+    processTimeoutMs: 420_000,
+    attempts: 1,
+  },
+  {
     name: "worker-per-thread",
     file: "tests/worker-per-thread.test.mjs",
     testTimeoutMs: 120_000,
