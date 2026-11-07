@@ -38,13 +38,10 @@ test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   );
   const packageHash = distribution?.v3?.piritaSha256Hash;
   assert.match(packageHash, /^[a-f0-9]{64}$/);
-  assert.ok(
-    (
-      await stat(
-        join(runtimeCache, "cache-v1", "packages", `${packageHash}.bin`),
-      )
-    ).size > 0,
-  );
+  const packageBytes = (
+    await stat(join(runtimeCache, "cache-v1", "packages", `${packageHash}.bin`))
+  ).size;
+  assert.ok(packageBytes > 0);
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
@@ -52,8 +49,29 @@ test("runs a registry WASIX package in the wasm-bindgen runtime", async () => {
   };
   const cachedClient = new Wasmer({ cache: { directory: runtimeCache } });
   try {
-    const cached = await cachedClient.packages.load("python/python@=3.13.20");
+    await cachedClient.ready();
+    // The cached image goes straight from the file into SDK memory. A
+    // whole-file JavaScript buffer would show up here until it is collected,
+    // and once freed it stays dirty in the allocator.
+    const baseline = process.memoryUsage().arrayBuffers;
+    let peak = baseline;
+    const sample = () => {
+      peak = Math.max(peak, process.memoryUsage().arrayBuffers);
+    };
+    const sampler = setInterval(sample, 1);
+    let cached;
+    try {
+      cached = await cachedClient.packages.load("python/python@=3.13.20");
+    } finally {
+      clearInterval(sampler);
+      sample();
+    }
     assert.equal(cached.id, "python/python@3.13.20");
+    assert.ok(
+      peak - baseline < packageBytes / 4,
+      `loading a cached ${packageBytes}-byte package allocated ` +
+        `${peak - baseline} bytes of ArrayBuffers`,
+    );
   } finally {
     await cachedClient.close();
     globalThis.fetch = originalFetch;
